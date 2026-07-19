@@ -1,7 +1,7 @@
 // Inverse of render/msg-format.mjs. There's no legacy md to migrate (0 real
-// instances, design §2.2) — this exists so the "템플릿 예제 왕복" golden
-// (Phase 0 acceptance, design §9.2) exercises the same round-trip discipline
-// db-schema does, and so a future real msg-format corpus has an import path.
+// instances, design §2.2) — this exists so the msg-format round trip (Phase 0
+// acceptance, design §9.2) exercises the same round-trip discipline db-schema
+// does, and so a future real msg-format corpus has an import path.
 import { parseTiered } from "../render/tiered.mjs";
 
 const EXAMPLES_MARKER = "\n\n## 예시 페이로드\n\n";

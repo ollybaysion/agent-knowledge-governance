@@ -1,7 +1,7 @@
 // Unit tests for the schema layer itself — the "모르는 키 거부" guarantee
 // (design §5.0/D3) and the tiered-value state rules (json-spec §3) are the
-// structural backbone every golden fixture relies on, so they get direct
-// coverage independent of the golden docs.
+// structural backbone every render/migrate fixture relies on, so they get
+// direct coverage independent of those fixtures.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
