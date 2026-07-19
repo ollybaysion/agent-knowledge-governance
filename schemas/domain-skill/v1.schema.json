@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "domain-skill/v1",
+  "title": "domain-skill/v1 body",
+  "description": "agent-knowledge-governance-json-spec.md §4.4 — akg is the format owner (§5.3). h1Title removed (H1 = '# {name}'); intro optional; description firstLine must end with '.'. Exception to the tiered-value rule: valueRules[].basis is a plain string with an inline '추정)' marker, not a $ref'd tiered value (json-spec §1.2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "argumentHint",
+    "description",
+    "steps",
+    "valueRules",
+    "output"
+  ],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "argumentHint": { "type": "string", "pattern": "\\S" },
+    "description": {
+      "type": "string",
+      "pattern": "^[^\\n]*\\.(\\n[\\s\\S]*)?$"
+    },
+    "intro": { "type": "string", "pattern": "\\S" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "sql"],
+        "properties": {
+          "title": { "type": "string", "pattern": "\\S" },
+          "lead": { "type": "string", "pattern": "\\S" },
+          "sql": { "type": "string", "pattern": "\\S" },
+          "notes": { "type": "string", "pattern": "\\S" }
+        }
+      }
+    },
+    "valueRules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "rule", "basis"],
+        "properties": {
+          "target": { "type": "string", "pattern": "\\S" },
+          "rule": { "type": "string", "pattern": "\\S" },
+          "basis": { "type": "string", "pattern": "\\S" }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lead", "template"],
+      "properties": {
+        "lead": { "type": "string", "pattern": "\\S" },
+        "template": { "type": "string", "pattern": "\\S" },
+        "exampleLabel": { "type": "string", "pattern": "\\S" },
+        "example": { "type": "string", "pattern": "\\S" }
+      },
+      "dependentRequired": {
+        "exampleLabel": ["example"],
+        "example": ["exampleLabel"]
+      }
+    },
+    "discipline": { "type": "string", "pattern": "\\S" }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "msg-format/v1",
+  "title": "msg-format/v1 body",
+  "description": "agent-knowledge-governance-json-spec.md §4.2 — v1 scope excludes response/rejects/errorCodes (user decision 2026-07-18).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "direction", "purpose", "fields"],
+  "properties": {
+    "command": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "direction": {
+      "type": "string",
+      "enum": ["host->equipment", "equipment->host"]
+    },
+    "purpose": { "$ref": "common/tiered-value.v1" },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["seq", "name", "type", "required", "desc"],
+        "properties": {
+          "seq": { "type": "number" },
+          "name": { "type": "string", "pattern": "\\S" },
+          "type": { "type": "string", "pattern": "\\S" },
+          "required": { "type": "boolean" },
+          "desc": { "$ref": "common/tiered-value.v1" }
+        }
+      }
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "payload"],
+        "properties": {
+          "label": { "type": "string", "pattern": "\\S" },
+          "payload": { "type": "string", "pattern": "\\S" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "schema": "db-schema/v1",
+  "id": "testuser.fdc_chamber",
+  "keywords": [
+    {
+      "kw": "fdc_chamber",
+      "inject": "full"
+    },
+    {
+      "kw": "testuser.fdc_chamber",
+      "inject": "full"
+    }
+  ],
+  "status": "active",
+  "body": {
+    "owner": "TESTUSER",
+    "table": "FDC_CHAMBER",
+    "catalog": {
+      "columns": [
+        {
+          "name": "CHM_ID",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "EQP_ID",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "CHM_NO",
+          "type": "NUMBER(3,0)",
+          "nullable": true,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "STATUS_CD",
+          "type": "VARCHAR2(10)",
+          "nullable": true,
+          "default": null,
+          "comment": null
+        }
+      ],
+      "primaryKey": ["CHM_ID"],
+      "indexes": [
+        {
+          "name": "SYS_C008832",
+          "unique": true,
+          "columns": ["CHM_ID"]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "EQP_ID",
+          "refTable": "FDC_EQUIPMENT",
+          "refColumn": "EQP_ID"
+        }
+      ],
+      "fetchedAt": "2026-07-17T05:10:00Z"
+    },
+    "purpose": {
+      "text": "챔버 — 설비 1:N 종속. EQP_ID FK로 조인되어 EquipmentDetail.chambers[]로 노출, CHM_NO 순 정렬",
+      "tier": "inferred",
+      "evidence": [
+        "fixtures/fdc-app/src/schema-map.ts:16",
+        "fixtures/fdc-app/src/equipment-repo.ts:39-52",
+        "fixtures/fdc-app/src/schema-map.ts:53-58"
+      ]
+    },
+    "columnDescs": {
+      "CHM_ID": {
+        "text": "챔버 ID — chambers[].id로 노출",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:19",
+          "fixtures/fdc-app/src/schema-map.ts:54"
+        ]
+      },
+      "EQP_ID": {
+        "text": "설비 FK — FDC_EQUIPMENT.EQP_ID와 조인(equipmentFkCol)",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:20",
+          "fixtures/fdc-app/src/equipment-repo.ts:43"
+        ]
+      },
+      "CHM_NO": {
+        "text": "챔버 번호 — chambers[] 조회의 정렬 기준(orderByCol), values[]에도 노출",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:56-57",
+          "fixtures/fdc-app/src/equipment-repo.ts:44"
+        ]
+      },
+      "STATUS_CD": {
+        "text": "챔버 상태 코드 — values[]로 노출만, 값 의미 매핑은 코드에 없음",
+        "tier": "inferred",
+        "evidence": ["fixtures/fdc-app/src/schema-map.ts:56"]
+      }
+    }
+  }
+}

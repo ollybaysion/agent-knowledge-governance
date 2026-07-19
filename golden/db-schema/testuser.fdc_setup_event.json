@@ -1,0 +1,136 @@
+{
+  "schema": "db-schema/v1",
+  "id": "testuser.fdc_setup_event",
+  "keywords": [
+    {
+      "kw": "fdc_setup_event",
+      "inject": "full"
+    },
+    {
+      "kw": "testuser.fdc_setup_event",
+      "inject": "full"
+    }
+  ],
+  "status": "active",
+  "body": {
+    "owner": "TESTUSER",
+    "table": "FDC_SETUP_EVENT",
+    "catalog": {
+      "columns": [
+        {
+          "name": "EVT_ID",
+          "type": "NUMBER",
+          "nullable": false,
+          "default": "\"TESTUSER\".\"ISEQ$$_74742\".nextval",
+          "comment": null
+        },
+        {
+          "name": "EQP_ID",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "EVT_TIME",
+          "type": "DATE",
+          "nullable": false,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "EVT_TYPE_CD",
+          "type": "VARCHAR2(4)",
+          "nullable": true,
+          "default": null,
+          "comment": null
+        },
+        {
+          "name": "EVT_LABEL",
+          "type": "VARCHAR2(200)",
+          "nullable": true,
+          "default": null,
+          "comment": null
+        }
+      ],
+      "primaryKey": ["EVT_ID"],
+      "indexes": [
+        {
+          "name": "SYS_C008841",
+          "unique": true,
+          "columns": ["EVT_ID"]
+        },
+        {
+          "name": "FDC_SETUP_EVENT_EQP_TIME_IX",
+          "unique": false,
+          "columns": ["EQP_ID", "EVT_TIME"]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "column": "EQP_ID",
+          "refTable": "FDC_EQUIPMENT",
+          "refColumn": "EQP_ID"
+        }
+      ],
+      "fetchedAt": "2026-07-17T05:10:00Z"
+    },
+    "purpose": {
+      "text": "셋업/설비 변경 이벤트 — compare의 post-setup 매칭 anchor. 설비별 EVT_TIME 역순으로 조회되어 SetupEvent[]로 노출",
+      "tier": "inferred",
+      "evidence": [
+        "fixtures/fdc-app/src/schema-map.ts:32",
+        "fixtures/fdc-app/src/equipment-repo.ts:68-85"
+      ]
+    },
+    "columnDescs": {
+      "EVT_ID": {
+        "text": null,
+        "tier": "scaffold"
+      },
+      "EQP_ID": {
+        "text": "설비 FK — FDC_EQUIPMENT.EQP_ID와 조인(equipmentFkCol)",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:68",
+          "fixtures/fdc-app/src/equipment-repo.ts:73"
+        ]
+      },
+      "EVT_TIME": {
+        "text": "이벤트 시각 — SetupEvent.time으로 노출(ISO, TO_CHAR 'YYYY-MM-DD\"T\"HH24:MI')",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:36",
+          "fixtures/fdc-app/src/equipment-repo.ts:70"
+        ]
+      },
+      "EVT_TYPE_CD": {
+        "text": "이벤트 유형 코드 — 'S'=setup, 'I'=info_change, 'M'=maintenance, 그 외 값은 'other'로 매핑",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:72-76",
+          "fixtures/fdc-app/src/equipment-repo.ts:79",
+          "fixtures/fdc-app/src/contract.ts:28"
+        ]
+      },
+      "EVT_LABEL": {
+        "text": "이벤트 라벨 — SetupEvent.label로 노출, NULL이면 응답에서 생략",
+        "tier": "inferred",
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:38",
+          "fixtures/fdc-app/src/equipment-repo.ts:80-82"
+        ]
+      }
+    },
+    "queries": [
+      {
+        "sql": "SELECT TO_CHAR(EVT_TIME,'YYYY-MM-DD\"T\"HH24:MI'), EVT_TYPE_CD, EVT_LABEL FROM FDC_SETUP_EVENT WHERE EQP_ID = :id ORDER BY EVT_TIME DESC",
+        "note": {
+          "text": "설비별 이벤트 역순 조회",
+          "tier": "inferred",
+          "evidence": ["fixtures/fdc-app/src/equipment-repo.ts:69-75"]
+        }
+      }
+    ]
+  }
+}
