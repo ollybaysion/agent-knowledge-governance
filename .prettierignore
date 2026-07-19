@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+# HTML formatting is owned by html-validate (the lint hook), which requires an
+# uppercase <!DOCTYPE>; prettier would lowercase it and the two would fight.
+public/*.html

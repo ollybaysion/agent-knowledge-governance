@@ -76,7 +76,10 @@ const SEMANTIC_CHECKS = {
     if (catalog?.columns && columnDescs) {
       const known = new Set(catalog.columns.map((c) => c.name));
       for (const name of Object.keys(columnDescs)) {
-        if (!known.has(name))
+        // A column that vanished from catalog auto-transitions its slot to
+        // deprecated (design D4/§3.1 "고아 슬롯") instead of being deleted —
+        // that orphaned entry legitimately has no catalog.columns match.
+        if (!known.has(name) && columnDescs[name]?.tier !== "deprecated")
           fail(
             errors,
             `$.body.columnDescs.${name}: no such column in catalog.columns`,
