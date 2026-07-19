@@ -1,0 +1,45 @@
+{
+  "schema": "msg-format/v1",
+  "id": "cmd-start-lot",
+  "keywords": [{ "kw": "cmd_start_lot", "inject": "full" }],
+  "status": "active",
+  "body": {
+    "command": "CMD_START_LOT",
+    "direction": "host->equipment",
+    "purpose": {
+      "text": "로트 시작을 지시한다",
+      "tier": "confirmed",
+      "evidence": ["fdc-eqp/src/cmd/start-lot.ts:12"],
+      "by": "promote:renoir",
+      "at": "2026-07-19T00:00:00Z"
+    },
+    "fields": [
+      {
+        "seq": 1,
+        "name": "LOT_ID",
+        "type": "string(20)",
+        "required": true,
+        "desc": {
+          "text": "로트 식별자",
+          "tier": "inferred",
+          "evidence": ["fdc-eqp/src/cmd/start-lot.ts:14"],
+          "by": "adopt:renoir",
+          "at": "2026-07-19T00:00:00Z"
+        }
+      },
+      {
+        "seq": 2,
+        "name": "RECIPE_ID",
+        "type": "string(20)",
+        "required": true,
+        "desc": { "text": null, "tier": "scaffold" }
+      }
+    ],
+    "examples": [
+      {
+        "label": "정상",
+        "payload": "{\"LOT_ID\":\"L2401\",\"RECIPE_ID\":\"R-100\"}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "agent-knowledge-governance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "akg — domain knowledge SSoT: JSON model, deterministic md render, keyword-docs migration",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
