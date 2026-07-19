@@ -85,6 +85,16 @@ test("db-schema: columnDescs key not present in catalog.columns is rejected", ()
   );
 });
 
+test("db-schema: a DEPRECATED columnDescs entry not in catalog.columns is allowed (orphan slot, §3.1)", () => {
+  const doc = minimalDbSchemaDoc();
+  doc.body.columnDescs.GHOST = {
+    text: "예전 컬럼",
+    tier: "deprecated",
+    evidence: ["x:1"],
+  };
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
 test("db-schema: id must be lower(owner.table)", () => {
   const doc = minimalDbSchemaDoc();
   doc.id = "wrong.id";

@@ -9,5 +9,8 @@
   },
   "scripts": {
     "test": "node --test"
+  },
+  "dependencies": {
+    "fastify": "^5.10.0"
   }
 }
