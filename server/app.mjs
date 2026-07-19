@@ -63,6 +63,10 @@ export async function buildApp({
   // S1/S14: every route must opt into either `config.public` or an explicit
   // `config.roles` allowlist — there is no default-allow path.
   app.addHook("preHandler", async (request, reply) => {
+    // No route matched — let the notFound handler answer (a 404), don't run
+    // auth against a nonexistent endpoint (which would 500 on the missing
+    // roles config).
+    if (!request.routeOptions?.url) return;
     const cfg = request.routeOptions?.config ?? {};
     if (cfg.public) return;
 
@@ -112,6 +116,10 @@ export async function buildApp({
   registerPromoteRoutes(app);
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
+
+  app.setNotFoundHandler((request, reply) => {
+    reply.code(404).send({ error: "not_found", path: request.url });
+  });
 
   return app;
 }

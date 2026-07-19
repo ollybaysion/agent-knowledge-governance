@@ -195,6 +195,51 @@ test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)",
   await cleanup();
 });
 
+test("DELETE archives a doc (approver only) — dropped from the index, JSON preserved; a nonexistent route is 404 not 500", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+    { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema",
+    headers: auth("aptok"),
+    payload: newDbSchemaDoc(),
+  });
+
+  // editor cannot archive
+  const forbidden = await app.inject({
+    method: "DELETE",
+    url: "/api/docs/db-schema/t.x",
+    headers: auth("edtok"),
+  });
+  assert.equal(forbidden.statusCode, 403);
+
+  const del = await app.inject({
+    method: "DELETE",
+    url: "/api/docs/db-schema/t.x",
+    headers: auth("aptok"),
+  });
+  assert.equal(del.statusCode, 200);
+
+  const after = await app.inject({
+    method: "GET",
+    url: "/api/docs/db-schema/t.x",
+    headers: auth("aptok"),
+  });
+  assert.equal(after.json().json.status, "archived"); // JSON preserved, just archived
+
+  // a genuinely unknown route returns a clean 404, never a 500 route_misconfigured
+  const unknown = await app.inject({
+    method: "DELETE",
+    url: "/api/nope/x",
+    headers: auth("aptok"),
+  });
+  assert.equal(unknown.statusCode, 404);
+
+  await cleanup();
+});
+
 test("catalog-push replaces catalog and auto-deprecates an inferred slot whose column vanished", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },

@@ -7,7 +7,7 @@ import {
   readJsonAtRev,
   listIds,
 } from "../store.mjs";
-import { persistDoc } from "../render-store.mjs";
+import { persistDoc, archiveDoc } from "../render-store.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { resolveConflict } from "../conflict.mjs";
@@ -40,7 +40,14 @@ export function registerDocsRoutes(app) {
         if (q && !id.includes(q)) continue;
         const tiers = tierSummary(bodySchema, doc.body);
         if (tier && !tiers[tier]) continue;
-        docs.push({ type: t, id, status: doc.status, tiers });
+        docs.push({
+          type: t,
+          id,
+          status: doc.status,
+          tiers,
+          keywords: doc.keywords,
+          rev: revOfPath(storeDir, `${t}/${id}.json`),
+        });
       }
     }
     return { docs };
@@ -300,6 +307,30 @@ export function registerDocsRoutes(app) {
             message: `catalog-push db-schema/${id}`,
           });
           return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // §6 DELETE — soft archive (status: archived): dropped from the compiled
+  // injection index, but the JSON + git history are preserved.
+  app.delete(
+    "/api/docs/:type/:id",
+    { config: { roles: ["approver"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const rev = archiveDoc(storeDir, type, doc, {
+            author: request.user.id,
+            message: `archive ${type}/${id}`,
+          });
+          return { status: 200, body: { rev } };
         },
         { priority: priorityOf(request.user) },
       );
