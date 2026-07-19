@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>akg — agent-knowledge-governance</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <nav id="tabs">
+        <button type="button" data-screen="corpus" class="tab">코퍼스</button>
+        <button type="button" data-screen="queue" class="tab">
+          검토 대기열
+        </button>
+        <button type="button" data-screen="audit" class="tab">감사</button>
+      </nav>
+      <div id="who"></div>
+    </header>
+
+    <section id="login" hidden>
+      <h1>akg 로그인</h1>
+      <p>발급받은 bearer 토큰을 입력하세요 (akg-user CLI로 발급).</p>
+      <input
+        id="token-input"
+        type="password"
+        placeholder="토큰"
+        autocomplete="current-password"
+      />
+      <button type="button" id="token-submit">저장</button>
+      <p id="login-error" class="error"></p>
+    </section>
+
+    <main id="app" hidden></main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

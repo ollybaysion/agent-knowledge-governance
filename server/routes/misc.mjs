@@ -23,6 +23,16 @@ export function registerMiscRoutes(app) {
     return { version: VERSION, storeRev: rev };
   });
 
+  // Not in design §6's table — added so the dashboard can show "logged in as
+  // X (role)" and gate the promote button client-side without guessing.
+  app.get(
+    "/api/me",
+    { config: { roles: ["viewer", "editor", "approver"] } },
+    async (request) => {
+      return { id: request.user.id, role: request.user.role };
+    },
+  );
+
   app.get(
     "/api/schemas/:type",
     { config: { public: true } },

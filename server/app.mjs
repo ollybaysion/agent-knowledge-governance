@@ -23,6 +23,7 @@ import { registerPromoteRoutes } from "./routes/promote.mjs";
 import { registerProposalsRoutes } from "./routes/proposals.mjs";
 import { registerAuditRoutes } from "./routes/audit.mjs";
 import { registerMiscRoutes } from "./routes/misc.mjs";
+import { registerDashboardRoutes } from "./routes/dashboard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -105,6 +106,7 @@ export async function buildApp({
     }
   });
 
+  registerDashboardRoutes(app);
   registerMiscRoutes(app);
   registerDocsRoutes(app);
   registerPromoteRoutes(app);
