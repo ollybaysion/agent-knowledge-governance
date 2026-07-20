@@ -1,26 +1,59 @@
 #!/usr/bin/env node
-// akg CLI (design §8.1). Phase 2 implements only `sync` — propose/catalog-push
-// are Phase 3 (see agent-knowledge-governance-phase2-instructions.md scope).
+// akg CLI (design §8.1). `sync` (Phase 2) pulls; `propose` / `catalog-push`
+// (Phase 3) push. sync fails OPEN (a down server just means "try later" —
+// it must never block a CC session). propose/catalog-push are explicit
+// writes a caller asked for, so they fail CLOSED (non-zero exit on any
+// failure) — the caller needs to know the write did not happen.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { syncMirror, AkgSyncError } from "../src/mirror/sync.mjs";
+import { propose } from "../src/client/propose.mjs";
+import { catalogPush } from "../src/client/catalog-push.mjs";
+import { AkgApiError } from "../src/client/errors.mjs";
+
+const USAGE = `usage:
+  akg sync [--skills] [--server <url>] [--mirror <dir>]
+  akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
+  akg catalog-push <owner.table> <describe.json> [--server <url>] [--mirror <dir>]
+`;
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
   const flags = { skills: false, server: null, mirror: null };
+  const positional = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--skills") flags.skills = true;
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
-    else {
+    else if (a.startsWith("--")) {
       process.stderr.write(`akg: unknown argument: ${a}\n`);
       process.exit(1);
-    }
+    } else positional.push(a);
   }
-  return { cmd, flags };
+  return { cmd, flags, positional };
+}
+
+function readJsonFile(path, label) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    process.stderr.write(
+      `akg: cannot read ${label} "${path}": ${err.message}\n`,
+    );
+    process.exit(1);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    process.stderr.write(
+      `akg: ${label} "${path}" is not valid JSON: ${err.message}\n`,
+    );
+    process.exit(1);
+  }
 }
 
 // §8.1: token file 0600 or AKG_TOKEN env. We don't enforce the mode here
@@ -77,33 +110,7 @@ function countDocs(mirrorDir) {
   return seen.size;
 }
 
-async function main() {
-  const { cmd, flags } = parseArgs(process.argv.slice(2));
-  if (cmd !== "sync") {
-    process.stderr.write(
-      "usage: akg sync [--skills] [--server <url>] [--mirror <dir>]\n",
-    );
-    process.exit(1);
-  }
-
-  const mirrorDir = resolveMirrorDir(flags);
-
-  const token = resolveToken();
-  if (!token) {
-    process.stderr.write(
-      "akg: no token — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
-    );
-    process.exit(1);
-  }
-
-  const serverUrl = resolveServerUrl(flags, mirrorDir);
-  if (!serverUrl) {
-    process.stderr.write(
-      "akg: no server URL — pass --server, set AKG_SERVER, or sync once with --server first\n",
-    );
-    process.exit(1);
-  }
-
+async function runSync(flags, mirrorDir, token, serverUrl) {
   try {
     const result = await syncMirror({
       serverUrl,
@@ -125,6 +132,99 @@ async function main() {
     // auth failure, which the user needs to actually see and fix.
     process.exit(err instanceof AkgSyncError && err.status === 401 ? 1 : 0);
   }
+}
+
+async function runPropose(positional, token, serverUrl) {
+  const [spec, proposalPath] = positional;
+  const slashIdx = spec ? spec.indexOf("/") : -1;
+  if (!spec || slashIdx <= 0 || !proposalPath) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const type = spec.slice(0, slashIdx);
+  const id = spec.slice(slashIdx + 1);
+  const parsed = readJsonFile(proposalPath, "proposal file");
+  const slots = parsed?.slots;
+  if (
+    !slots ||
+    typeof slots !== "object" ||
+    Array.isArray(slots) ||
+    Object.keys(slots).length === 0
+  ) {
+    process.stderr.write(
+      `akg propose: "${proposalPath}" must contain a non-empty "slots" object\n`,
+    );
+    process.exit(1);
+  }
+
+  try {
+    const result = await propose({ serverUrl, token, type, id, slots });
+    process.stdout.write(
+      result.deduped
+        ? `proposal already pending: ${result.id}\n`
+        : `proposed ${type}/${id}: ${result.id}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(`akg propose failed: ${err.message}\n`);
+    // Fail CLOSED: unlike sync, this is a write the caller asked for — it
+    // must surface a non-zero exit when it did not go through.
+    process.exit(1);
+  }
+}
+
+async function runCatalogPush(positional, token, serverUrl) {
+  const [id, describePath] = positional;
+  if (!id || !describePath) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const catalog = readJsonFile(describePath, "describe_table file");
+
+  try {
+    const result = await catalogPush({ serverUrl, token, id, catalog });
+    process.stdout.write(
+      `catalog pushed: db-schema/${id} (rev ${result.rev})\n`,
+    );
+  } catch (err) {
+    process.stderr.write(`akg catalog-push failed: ${err.message}\n`);
+    if (err instanceof AkgApiError && err.status === 404) {
+      process.stderr.write(
+        `akg catalog-push: db-schema/${id} does not exist yet — create it first (dashboard or a proposal)\n`,
+      );
+    }
+    // Fail CLOSED, same reasoning as propose.
+    process.exit(1);
+  }
+}
+
+async function main() {
+  const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
+  if (!["sync", "propose", "catalog-push"].includes(cmd)) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+
+  const mirrorDir = resolveMirrorDir(flags);
+
+  const token = resolveToken();
+  if (!token) {
+    process.stderr.write(
+      "akg: no token — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
+    );
+    process.exit(1);
+  }
+
+  const serverUrl = resolveServerUrl(flags, mirrorDir);
+  if (!serverUrl) {
+    process.stderr.write(
+      "akg: no server URL — pass --server, set AKG_SERVER, or sync once with --server first\n",
+    );
+    process.exit(1);
+  }
+
+  if (cmd === "sync") await runSync(flags, mirrorDir, token, serverUrl);
+  else if (cmd === "propose") await runPropose(positional, token, serverUrl);
+  else await runCatalogPush(positional, token, serverUrl);
 }
 
 main();
