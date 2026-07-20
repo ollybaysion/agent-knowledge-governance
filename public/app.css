@@ -129,13 +129,6 @@ header {
   letter-spacing: 0.03em;
   font-size: 14px;
 }
-.wordmark small {
-  font-weight: 400;
-  color: var(--muted-soft);
-  font-size: 11px;
-  margin-left: 8px;
-  letter-spacing: 0;
-}
 nav {
   display: flex;
   gap: 2px;
@@ -1026,6 +1019,17 @@ tr.dep-row td {
 }
 .t-inf {
   color: var(--warning-ink);
+}
+.editable {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
+.editable:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  background: var(--surface-card);
 }
 .t-conf {
   color: var(--body-strong);
