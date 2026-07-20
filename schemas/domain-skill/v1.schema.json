@@ -2,69 +2,228 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "domain-skill/v1",
   "title": "domain-skill/v1 body",
-  "description": "agent-knowledge-governance-json-spec.md §4.4 — akg is the format owner (§5.3). h1Title removed (H1 = '# {name}'); intro optional; description firstLine must end with '.'. Exception to the tiered-value rule: valueRules[].basis is a plain string with an inline '추정)' marker, not a $ref'd tiered value (json-spec §1.2).",
+  "description": "agent-knowledge-governance-json-spec.md §4.4 — akg is the format owner (§5.3). Body is agent-skill-foundry spec v2: `description` is NOT a field (the renderer synthesizes it from scope + focus + inputs) and `valueRules` is gone (code tables live in db-schema docs, so the tiered-value exception this type used to carry is also gone). The answer's form is free but its content has a floor — steps[].produces composes the 반드시 포함 line. Unknown keys are rejected at every level so a typo cannot silently drop a rule.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "name",
     "argumentHint",
-    "description",
+    "scope",
+    "focus",
+    "intro",
+    "inputs",
+    "dependencies",
     "steps",
-    "valueRules",
     "output"
   ],
   "properties": {
-    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-    "argumentHint": { "type": "string", "pattern": "\\S" },
-    "description": {
+    "name": {
       "type": "string",
-      "pattern": "^[^\\n]*\\.(\\n[\\s\\S]*)?$"
+      "pattern": "^[a-z][a-z0-9-]*$"
     },
-    "intro": { "type": "string", "pattern": "\\S" },
+    "argumentHint": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "단위",
+        "카디널리티",
+        "의도"
+      ],
+      "properties": {
+        "단위": {
+          "enum": [
+            "설비",
+            "챔버",
+            "센서"
+          ]
+        },
+        "카디널리티": {
+          "enum": [
+            "단일"
+          ]
+        },
+        "의도": {
+          "enum": [
+            "상태",
+            "생성 이력"
+          ]
+        }
+      }
+    },
+    "focus": {
+      "type": "string",
+      "description": "Spliced into a single rendered line — no newline, no leading markdown block marker.",
+      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    },
+    "anchorTable": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "intro": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "required",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mcp"
+        ],
+        "properties": {
+          "mcp": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          },
+          "why": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
     "steps": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["title", "sql"],
+        "required": [
+          "title",
+          "sql"
+        ],
         "properties": {
-          "title": { "type": "string", "pattern": "\\S" },
-          "lead": { "type": "string", "pattern": "\\S" },
-          "sql": { "type": "string", "pattern": "\\S" },
-          "notes": { "type": "string", "pattern": "\\S" }
-        }
-      }
-    },
-    "valueRules": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["target", "rule", "basis"],
-        "properties": {
-          "target": { "type": "string", "pattern": "\\S" },
-          "rule": { "type": "string", "pattern": "\\S" },
-          "basis": { "type": "string", "pattern": "\\S" }
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "produces": {
+            "type": "string",
+            "description": "Spliced into a single rendered line — no newline, no leading markdown block marker.",
+            "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+          },
+          "lead": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "sql": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "branches": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "when",
+                "then"
+              ],
+              "properties": {
+                "when": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "then": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              }
+            }
+          },
+          "notes": {
+            "type": "string",
+            "pattern": "\\S"
+          }
         }
       }
     },
     "output": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lead", "template"],
+      "required": [
+        "avoid",
+        "examples"
+      ],
       "properties": {
-        "lead": { "type": "string", "pattern": "\\S" },
-        "template": { "type": "string", "pattern": "\\S" },
-        "exampleLabel": { "type": "string", "pattern": "\\S" },
-        "example": { "type": "string", "pattern": "\\S" }
-      },
-      "dependentRequired": {
-        "exampleLabel": ["example"],
-        "example": ["exampleLabel"]
+        "avoid": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string",
+            "description": "Shape contract 「끌리는 오추론」 — 「그걸 금하는 데이터 사실」, both sides at least 6 chars, single line. A count-only gate let a restatement of the universal discipline pass as domain knowledge.",
+            "pattern": "^(?![#\\-*>|])[^\\n]{6,} — [^\\n]{6,}$"
+          }
+        },
+        "examples": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ask",
+              "answer"
+            ],
+            "properties": {
+              "ask": {
+                "type": "string",
+                "description": "Spliced into a single rendered line — no newline, no leading markdown block marker.",
+                "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+              },
+              "answer": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        }
       }
     },
-    "discipline": { "type": "string", "pattern": "\\S" }
+    "discipline": {
+      "type": "string",
+      "pattern": "\\S"
+    }
   }
 }
