@@ -1,10 +1,13 @@
-# Consuming akg from a local CC environment (A mode)
+# Consuming and producing with akg from a local CC environment
 
-This is Phase 2 (design §8.1, §8.2): pull the server's `rendered/` bundle into
-a local mirror with `akg sync`, then point claude-hooks' `keyword-docs`
-provider at that mirror. claude-hooks itself is **not modified** — the
-provider already supports a `params.index` override (D1), so switching to akg
-is a 4-line `context.json` edit.
+Phase 2 (design §8.1, §8.2, sections 1-5 below): pull the server's
+`rendered/` bundle into a local mirror with `akg sync`, then point
+claude-hooks' `keyword-docs` provider at that mirror. claude-hooks itself is
+**not modified** — the provider already supports a `params.index` override
+(D1), so switching to akg is a 4-line `context.json` edit.
+
+Phase 3 (design §8.1, section 6 below): push changes back to the hub with
+`akg propose` and `akg catalog-push` — the CLI's write side.
 
 ## 1. One-time setup
 
@@ -133,3 +136,63 @@ out broadly:
    `--mirror`, and confirm it fails (fail-open, exit 0, stderr explains why)
    **without deleting or corrupting the mirror** — the docs from step 2/3
    must still be readable.
+
+## 6. Producing: `akg propose` and `akg catalog-push`
+
+Unlike `sync`, these are explicit writes a caller asked for — they **fail
+closed**: any failure (network, auth, validation, a 404) prints the reason to
+stderr and exits `1`, so a calling skill/script can tell the write did not
+happen. Both need a token with at least the `agent` role.
+
+### `akg propose <type>/<id> <proposal.json>`
+
+Submits a slot-level proposal to the hub's review queue (`POST
+/api/proposals`) — the exit for claude-hooks' `db-schema-propose-codebase`
+skill: it hands its proposal here instead of applying it to a local file.
+
+`<type>/<id>` is e.g. `db-schema/t.sensor`. `proposal.json` holds the slots to
+propose, keyed by slot address:
+
+```json
+{
+  "slots": {
+    "purpose": {
+      "text": "센서 원시값 로그 테이블.",
+      "tier": "inferred",
+      "evidence": ["ingest.py:12"]
+    }
+  }
+}
+```
+
+```sh
+node bin/akg.mjs propose db-schema/t.sensor proposal.json
+```
+
+Prints `proposed db-schema/t.sensor: <uuid>` (201) or `proposal already
+pending: <uuid>` (200 — an identical resubmission dedups against the pending
+queue, S8; safe to retry). A human reviews and adopts/rejects it from the
+dashboard or `POST /api/proposals/:id/adopt|reject` — this CLI only submits,
+it never adopts (adoption is an editor-role action).
+
+### `akg catalog-push <owner.table> <describe.json>`
+
+Pushes a fresh `describe_table` result (agent-db-plugin MCP output shape —
+`columns`/`primaryKey`/`foreignKeys`/`indexes`/`numRows`/`lastAnalyzed`/
+`tableComment`) into a db-schema doc's `catalog` field (`PUT
+/api/docs/db-schema/:id/catalog`) — the exit for claude-hooks'
+`db-schema-docs` skill: schema-doc generation moves from "write a local md
+file" to "push the raw schema to the hub." This only ever replaces the
+**auto/fact** half of the doc (`catalog`); every human-authored slot
+(`purpose`, `columnDescs`, `queries`) is left alone, except that a column
+which vanished from the new catalog has its `columnDescs` entry dropped (if
+still `scaffold`, i.e. never annotated) or marked `deprecated` (if it carried
+real text) — never silently deleted.
+
+```sh
+node bin/akg.mjs catalog-push t.sensor describe.json
+```
+
+Prints `catalog pushed: db-schema/t.sensor (rev <rev>)`. The target doc must
+already exist — this route never creates one; a 404 means propose (or the
+dashboard) needs to create it first.
