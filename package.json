@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "akg": "bin/akg.mjs"
+  },
   "scripts": {
     "test": "node --test"
   },
