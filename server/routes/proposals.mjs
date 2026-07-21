@@ -2,7 +2,6 @@
 // adopt/reject (editor). Storage: store/proposals/pending|archive/<uuid>.json
 // — a directory listing IS the queue (design §D2), no separate DB.
 import { createHash, randomUUID } from "node:crypto";
-import { validateDocument } from "../../src/envelope.mjs";
 import {
   readJson,
   revOfPath,
@@ -11,7 +10,7 @@ import {
   isValidId,
 } from "../store.mjs";
 import { docWrites } from "../render-store.mjs";
-import { setSlot } from "../slots.mjs";
+import { applySlots, checkSlotValues } from "../proposal-apply.mjs";
 
 function priorityOf(user) {
   return user.role === "agent" ? "agent" : "human";
@@ -36,6 +35,25 @@ export function registerProposalsRoutes(app) {
       }
       if (!refs[`${type}/v1`])
         return reply.code(400).send({ error: "unknown_type" });
+
+      // Rehearse the adopt now, so a proposal that can never be adopted never
+      // reaches the queue (issue #21). If the target does not exist yet the
+      // rehearsal is impossible — but that failure is not settled either (the
+      // document may be created before anyone adopts), so only the value
+      // checks that hold regardless of the document are applied.
+      const currentDoc = readJson(storeDir, `${type}/${id}.json`);
+      const rehearsal = currentDoc
+        ? applySlots(currentDoc, slots, refs, {
+            by: `adopt:${request.user.id}`,
+            at: new Date().toISOString(),
+          })
+        : (() => {
+            const bad = checkSlotValues(slots);
+            return bad ? { ok: false, status: 400, body: bad } : { ok: true };
+          })();
+      if (!rehearsal.ok)
+        return reply.code(rehearsal.status).send(rehearsal.body);
+
       const contentHash = createHash("sha256")
         .update(JSON.stringify({ type, id, slots }))
         .digest("hex");
@@ -127,30 +145,16 @@ export function registerProposalsRoutes(app) {
 
           const slotsToApply = overrideSlots ?? proposal.slots;
           const now = new Date().toISOString();
-          const newBody = structuredClone(currentDoc.body);
-          for (const [addr, val] of Object.entries(slotsToApply)) {
-            const evidence = Array.isArray(val.evidence) ? val.evidence : [];
-            if (!val.text || evidence.length === 0) {
-              return {
-                status: 400,
-                body: { error: "invalid_slot_value", address: addr },
-              };
-            }
-            setSlot(newBody, addr, {
-              text: val.text,
-              tier: "inferred",
-              evidence,
-              by: `adopt:${request.user.id}`,
-              at: now,
-            });
-          }
-          const newDoc = { ...currentDoc, body: newBody };
-          const errors = validateDocument(newDoc, refs);
-          if (errors.length)
-            return {
-              status: 400,
-              body: { error: "validation_failed", details: errors },
-            };
+          // Re-run at adopt, not just at submit: the document may have moved
+          // since (see proposal-apply.mjs), and `overrideSlots` from the
+          // reviewer's body has never been checked at all.
+          const applied = applySlots(currentDoc, slotsToApply, refs, {
+            by: `adopt:${request.user.id}`,
+            at: now,
+          });
+          if (!applied.ok)
+            return { status: applied.status, body: applied.body };
+          const newDoc = applied.doc;
 
           const doc = docWrites(storeDir, type, newDoc);
           const writes = [
