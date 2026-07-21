@@ -113,6 +113,18 @@ function cacheFor(dir) {
   return c;
 }
 
+// `git diff --cached --quiet` exits 1 when the index differs from HEAD, 0 when
+// it matches. Asked after `git add`, that is exactly "would this commit be
+// empty?" — asked BEFORE committing, so no empty commit is ever attempted.
+function isIndexEmpty(dir) {
+  try {
+    git(dir, ["diff", "--cached", "--quiet"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function revOfPath(dir, relpath) {
   const cache = cacheFor(dir);
   if (cache.has(relpath)) return cache.get(relpath);
@@ -193,6 +205,22 @@ export function commitFiles(
   if (touched.length === 0) throw new StoreError("커밋할 변경이 없습니다", 400);
 
   git(dir, ["add", "-A", "--", ...touched]);
+
+  // Writing the same bytes back is a no-op, not an error. `git commit` fails
+  // on an empty index, which surfaced as a 500 on the most ordinary thing a
+  // producer does: re-push a document it did not change (a re-run factory, a
+  // retried CLI call). Idempotence is the honest answer — the document is
+  // already at this content, so nothing new happened to record.
+  //
+  // The rev returned is the one for the PATH, not HEAD: on a no-op, HEAD may
+  // belong to some other document's commit, and callers hand this rev
+  // straight back as the doc's rev — where If-Match compares it against
+  // revOfPath(). Returning HEAD would make the next edit 409 on a rev the
+  // client was just told was current.
+  if (isIndexEmpty(dir)) {
+    const primary = writes[0]?.relpath ?? touched[0];
+    return revOfPath(dir, primary);
+  }
   // S12: 커밋 메시지·author는 항상 spawn argv의 개별 원소로 전달 — shell 경유 금지.
   git(dir, ["commit", "-q", "--author", authorString(author), "-m", message]);
   const rev = git(dir, ["rev-parse", "HEAD"]).trim();

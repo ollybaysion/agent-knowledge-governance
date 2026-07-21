@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -213,6 +213,132 @@ test("cli catalog-push: target doc missing -> exit 1, 404 hint printed", async (
     rmSync(dir, { recursive: true, force: true });
   } finally {
     await cleanup();
+  }
+});
+
+// --- push (issue #18) ------------------------------------------------------
+
+const GOLDEN_SPEC = JSON.parse(
+  readFileSync(
+    fileURLToPath(
+      new URL("../../examples/domain-skill/fdc-explain-sensor.json", import.meta.url),
+    ),
+    "utf8",
+  ),
+).body;
+
+/** A child with NO akg env at all, and a HOME with no token file. */
+function runCliBare(args, home) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, HOME: home };
+    delete env.AKG_TOKEN;
+    delete env.AKG_SERVER;
+    delete env.AKG_MIRROR;
+    const child = spawn("node", [BIN, ...args], { env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+test("cli push: a bare spec.json creates the doc, and a second run updates it", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-push-"));
+  try {
+    const specPath = join(home, "spec.json");
+    writeFileSync(specPath, JSON.stringify(GOLDEN_SPEC));
+
+    const first = await runCli(["push", "domain-skill", specPath], {
+      token: "ed-tok",
+      serverUrl,
+    });
+    assert.equal(first.status, 0, first.stderr);
+    assert.match(first.stdout, /^created domain-skill\/fdc-explain-sensor \(rev /);
+
+    // The hub now serves the skill — this is the whole point of the command.
+    const md = await app.inject({
+      method: "GET",
+      url: "/api/docs/domain-skill/fdc-explain-sensor?format=md",
+      headers: { authorization: "Bearer ed-tok" },
+    });
+    assert.equal(md.statusCode, 200);
+    assert.match(md.body, /^---\nname: fdc-explain-sensor\n/);
+
+    writeFileSync(
+      specPath,
+      JSON.stringify({ ...GOLDEN_SPEC, focus: "정체·소속 설비·현재 상태와 이력" }),
+    );
+    const second = await runCli(["push", "domain-skill", specPath], {
+      token: "ed-tok",
+      serverUrl,
+    });
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /^updated domain-skill\/fdc-explain-sensor \(rev /);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+test("cli push --dry-run: renders the skill with no token, no server, and writes nothing", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-dryrun-"));
+  try {
+    const specPath = join(home, "spec.json");
+    writeFileSync(specPath, JSON.stringify(GOLDEN_SPEC));
+
+    const r = await runCliBare(["push", "domain-skill", specPath, "--dry-run"], home);
+    assert.equal(r.status, 0, r.stderr);
+    // The preview IS the SKILL.md the factory used to print locally.
+    assert.match(r.stdout, /^---\nname: fdc-explain-sensor\n/);
+    assert.match(r.stdout, /## 조회 절차/);
+    assert.match(r.stderr, /DRY-RUN/);
+    // Nothing about a missing token or server, because it needs neither.
+    assert.doesNotMatch(r.stderr, /no token|no server URL/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cli push: an invalid spec fails on validation, before it ever calls the server", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-badspec-"));
+  try {
+    const specPath = join(home, "spec.json");
+    // A v1 field that spec v2 removed — the exact thing "unknown keys are
+    // rejected" exists to catch.
+    writeFileSync(
+      specPath,
+      JSON.stringify({ ...GOLDEN_SPEC, description: "손으로 쓴 라우팅 문장" }),
+    );
+
+    // A server URL that cannot possibly answer: if validation did not happen
+    // first, this would fail with a connection error instead.
+    const r = await runCli(["push", "domain-skill", specPath], {
+      token: "ed-tok",
+      serverUrl: "http://127.0.0.1:1",
+    });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /검증 실패/);
+    assert.match(r.stderr, /description/);
+    assert.doesNotMatch(r.stderr, /ECONNREFUSED|fetch failed/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cli push: a body with no derivable id says which field is missing", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-noid-"));
+  try {
+    const specPath = join(home, "spec.json");
+    const { name, ...noName } = GOLDEN_SPEC;
+    writeFileSync(specPath, JSON.stringify(noName));
+
+    const r = await runCliBare(["push", "domain-skill", specPath, "--dry-run"], home);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /`name` 이 필요합니다/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

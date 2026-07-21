@@ -63,24 +63,55 @@ function fail(errors, msg) {
   errors.push(msg);
 }
 
+// The id is derived from the body, never authored beside it — one place to get
+// it wrong instead of two. SEMANTIC_CHECKS below turns each rule into a
+// validation, and src/client/push.mjs uses the same rules to build an envelope
+// around a bare body, so a pushed doc and a validated doc agree by
+// construction. Null when the body lacks the field the id comes from: the
+// schema layer reports the missing field, and a second complaint about the id
+// would only bury it.
+export function deriveId(schema, body) {
+  if (!body || typeof body !== "object") return null;
+  switch (schema) {
+    case "db-schema/v1": {
+      // A schema-qualified table is `owner.table`, an unqualified one is just
+      // `table` — `owner` is optional and the id follows whichever the
+      // document actually names.
+      if (!body.table) return null;
+      const qualified = body.owner ? `${body.owner}.${body.table}` : body.table;
+      return qualified.toLowerCase();
+    }
+    case "msg-format/v1":
+      return body.command ? body.command.toLowerCase().replace(/_/g, "-") : null;
+    case "domain-skill/v1":
+      return body.name ?? null;
+    default:
+      return null;
+  }
+}
+
+/** How deriveId got its answer, for error messages that name the source field. */
+const ID_SOURCE = {
+  "db-schema/v1": (body) => (body?.owner ? "lower(owner.table)" : "lower(table)"),
+  "msg-format/v1": () => "kebab(command)",
+  "domain-skill/v1": () => "== body.name",
+};
+
 // Cross-field checks the JSON-Schema layer can't express (sibling-node
 // comparisons) — one function per type, kept intentionally small.
+/** Shared by every type: the id must be what deriveId() says it is. */
+function checkDerivedId(doc, errors) {
+  const wantId = deriveId(doc.schema, doc.body);
+  if (wantId !== null && doc.id !== wantId) {
+    const how = ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body";
+    fail(errors, `$.id: expected "${wantId}" (${how}), got "${doc.id}"`);
+  }
+}
+
 const SEMANTIC_CHECKS = {
   "db-schema/v1"(doc, errors) {
-    const { owner, table, catalog, columnDescs } = doc.body;
-    // `owner` is optional: a schema-qualified table is `owner.table`, an
-    // unqualified one is just `table`. Either way the id is the lowercased
-    // form of whatever the document actually names, so the id keeps being
-    // derivable from the body rather than a second place to get it wrong.
-    if (table) {
-      const qualified = owner ? `${owner}.${table}` : table;
-      const wantId = qualified.toLowerCase();
-      if (doc.id !== wantId)
-        fail(
-          errors,
-          `$.id: expected "${wantId}" (lower(${owner ? "owner.table" : "table"})), got "${doc.id}"`,
-        );
-    }
+    const { catalog, columnDescs } = doc.body;
+    checkDerivedId(doc, errors);
     if (catalog?.columns && columnDescs) {
       const known = new Set(catalog.columns.map((c) => c.name));
       for (const name of Object.keys(columnDescs)) {
@@ -96,23 +127,10 @@ const SEMANTIC_CHECKS = {
     }
   },
   "msg-format/v1"(doc, errors) {
-    const { command } = doc.body;
-    if (command) {
-      const wantId = command.toLowerCase().replace(/_/g, "-");
-      if (doc.id !== wantId)
-        fail(
-          errors,
-          `$.id: expected "${wantId}" (kebab(command)), got "${doc.id}"`,
-        );
-    }
+    checkDerivedId(doc, errors);
   },
   "domain-skill/v1"(doc, errors) {
-    if (doc.body.name && doc.id !== doc.body.name) {
-      fail(
-        errors,
-        `$.id: expected "${doc.body.name}" (== body.name), got "${doc.id}"`,
-      );
-    }
+    checkDerivedId(doc, errors);
     // The answer's content floor (the 반드시 포함 line) is composed from
     // steps[].produces, so a spec where no step declares one renders that
     // line empty and the free-form output has nothing holding it to the data

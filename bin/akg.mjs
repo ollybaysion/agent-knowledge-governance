@@ -4,31 +4,55 @@
 // it must never block a CC session). propose/catalog-push are explicit
 // writes a caller asked for, so they fail CLOSED (non-zero exit on any
 // failure) — the caller needs to know the write did not happen.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
+import { buildDocument, push, validateForPush } from "../src/client/push.mjs";
+import { renderDocMd } from "../src/render/index.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
   akg sync [--skills] [--server <url>] [--mirror <dir>]
+  akg push <type> <doc.json> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <owner.table|table> <describe.json> [--server <url>] [--mirror <dir>]
+
+  push takes a bare body (a foundry spec.json is a domain-skill body) or a
+  full envelope; it creates the document, or updates it if it already exists.
+  --dry-run validates and prints the rendered md without writing anything.
 `;
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
-  const flags = { skills: false, server: null, mirror: null };
+  const flags = {
+    skills: false,
+    server: null,
+    mirror: null,
+    dryRun: false,
+    keywords: null,
+    status: null,
+  };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--skills") flags.skills = true;
+    else if (a === "--dry-run") flags.dryRun = true;
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
-    else if (a.startsWith("--")) {
+    else if (a === "--status") flags.status = rest[++i];
+    else if (a === "--keyword") {
+      // <kw>[:full|pointer] — repeatable. Default inject is `full`, matching
+      // the envelope default a bare body would otherwise get.
+      const raw = rest[++i] ?? "";
+      const sep = raw.lastIndexOf(":");
+      const kw = sep > 0 ? raw.slice(0, sep) : raw;
+      const inject = sep > 0 ? raw.slice(sep + 1) : "full";
+      (flags.keywords ??= []).push({ kw, inject });
+    } else if (a.startsWith("--")) {
       process.stderr.write(`akg: unknown argument: ${a}\n`);
       process.exit(1);
     } else positional.push(a);
@@ -110,6 +134,19 @@ function countDocs(mirrorDir) {
   return seen.size;
 }
 
+// domain-skill ships as a directory per skill and deliberately has no
+// index.json (json-spec §4.4), so countDocs cannot see it — a `sync --skills`
+// that installed skills would otherwise report "0 docs" while writing files.
+function countSkills(mirrorDir) {
+  try {
+    return readdirSync(join(mirrorDir, "domain-skill"), {
+      withFileTypes: true,
+    }).filter((e) => e.isDirectory()).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function runSync(flags, mirrorDir, token, serverUrl) {
   try {
     const result = await syncMirror({
@@ -121,8 +158,10 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
     if (!result.changed) {
       process.stdout.write(`up to date (rev ${result.rev ?? "none"})\n`);
     } else {
+      const skills = countSkills(mirrorDir);
       process.stdout.write(
-        `synced rev ${result.rev} (${countDocs(mirrorDir)} docs)\n`,
+        `synced rev ${result.rev} (${countDocs(mirrorDir)} docs` +
+          `${skills ? `, ${skills} skills` : ""})\n`,
       );
     }
   } catch (err) {
@@ -150,6 +189,69 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
       );
     }
     process.exit(permanent ? 1 : 0);
+  }
+}
+
+async function runPush(positional, flags, token, serverUrl) {
+  const [type, docPath] = positional;
+  if (!type || !docPath) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const parsed = readJsonFile(docPath, "document file");
+
+  let doc;
+  try {
+    ({ doc } = buildDocument(type, parsed, {
+      keywords: flags.keywords,
+      status: flags.status,
+    }));
+  } catch (err) {
+    process.stderr.write(`akg push: ${err.message}\n`);
+    process.exit(1);
+  }
+
+  // Validate BEFORE the network. A malformed spec should fail the same way
+  // whether or not a server is reachable, and the caller gets the field path
+  // instead of an HTTP status.
+  const errors = validateForPush(doc);
+  if (errors.length) {
+    process.stderr.write(
+      `akg push: ${type}/${doc.id} 검증 실패\n${errors.map((e) => `  - ${e}`).join("\n")}\n`,
+    );
+    process.exit(1);
+  }
+
+  if (flags.dryRun) {
+    const md = renderDocMd(type, doc);
+    process.stdout.write(md ?? "(이 타입은 md 를 렌더하지 않습니다)\n");
+    process.stderr.write(
+      `\n[akg] DRY-RUN — ${type}/${doc.id} 검증 통과, 쓰기 없음. 올리려면 --dry-run 을 빼세요\n`,
+    );
+    return;
+  }
+
+  try {
+    const result = await push({ serverUrl, token, type, doc });
+    process.stdout.write(
+      result.created
+        ? `created ${type}/${doc.id} (rev ${result.rev})\n`
+        : `updated ${type}/${doc.id} (rev ${result.rev}${result.rebased ? ", rebased" : ""})\n`,
+    );
+    if (result.envelopeIgnored) {
+      process.stderr.write(
+        `akg push: ${type}/${doc.id} 는 이미 있어 body 만 갱신했습니다 — keywords/status 는 기존 값을 유지합니다(대시보드에서 변경)\n`,
+      );
+    }
+  } catch (err) {
+    process.stderr.write(`akg push failed: ${err.message}\n`);
+    if (err instanceof AkgApiError && err.status === 409) {
+      process.stderr.write(
+        `akg push: 다른 편집과 충돌했습니다 — 최신본을 받아 다시 시도하세요\n`,
+      );
+    }
+    // Fail CLOSED, same reasoning as propose/catalog-push.
+    process.exit(1);
   }
 }
 
@@ -218,10 +320,17 @@ async function runCatalogPush(positional, token, serverUrl) {
 
 async function main() {
   const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
-  if (!["sync", "propose", "catalog-push"].includes(cmd)) {
+  if (!["sync", "push", "propose", "catalog-push"].includes(cmd)) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
+
+  // A dry run touches nothing outside this process: no token, no server, no
+  // mirror. Requiring either would make "check my spec" need credentials it
+  // never uses, and the factory's approval step runs before any of that is
+  // set up.
+  const offline = cmd === "push" && flags.dryRun;
+  if (offline) return runPush(positional, flags, null, null);
 
   const mirrorDir = resolveMirrorDir(flags);
 
@@ -246,6 +355,7 @@ async function main() {
   }
 
   if (cmd === "sync") await runSync(flags, mirrorDir, token, serverUrl);
+  else if (cmd === "push") await runPush(positional, flags, token, serverUrl);
   else if (cmd === "propose") await runPropose(positional, token, serverUrl);
   else await runCatalogPush(positional, token, serverUrl);
 }

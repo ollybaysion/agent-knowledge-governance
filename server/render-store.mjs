@@ -2,18 +2,9 @@
 // given a fully-resolved doc, write store/<type>/<id>.json + the derived
 // rendered/ artifacts in one commit (json-spec §1.1 — truth and derivative
 // always move together).
-import { renderDbSchemaMd } from "../src/render/db-schema.mjs";
-import { renderMsgFormatMd } from "../src/render/msg-format.mjs";
-import { renderDomainSkillMd } from "../src/render/domain-skill.mjs";
+import { docMdPath, renderDocMd } from "../src/render/index.mjs";
 import { commitFiles, listIds, readJson } from "./store.mjs";
 
-// domain-skill renders to rendered/domain-skill/<name>/SKILL.md (json-spec
-// §4.4) and is distributed via `akg sync --skills`, not the keyword-docs
-// injection index — it deliberately has no index.json entry.
-const RENDERERS = {
-  "db-schema/v1": renderDbSchemaMd,
-  "msg-format/v1": renderMsgFormatMd,
-};
 const INDEXED_TYPES = new Set(["db-schema", "msg-format"]);
 
 const stableJson = (obj) => JSON.stringify(obj, null, 2) + "\n";
@@ -37,30 +28,12 @@ export function compileIndex(docs) {
   return entries;
 }
 
-function docMdPath(type, doc) {
-  if (type === "domain-skill")
-    return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
-  return `rendered/${type}/docs/${doc.id}.md`;
-}
-
-function rendererFor(type, doc) {
-  return (
-    RENDERERS[doc.schema] ??
-    (type === "domain-skill" ? renderDomainSkillMd : null)
-  );
-}
-
-/**
- * The md for a doc, computed rather than read. An inactive doc has no file in
- * rendered/ by design (see docWrites), but the dashboard still has to show it —
- * being readable while staying out of the injection path is the entire point of
- * the state. Safe because rendering is pure: json-spec §1.1 makes
- * `render(json) === md` a contract, so this returns what the file would hold.
- * Null for types with no renderer (unclassified, whose truth is already md).
- */
-export function renderDocMd(type, doc) {
-  return rendererFor(type, doc)?.(doc) ?? null;
-}
+// Re-exported for server callers: an inactive doc has no file in rendered/ by
+// design (see docWrites), but the dashboard still has to show it — being
+// readable while staying out of the injection path is the entire point of the
+// state. Safe because rendering is pure (json-spec §1.1), so this returns what
+// the file would hold.
+export { renderDocMd };
 
 /**
  * The file writes one doc's persistence needs: store/<type>/<id>.json + its
@@ -83,10 +56,15 @@ export function docWrites(storeDir, type, doc) {
   ];
   const removes = [];
 
-  const render = rendererFor(type, doc);
-  if (render) {
+  // Null md = a type with no renderer (unclassified), which has nothing to
+  // write or remove. Rendering an inactive doc only to drop the result is
+  // wasted work, but rendering is pure and cheap, and one code path for
+  // "does this type render at all" beats a second predicate that could
+  // disagree with the renderer about it.
+  const md = renderDocMd(type, doc);
+  if (md !== null) {
     if (doc.status === "active") {
-      writes.push({ relpath: docMdPath(type, doc), content: render(doc) });
+      writes.push({ relpath: docMdPath(type, doc), content: md });
     } else {
       removes.push(docMdPath(type, doc));
     }
