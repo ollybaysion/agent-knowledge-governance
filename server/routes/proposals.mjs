@@ -3,7 +3,13 @@
 // — a directory listing IS the queue (design §D2), no separate DB.
 import { createHash, randomUUID } from "node:crypto";
 import { validateDocument } from "../../src/envelope.mjs";
-import { readJson, revOfPath, commitFiles, listIds } from "../store.mjs";
+import {
+  readJson,
+  revOfPath,
+  commitFiles,
+  listIds,
+  isValidId,
+} from "../store.mjs";
 import { docWrites } from "../render-store.mjs";
 import { setSlot } from "../slots.mjs";
 
@@ -91,6 +97,10 @@ export function registerProposalsRoutes(app) {
     { config: { roles: ["editor"] } },
     async (request, reply) => {
       const { pid } = request.params;
+      // CS7: pid becomes a file path below — reject anything that isn't a
+      // plain id before it can steer the read/write out of proposals/.
+      if (!isValidId(pid))
+        return reply.code(400).send({ error: "invalid_proposal_id" });
       const ifMatch = request.headers["if-match"];
       if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
       const overrideSlots = request.body?.slots;
@@ -178,6 +188,8 @@ export function registerProposalsRoutes(app) {
     { config: { roles: ["editor"] } },
     async (request, reply) => {
       const { pid } = request.params;
+      if (!isValidId(pid))
+        return reply.code(400).send({ error: "invalid_proposal_id" });
       const reason = request.body?.reason ?? null;
 
       const result = await queue.enqueue(

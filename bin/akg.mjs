@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { syncMirror, AkgSyncError } from "../src/mirror/sync.mjs";
+import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
@@ -128,9 +128,21 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
   } catch (err) {
     process.stderr.write(`akg sync failed: ${err.message}\n`);
     // Fail-open (§9.2): a sync failure must never block a CC session — the
-    // existing mirror (if any) is untouched, so exit 0 unless this was an
-    // auth failure, which the user needs to actually see and fix.
-    process.exit(err instanceof AkgSyncError && err.status === 401 ? 1 : 0);
+    // existing mirror (if any) is untouched, so exit 0. Two exceptions, both
+    // permanent conditions that a retry cannot clear and that leave the
+    // mirror silently frozen at an old rev if we report success:
+    //   401  — the token needs fixing.
+    //   REJECTED — the bundle's shape was refused (layout this CLI doesn't
+    //              know = it is older than the server, or a hostile entry).
+    const permanent =
+      err instanceof AkgSyncError &&
+      (err.status === 401 || err.code === REJECTED);
+    if (permanent && err.code === REJECTED) {
+      process.stderr.write(
+        "akg: 이 CLI가 서버 번들을 설치할 수 없습니다 — CLI가 서버보다 오래됐을 수 있습니다. 미러는 갱신되지 않았습니다.\n",
+      );
+    }
+    process.exit(permanent ? 1 : 0);
   }
 }
 
