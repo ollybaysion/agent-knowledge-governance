@@ -165,6 +165,13 @@ nav button:focus-visible {
 #meta .ok {
   color: var(--success-ink);
 }
+/* Anonymous visitors get a plain "열람 전용" chip where the id (role) goes, so
+   the reason edit controls are missing is visible without opening anything. */
+#meta .whoami.anon {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 10px;
+}
 #theme-toggle {
   font: inherit;
   font-size: 11px;
@@ -1621,6 +1628,14 @@ ol.steps > li p {
 }
 
 /* ---- 실제 앱 추가분(프로토타입엔 없던 로그인/상태 표시) ---- */
+/* #login is a <section>, and `section { display: none }` above drives screen
+   switching through an `.on` class that the login screen never gets. Without
+   this rule, showLogin() unsets [hidden] and still renders nothing — a blank
+   page. Visibility is tied to the [hidden] attribute the JS already toggles
+   rather than adding a second mechanism to keep in sync. */
+#login:not([hidden]) {
+  display: block;
+}
 #login {
   max-width: 30rem;
   margin: 48px auto;

@@ -27,9 +27,15 @@ export function registerMiscRoutes(app) {
   // X (role)" and gate the promote button client-side without guessing.
   app.get(
     "/api/me",
-    { config: { roles: ["viewer", "editor", "approver"] } },
+    { config: { roles: ["viewer", "editor", "approver"], anonOk: true } },
     async (request) => {
-      return { id: request.user.id, role: request.user.role };
+      // `anonymous: true` is what lets the dashboard boot straight into a
+      // read-only view instead of showing a login gate first.
+      return {
+        id: request.user.id,
+        role: request.user.role,
+        anonymous: request.user.anon === true,
+      };
     },
   );
 
@@ -45,7 +51,7 @@ export function registerMiscRoutes(app) {
 
   app.get(
     "/api/index/:type",
-    { config: { roles: ["viewer"] } },
+    { config: { roles: ["viewer"], anonOk: true } },
     async (request, reply) => {
       const { type } = request.params;
       const rev =
@@ -68,7 +74,7 @@ export function registerMiscRoutes(app) {
   // (the editable JSON) — akg sync only ever needs the former (design §8.1).
   app.get(
     "/api/bundle",
-    { config: { roles: ["viewer"] } },
+    { config: { roles: ["viewer"], anonOk: true } },
     async (request, reply) => {
       let headRev = null;
       try {

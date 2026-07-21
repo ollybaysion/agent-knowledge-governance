@@ -33,7 +33,10 @@
 
     <section id="login">
       <h1>지식 레지스트리 로그인</h1>
-      <p>발급받은 bearer 토큰을 입력하세요 (관리자에게 문의).</p>
+      <p>
+        열람만 할 거라면 로그인하지 않아도 됩니다. 편집·확정하려면 발급받은
+        토큰을 입력하세요 (관리자에게 문의).
+      </p>
       <input
         id="token-input"
         type="password"
@@ -42,6 +45,9 @@
       />
       <button type="button" class="btn primary" id="token-submit">
         로그인
+      </button>
+      <button type="button" class="btn ghost" id="login-cancel">
+        열람만 하기
       </button>
       <p id="login-error" class="error"></p>
     </section>

@@ -44,35 +44,39 @@ function priorityOf(user) {
 export function registerDocsRoutes(app) {
   const { storeDir, refs, queue } = app.akg;
 
-  app.get("/api/docs", { config: { roles: ["viewer"] } }, async (request) => {
-    const { type, tier, q } = request.query ?? {};
-    const types = type ? [type] : DOC_TYPES;
-    const docs = [];
-    for (const t of types) {
-      const bodySchema = refs[`${t}/v1`];
-      if (!bodySchema) continue;
-      for (const id of listIds(storeDir, t)) {
-        const doc = readJson(storeDir, `${t}/${id}.json`);
-        if (!doc) continue;
-        if (q && !id.includes(q)) continue;
-        const tiers = tierSummary(bodySchema, doc.body);
-        if (tier && !tiers[tier]) continue;
-        docs.push({
-          type: t,
-          id,
-          status: doc.status,
-          tiers,
-          keywords: doc.keywords,
-          rev: revOfPath(storeDir, `${t}/${id}.json`),
-        });
+  app.get(
+    "/api/docs",
+    { config: { roles: ["viewer"], anonOk: true } },
+    async (request) => {
+      const { type, tier, q } = request.query ?? {};
+      const types = type ? [type] : DOC_TYPES;
+      const docs = [];
+      for (const t of types) {
+        const bodySchema = refs[`${t}/v1`];
+        if (!bodySchema) continue;
+        for (const id of listIds(storeDir, t)) {
+          const doc = readJson(storeDir, `${t}/${id}.json`);
+          if (!doc) continue;
+          if (q && !id.includes(q)) continue;
+          const tiers = tierSummary(bodySchema, doc.body);
+          if (tier && !tiers[tier]) continue;
+          docs.push({
+            type: t,
+            id,
+            status: doc.status,
+            tiers,
+            keywords: doc.keywords,
+            rev: revOfPath(storeDir, `${t}/${id}.json`),
+          });
+        }
       }
-    }
-    return { docs };
-  });
+      return { docs };
+    },
+  );
 
   app.get(
     "/api/docs/:type/:id",
-    { config: { roles: ["viewer"] } },
+    { config: { roles: ["viewer"], anonOk: true } },
     async (request, reply) => {
       const { type, id } = request.params;
       const relpath = `${type}/${id}.json`;

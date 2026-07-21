@@ -113,12 +113,17 @@ async function postDoc(app, doc) {
 // code path (status/headers.get/arrayBuffer) runs unmodified against the
 // real server, no network involved.
 function fetchImplFromApp(app, token) {
-  return async (url) => {
+  return async (url, init = {}) => {
     const u = new URL(url);
     const res = await app.inject({
       method: "GET",
       url: u.pathname + u.search,
-      headers: { authorization: `Bearer ${token}` },
+      // With a token the harness supplies the header. With null it forwards
+      // whatever syncMirror actually sent — which is how the anonymous path
+      // (no Authorization header at all) gets exercised for real.
+      headers: token
+        ? { authorization: `Bearer ${token}` }
+        : (init.headers ?? {}),
     });
     return {
       status: res.statusCode,
@@ -144,6 +149,27 @@ function siblingEntries(mirrorDir) {
     (n) => n !== basename(mirrorDir),
   );
 }
+
+test("0. a tokenless sync works against a server with anonymous read on", async () => {
+  const { app, cleanup } = await setupServer();
+  await postDoc(app, dbSchemaDoc("T_SENSOR"));
+
+  const mirrorDir = tmpMirrorDir();
+  const result = await syncMirror({
+    serverUrl: "http://test.local",
+    token: null, // no ~/.claude/akg/token, no AKG_TOKEN
+    mirrorDir,
+    fetchImpl: fetchImplFromApp(app, null), // forwards syncMirror's own headers
+  });
+
+  assert.equal(result.changed, true);
+  assert.ok(
+    existsSync(join(mirrorDir, "db-schema", "index.json")),
+    "an anonymous pull must produce the same mirror a viewer token would",
+  );
+  rmSync(mirrorDir, { recursive: true, force: true });
+  await cleanup();
+});
 
 test("1. first sync (no local rev) produces a mirror matching §5.1's provider contract", async () => {
   const { app, cleanup } = await setupServer();
