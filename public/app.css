@@ -299,6 +299,14 @@ main {
   background: rgba(198, 69, 69, 0.14);
   color: var(--error-ink);
 }
+/* 비활성 = 결함이 아니라 아직 안 쓰는 상태 — 경고색이 아니라 muted 로 물러나 있게 */
+.mini-off {
+  background: var(--surface-card);
+  color: var(--muted);
+}
+.doc-item.off .nm {
+  color: var(--muted);
+}
 @media (prefers-reduced-motion: reduce) {
   .chev {
     transition: none;
@@ -786,6 +794,9 @@ svg.sd {
 .stat.dep b {
   color: var(--error-ink);
 }
+.stat.off b {
+  color: var(--muted);
+}
 
 /* ---- 타입 필터 칩 ---- */
 .typechips {
@@ -895,6 +906,26 @@ svg.sd {
 }
 .chip.rev {
   color: var(--teal-ink);
+}
+.chip.st-inactive {
+  color: var(--muted);
+}
+.chip.st-archived {
+  color: var(--error-ink);
+}
+/* 문서를 열었을 때 왜 이게 주입되지 않는지 그 자리에서 말해주는 띠 */
+.offbar {
+  margin: 8px 16px 0;
+  padding: 8px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.offbar b {
+  color: var(--body-strong);
 }
 .docwrap {
   padding: 10px 16px 0;
