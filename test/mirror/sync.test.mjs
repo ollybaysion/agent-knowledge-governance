@@ -74,10 +74,25 @@ function domainSkillDoc(name) {
     body: {
       name,
       argumentHint: "{id}",
-      description: "테스트 스킬.",
-      steps: [{ title: "1단계", sql: "SELECT 1 FROM dual" }],
-      valueRules: [{ target: "X", rule: "그대로", basis: "scaffold" }],
-      output: { lead: "결과", template: "{X}" },
+      scope: { 단위: "센서", 카디널리티: "단일", 의도: "상태" },
+      focus: "현재 상태",
+      intro: "테스트 스킬.",
+      inputs: [{ name: "id", required: true, description: "조회 키" }],
+      dependencies: [{ mcp: "agent-db-plugin" }],
+      steps: [
+        { title: "1단계", produces: "현재 상태", sql: "SELECT 1 FROM dual" },
+      ],
+      output: {
+        avoid: [
+          "없는 사유를 추측한다 — 사유 컬럼은 데이터에 없다",
+          "측정값을 지어낸다 — 이 스킬 범위 밖이다",
+          "코드를 구체화한다 — 라벨 이상은 모른다",
+        ],
+        examples: [
+          { ask: "전체 설명", answer: "넓은 답이다." },
+          { ask: "좁은 질문", answer: "좁은 답이다." },
+        ],
+      },
     },
   };
 }

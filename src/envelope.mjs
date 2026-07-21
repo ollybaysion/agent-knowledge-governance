@@ -105,6 +105,21 @@ const SEMANTIC_CHECKS = {
         `$.id: expected "${doc.body.name}" (== body.name), got "${doc.id}"`,
       );
     }
+    // The answer's content floor (the 반드시 포함 line) is composed from
+    // steps[].produces, so a spec where no step declares one renders that
+    // line empty and the free-form output has nothing holding it to the data
+    // it fetched. JSON Schema `contains` would say this, but the validator
+    // here doesn't implement it.
+    if (
+      Array.isArray(doc.body.steps) &&
+      doc.body.steps.length > 0 &&
+      !doc.body.steps.some((s) => s?.produces)
+    ) {
+      fail(
+        errors,
+        "$.body.steps: no step declares produces — 답의 완결성 바닥(반드시 포함)이 비게 됩니다",
+      );
+    }
   },
 };
 

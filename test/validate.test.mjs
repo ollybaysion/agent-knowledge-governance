@@ -146,76 +146,127 @@ test("msg-format: output.exampleLabel requires example and vice versa", () => {
   assert.ok(validate(schema, base, refs).length === 0);
 });
 
-test("domain-skill: exampleLabel without example is rejected (dependentRequired)", () => {
-  const schema = refs["domain-skill/v1"];
-  const body = {
-    name: "x",
-    argumentHint: "{id}",
-    description: "설명.",
-    steps: [{ title: "s1", sql: "SELECT 1" }],
-    valueRules: [{ target: "A", rule: "B", basis: "scaffold" }],
-    output: { lead: "l", template: "t", exampleLabel: "예시" },
-  };
-  const errors = validate(schema, body, refs);
-  assert.ok(errors.some((e) => e.includes("dependentRequired")));
+const V2_BODY = () => ({
+  name: "x",
+  argumentHint: "{id}",
+  scope: { 단위: "센서", 카디널리티: "단일", 의도: "상태" },
+  focus: "현재 상태",
+  intro: "도메인 주의사항.",
+  inputs: [{ name: "id", required: true, description: "조회 키" }],
+  dependencies: [{ mcp: "agent-db-plugin" }],
+  steps: [{ title: "s1", produces: "현재 상태", sql: "SELECT 1" }],
+  output: {
+    avoid: [
+      "없는 사유를 추측한다 — 사유 컬럼은 데이터에 없다",
+      "측정값을 지어낸다 — 이 스킬 범위 밖이다",
+      "코드를 구체화한다 — 라벨 이상은 모른다",
+    ],
+    examples: [
+      { ask: "전체 설명", answer: "넓은 답이다." },
+      { ask: "좁은 질문", answer: "좁은 답이다." },
+    ],
+  },
 });
 
-test("domain-skill: h1Title key is rejected (akg dropped it, json-spec §4.4)", () => {
-  const schema = refs["domain-skill/v1"];
-  const body = {
-    name: "x",
-    argumentHint: "{id}",
-    description: "설명.",
-    h1Title: "안 됨",
-    steps: [{ title: "s1", sql: "SELECT 1" }],
-    valueRules: [{ target: "A", rule: "B", basis: "scaffold" }],
-    output: { lead: "l", template: "t" },
-  };
-  const errors = validate(schema, body, refs);
-  assert.ok(errors.some((e) => e.includes("h1Title")));
+test("domain-skill: the v2 body shape is valid", () => {
+  assert.deepEqual(validate(refs["domain-skill/v1"], V2_BODY(), refs), []);
 });
 
-test("domain-skill: description firstLine must end with '.'", () => {
+// spec v2 removed these three; an old body must fail loudly rather than lose
+// its rules to additionalProperties.
+test("domain-skill: removed v1 keys are rejected (description, valueRules, h1Title)", () => {
   const schema = refs["domain-skill/v1"];
-  const body = {
-    name: "x",
-    argumentHint: "{id}",
-    description: "마침표 없음\n다음 줄.",
-    steps: [{ title: "s1", sql: "SELECT 1" }],
-    valueRules: [{ target: "A", rule: "B", basis: "scaffold" }],
-    output: { lead: "l", template: "t" },
-  };
-  const errors = validate(schema, body, refs);
-  assert.ok(errors.some((e) => e.includes("$.description")));
+  for (const [key, value] of [
+    ["description", "설명."],
+    ["valueRules", [{ target: "A", rule: "B", basis: "scaffold" }]],
+    ["h1Title", "안 됨"],
+    ["output.template", "t"],
+  ]) {
+    const body = V2_BODY();
+    if (key === "output.template") body.output.template = value;
+    else body[key] = value;
+    const errors = validate(schema, body, refs);
+    assert.ok(
+      errors.some((e) => e.includes(key.split(".").pop())),
+      `${key} 는 거부돼야 함: ${JSON.stringify(errors)}`,
+    );
+  }
 });
 
 test("domain-skill: name must be kebab-case", () => {
-  const schema = refs["domain-skill/v1"];
-  const body = {
-    name: "Not_Kebab",
-    argumentHint: "{id}",
-    description: "설명.",
-    steps: [{ title: "s1", sql: "SELECT 1" }],
-    valueRules: [{ target: "A", rule: "B", basis: "scaffold" }],
-    output: { lead: "l", template: "t" },
-  };
-  const errors = validate(schema, body, refs);
+  const body = { ...V2_BODY(), name: "Not_Kebab" };
+  const errors = validate(refs["domain-skill/v1"], body, refs);
   assert.ok(errors.some((e) => e.includes("$.name")));
 });
 
-test("domain-skill: steps and valueRules require at least one item", () => {
-  const schema = refs["domain-skill/v1"];
-  const body = {
-    name: "x",
-    argumentHint: "{id}",
-    description: "설명.",
-    steps: [],
-    valueRules: [],
-    output: { lead: "l", template: "t" },
+test("domain-skill: scope axes are closed enums", () => {
+  const body = V2_BODY();
+  body.scope.의도 = "이상 분석"; // v2 격자 밖 — 확장은 akg 발행
+  const errors = validate(refs["domain-skill/v1"], body, refs);
+  assert.ok(errors.some((e) => e.includes("$.scope.의도")));
+});
+
+test("domain-skill: steps require at least one item and one produces", () => {
+  const empty = { ...V2_BODY(), steps: [] };
+  assert.ok(
+    validate(refs["domain-skill/v1"], empty, refs).some((e) =>
+      e.includes("$.steps"),
+    ),
+  );
+
+  // produces 가 하나도 없으면 답의 완결성 바닥(반드시 포함)이 비게 된다. JSON
+  // Schema 의 contains 는 이 검증기가 구현하지 않아 시맨틱 체크(문서 층)가 본다.
+  const noProduces = {
+    schema: "domain-skill/v1",
+    id: "x",
+    keywords: [{ kw: "x", inject: "full" }],
+    status: "active",
+    body: V2_BODY(),
   };
-  const errors = validate(schema, body, refs);
-  assert.ok(errors.some((e) => e.includes("$.steps")));
-  assert.ok(errors.some((e) => e.includes("$.valueRules")));
+  delete noProduces.body.steps[0].produces;
+  assert.ok(
+    validateDocument(noProduces, refs).some((e) =>
+      e.includes("no step declares produces"),
+    ),
+  );
+});
+
+// The old gate was a count; a restatement of the universal discipline passed
+// it with zero domain content.
+test("domain-skill: avoid enforces the shape contract, not just the count", () => {
+  const schema = refs["domain-skill/v1"];
+
+  const tooFew = V2_BODY();
+  tooFew.output.avoid = tooFew.output.avoid.slice(0, 2);
+  assert.ok(
+    validate(schema, tooFew, refs).some((e) => e.includes("$.output.avoid")),
+  );
+
+  const noSeparator = V2_BODY();
+  noSeparator.output.avoid[0] = "부정확한 설명을 한다";
+  assert.ok(
+    validate(schema, noSeparator, refs).some((e) =>
+      e.includes("$.output.avoid[0]"),
+    ),
+  );
+});
+
+test("domain-skill: examples require a contrasting pair, ask stays inline", () => {
+  const schema = refs["domain-skill/v1"];
+
+  const single = V2_BODY();
+  single.output.examples = [single.output.examples[0]];
+  assert.ok(
+    validate(schema, single, refs).some((e) => e.includes("$.output.examples")),
+  );
+
+  const multiline = V2_BODY();
+  multiline.output.examples[0].ask = "전체를\n설명해줘";
+  assert.ok(
+    validate(schema, multiline, refs).some((e) =>
+      e.includes("$.output.examples[0].ask"),
+    ),
+  );
 });
 
 test("whitespace-only strings are rejected by the \\S pattern", () => {
