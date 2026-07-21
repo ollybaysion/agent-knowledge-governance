@@ -5,7 +5,7 @@
   "description": "agent-knowledge-governance-json-spec.md §4.1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["owner", "table", "catalog", "purpose", "columnDescs"],
+  "required": ["table", "catalog", "purpose", "columnDescs"],
   "properties": {
     "owner": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
     "table": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
