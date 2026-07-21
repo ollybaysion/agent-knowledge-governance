@@ -86,11 +86,22 @@ async function api(path, opts = {}) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(body);
   }
-  const res = await fetch(path, {
-    method: opts.method || "GET",
-    headers,
-    body,
-  });
+  // fetch throws rather than resolving for two reachable cases: the network is
+  // down, and the token carries a character that cannot go in a header (a
+  // mis-paste — Korean text, a stray newline). Both used to surface as an
+  // unhandled rejection, which meant the UI showed nothing at all and left
+  // whatever message was on screen before. Status 0 = "the request never went
+  // out", distinct from any status a server can return.
+  let res;
+  try {
+    res = await fetch(path, {
+      method: opts.method || "GET",
+      headers,
+      body,
+    });
+  } catch {
+    return { ok: false, status: 0, etag: null, data: null };
+  }
   let data = null;
   try {
     data = await res.json();
@@ -206,6 +217,8 @@ async function loadMe() {
   return { ok: true };
 }
 function loginFailureMessage(status) {
+  if (status === 0)
+    return "요청을 보내지 못했습니다 — 서버에 연결할 수 없거나, 토큰에 쓸 수 없는 문자가 섞여 있습니다.";
   if (status === 401)
     return "토큰이 유효하지 않습니다 — 오타이거나, 만료됐거나, 회수된 토큰입니다.";
   if (status === 429)

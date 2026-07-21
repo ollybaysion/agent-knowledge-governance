@@ -1628,6 +1628,14 @@ ol.steps > li p {
 }
 
 /* ---- 실제 앱 추가분(프로토타입엔 없던 로그인/상태 표시) ---- */
+/* #login is a <section>, and `section { display: none }` above drives screen
+   switching through an `.on` class that the login screen never gets. Without
+   this rule, showLogin() unsets [hidden] and still renders nothing — a blank
+   page. Visibility is tied to the [hidden] attribute the JS already toggles
+   rather than adding a second mechanism to keep in sync. */
+#login:not([hidden]) {
+  display: block;
+}
 #login {
   max-width: 30rem;
   margin: 48px auto;
