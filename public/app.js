@@ -268,8 +268,11 @@ async function renderDocTree() {
   let pendingTotal = 0;
   for (const type of DOC_TYPES) {
     const res = await api(`/api/docs?type=${type}`);
+    // Inactive documents belong in the tree: they are readable by design and
+    // invisible ones cannot be reviewed, let alone activated. Archived stays
+    // hidden — that one is a decision to stop carrying the document.
     const docs = (res.ok ? res.data.docs : []).filter(
-      (d) => d.status === "active",
+      (d) => d.status !== "archived",
     );
     const items = el(
       "div",
@@ -280,7 +283,7 @@ async function renderDocTree() {
           "button",
           {
             type: "button",
-            class: "doc-item",
+            class: d.status === "inactive" ? "doc-item off" : "doc-item",
             "data-type": type,
             "data-id": d.id,
             onclick: () =>
@@ -289,6 +292,9 @@ async function renderDocTree() {
           [
             el("span", { class: "nm", text: d.id }),
             el("span", { class: "mini" }, [
+              d.status === "inactive"
+                ? el("span", { class: "mini-off", text: "비활성" })
+                : null,
               d.tiers.inferred
                 ? el("span", {
                     class: "mini-inf",
@@ -345,14 +351,19 @@ async function renderOverview() {
     const res = await api(`/api/docs?type=${type}`);
     if (!res.ok) continue;
     for (const d of res.data.docs) {
-      if (d.status !== "active") continue;
+      if (d.status === "archived") continue;
       all.push({ ...d, type });
       for (const t of Object.keys(totals)) totals[t] += d.tiers[t] || 0;
     }
   }
 
+  // Counted separately rather than folded into 문서: after a bulk import most
+  // of the corpus can be inactive, and a single total would read as a corpus
+  // far larger than what any session actually sees.
+  const inactive = all.filter((d) => d.status === "inactive").length;
   $("ov-stats").replaceChildren(
-    stat(String(all.length), "문서"),
+    stat(String(all.length - inactive), "활성 문서"),
+    stat(String(inactive), "비활성 (주입 안 됨)", inactive ? "off" : ""),
     stat(String(totals.inferred), "검토 대기 (추정 슬롯)", "warn"),
     stat(String(totals.confirmed), "confirmed 슬롯"),
     stat(String(totals.deprecated), "deprecated (고아)", "dep"),
@@ -402,7 +413,7 @@ async function renderOverview() {
         ]),
         el("td", {}, keywordChips(d.keywords || [])),
         el("td", {}, tierMeter(d.tiers)),
-        el("td", { text: d.status }),
+        el("td", {}, statusBadge(d.status)),
         el("td", {}, el("span", { class: "chip rev", text: shortRev(d.rev) })),
       ],
     ),
@@ -441,6 +452,26 @@ function stat(value, label, klass) {
   ]);
 }
 
+// The status in the reader's language: what it means for the document, not the
+// enum value. "활성" alone says nothing about why anyone should care.
+const STATUS_LABEL = {
+  active: "활성",
+  inactive: "비활성",
+  archived: "폐기",
+};
+function statusBadge(status) {
+  return el("span", {
+    class: `chip st-${status}`,
+    text: STATUS_LABEL[status] ?? status,
+    title:
+      status === "inactive"
+        ? "조회는 되지만 미러로 나가지 않아 세션에 주입되지 않습니다."
+        : status === "active"
+          ? "미러로 배포되어 세션 프롬프트에 주입됩니다."
+          : "더 이상 싣지 않는 문서입니다.",
+  });
+}
+
 // ================= 문서 (단일 문서 뷰) =================
 // 편집은 슬롯 단위 클릭-투-편집(도착 상태 텍스트를 바로 누르면 그 슬롯만
 // 편집 필드로 바뀜) — 문서 전체를 편집 모드로 앞서 전환하는 버튼은 없다.
@@ -472,6 +503,50 @@ async function renderDocScreen(type, id) {
     await renderDocTree();
     renderDocScreen(type, id);
   }
+  // #7 — activate/deactivate. Approver only, If-Match like every other write.
+  async function statusAction(target) {
+    const r = await api(
+      `/api/docs/${type}/${encodeURIComponent(id)}/${
+        target === "active" ? "activate" : "deactivate"
+      }`,
+      { method: "POST", headers: { "if-match": rev } },
+    );
+    if (!r.ok) {
+      toast(
+        r.status === 409
+          ? "충돌 — 다른 사용자가 이 문서를 먼저 고쳤습니다. 새로고침 후 다시 시도하세요."
+          : `상태 변경 실패 (${r.status})`,
+        "error",
+      );
+      return;
+    }
+    toast(
+      target === "active"
+        ? "활성 — 다음 동기화부터 주입됩니다."
+        : "비활성 — 미러에서 빠집니다.",
+    );
+    reload();
+  }
+
+  // Labelled by the state it arrives at, like 추정으로 반영/확정 — the button
+  // says where the document lands, not what the click does.
+  function statusSwitch() {
+    if (!canApprove || doc.status === "archived") return null;
+    const toActive = doc.status !== "active";
+    return el(
+      "button",
+      {
+        type: "button",
+        class: `act ${toActive ? "a-promote" : "a-reject"}`,
+        title: toActive
+          ? "미러로 배포해 세션에 주입되게 합니다."
+          : "미러에서 빼 주입을 멈춥니다. 문서와 이력은 남습니다.",
+        onclick: () => statusAction(toActive ? "active" : "inactive"),
+      },
+      toActive ? "활성" : "비활성",
+    );
+  }
+
   async function slotAction(verb, address, endpoint) {
     const r = await api(
       `/api/docs/${type}/${encodeURIComponent(id)}/${endpoint}`,
@@ -769,11 +844,23 @@ async function renderDocScreen(type, id) {
       el("div", { class: "dochead" }, [
         el("span", { class: "id", text: id }),
         el("span", { class: "chip", text: type }),
-        el("span", { class: "chip", text: doc.status }),
+        statusBadge(doc.status),
         el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
         el("span", { class: "brk" }),
         ...keywordChips(doc.keywords || []),
+        statusSwitch(),
       ]),
+      // Say it on the document itself. Someone reading an inactive doc is
+      // deciding whether to turn it on; the badge alone does not tell them
+      // what turning it on costs.
+      doc.status === "inactive"
+        ? el("div", { class: "offbar" }, [
+            el("b", { text: "비활성 문서입니다. " }),
+            el("span", {
+              text: "여기서는 그대로 읽을 수 있지만 미러로 나가지 않아 세션에 주입되지 않습니다. 주입 예산은 한 턴에 문서 2개뿐이므로, 상시 주입할 가치가 있을 때만 활성으로 바꾸세요.",
+            }),
+          ])
+        : null,
       notice,
       el(
         "div",
