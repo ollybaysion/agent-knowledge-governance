@@ -557,10 +557,15 @@ async function renderDocScreen(type, id) {
   lastDoc = { type, id };
   highlightTree();
   editingAddr = null;
-  const { json: doc, rev, slots, md } = res.data;
+  // doc/rev are reassigned in place after a clean save so the screen can
+  // repaint optimistically instead of re-fetching the whole document.
+  let { json: doc, rev } = res.data;
+  const { slots, md } = res.data;
   const canApprove = currentUser.role === "approver";
   const canEdit = canApprove || currentUser.role === "editor";
-  const inputs = {}; // address -> {textArea, evidenceInput}
+  let editBuf = null; // {text, evidence[]} — working copy of the open slot
+  let reconcileFor = null; // {address, doc, rev, overlap} — 409 화해 카드 상태
+  const live = {}; // live refs of the open editor (badge/caption/save/diff)
 
   const notice = el("div", { id: "doc-notice" });
 
@@ -658,8 +663,7 @@ async function renderDocScreen(type, id) {
           type: "button",
           class: "btn ghost sm",
           onclick: () => {
-            editingAddr = slot.address;
-            renderInner();
+            startEdit(slot.address);
           },
           text: "복원",
         }),
@@ -683,12 +687,41 @@ async function renderDocScreen(type, id) {
     confirmed: "t-conf",
     deprecated: "t-conf",
   };
+  function slotDirty() {
+    if (!editingAddr || !editBuf) return false;
+    const s = slotByAddr(editingAddr);
+    if (!s) return false;
+    return (
+      editBuf.text.trim() !== (s.text || "").trim() ||
+      editBuf.evidence.join(" ") !== (s.evidence || []).join(" ")
+    );
+  }
   function startEdit(address) {
+    // Dirty guard: an unsaved edit is never dropped because a neighbouring
+    // slot was clicked — flash the open editor and stay put instead.
+    if (editingAddr && editingAddr !== address && slotDirty()) {
+      const open = document.querySelector(".slot-edit");
+      if (open) {
+        open.classList.remove("dirtyflash");
+        void open.offsetWidth;
+        open.classList.add("dirtyflash");
+      }
+      toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
+      return;
+    }
+    const slot = slotByAddr(address);
     editingAddr = address;
+    reconcileFor = null;
+    editBuf = {
+      text: (slot && slot.text) || "",
+      evidence: ((slot && slot.evidence) || []).slice(),
+    };
     renderInner();
   }
   function cancelEdit() {
     editingAddr = null;
+    editBuf = null;
+    reconcileFor = null;
     renderInner();
   }
   function slotReadText(slot) {
@@ -708,44 +741,399 @@ async function renderDocScreen(type, id) {
       ...common,
     });
   }
-  function slotEditFields(slot) {
-    const textArea = el("textarea", { text: slot.text ?? "" });
-    const evidenceInput = el("input", {
-      type: "text",
-      value: (slot.evidence || []).join("; "),
-      placeholder: "근거 (file:line; 세미콜론 구분)",
-    });
-    inputs[slot.address] = { textArea, evidenceInput };
-    return [textArea, evidenceInput];
+  // 단어 단위 LCS diff — 저장 전 미리보기(④)에서 무엇이 바뀌는지 보여준다.
+  function wordDiff(oldStr, newStr) {
+    const a = oldStr.trim() ? oldStr.trim().split(/\s+/) : [];
+    const b = newStr.trim() ? newStr.trim().split(/\s+/) : [];
+    const n = a.length;
+    const m = b.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] =
+          a[i] === b[j]
+            ? dp[i + 1][j + 1] + 1
+            : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out = [];
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) {
+        out.push({ t: "eq", w: a[i] });
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        out.push({ t: "del", w: a[i] });
+        i++;
+      } else {
+        out.push({ t: "add", w: b[j] });
+        j++;
+      }
+    }
+    while (i < n) out.push({ t: "del", w: a[i++] });
+    while (j < m) out.push({ t: "add", w: b[j++] });
+    return out;
   }
-  // Save/Cancel pair shown inline next to whichever slot is being edited.
-  function slotEditActs(slot) {
-    return el("span", { class: "acts" }, [
-      el("button", {
-        type: "button",
-        class: "btn primary sm",
-        onclick: () => saveEdit(slot.address),
-        text: "저장",
-      }),
-      el("button", {
-        type: "button",
-        class: "btn ghost sm",
-        onclick: cancelEdit,
-        text: "취소",
-      }),
+
+  // 저장하면 티어가 어디로 가는지 — 서버 applyEdit 규칙의 클라이언트 미러.
+  function nextTier(slot, text, textChanged) {
+    if (!text.trim()) return "scaffold";
+    if (!textChanged) return slot.tier;
+    if (slot.tier === "confirmed" || slot.tier === "scaffold") return "inferred";
+    return slot.tier;
+  }
+
+  function renderChips() {
+    const box = live.chipBox;
+    if (!box) return;
+    for (const c of box.querySelectorAll(".evchip")) c.remove();
+    const slot = slotByAddr(editingAddr);
+    const known = (slot && slot.evidence) || [];
+    editBuf.evidence.forEach((ev, idx) => {
+      const chip = el(
+        "span",
+        { class: `evchip${known.includes(ev) ? "" : " new"}` },
+        [
+          ev,
+          el("button", {
+            type: "button",
+            "aria-label": `근거 제거: ${ev}`,
+            text: "✕",
+            onclick: () => {
+              editBuf.evidence.splice(idx, 1);
+              renderChips();
+              updateLive();
+            },
+          }),
+        ],
+      );
+      box.insertBefore(chip, live.chipInput);
+    });
+  }
+  function commitChip() {
+    const v = live.chipInput.value
+      .trim()
+      .replace(/[;,]+$/, "")
+      .trim();
+    if (v && !editBuf.evidence.includes(v)) editBuf.evidence.push(v);
+    live.chipInput.value = "";
+    renderChips();
+    updateLive();
+  }
+
+  // ① 도장 모핑 · ② 저장 가드 · ④ diff. 타이핑마다 전체를 다시 그리면 캐럿을
+  // 잃으므로, 열린 편집기 안의 노드만 제자리에서 갱신한다.
+  function updateLive() {
+    const slot = slotByAddr(editingAddr);
+    if (!slot || !live.tierLive) return;
+    const textChanged = editBuf.text.trim() !== (slot.text || "").trim();
+    const evChanged =
+      editBuf.evidence.join(" ") !== (slot.evidence || []).join(" ");
+    const changed = textChanged || evChanged;
+    const to = nextTier(slot, editBuf.text, textChanged);
+
+    live.tierLive.replaceChildren();
+    if (to !== slot.tier) {
+      const demote = slot.tier === "confirmed";
+      live.tierLive.append(
+        el("span", { class: `from ${demote ? "demote" : "keep"}` }, [
+          tierBadge(slot.tier),
+        ]),
+        el("span", { class: "arrow", text: "→" }),
+        tierBadge(to),
+      );
+      const toScaffold = to === "scaffold";
+      live.sealCap.hidden = false;
+      live.sealCap.className =
+        demote || toScaffold ? "seal-cap" : "seal-cap promote";
+      live.sealCap.textContent = toScaffold
+        ? "텍스트를 비우면 이 슬롯은 빈칸으로 되돌아갑니다."
+        : demote
+          ? "저장하면 확정이 풀립니다 — 다시 확정하려면 검토가 필요합니다."
+          : "빈칸을 채우면 추정으로 반영됩니다.";
+    } else {
+      live.tierLive.appendChild(tierBadge(slot.tier));
+      live.sealCap.hidden = true;
+      live.sealCap.textContent = "";
+    }
+
+    // 서버가 400으로 막는 "바뀐 슬롯엔 근거 필수"를 저장 전으로 당긴다.
+    if (!changed) {
+      live.save.disabled = true;
+      live.save.title = "변경 없음";
+    } else if (textChanged && editBuf.evidence.length === 0) {
+      live.save.disabled = true;
+      live.save.title =
+        "근거를 1개 이상 추가하세요 — 근거가 없으면 다음 사람이 확정할 수 없습니다.";
+    } else {
+      live.save.disabled = false;
+      live.save.title = "";
+    }
+
+    const body = live.diffBody;
+    body.replaceChildren();
+    if (!changed) {
+      body.appendChild(el("span", { class: "dim", text: "아직 변경 없음" }));
+      return;
+    }
+    if (textChanged) {
+      const wd = el("span", { class: "wd" });
+      for (const p of wordDiff(slot.text || "", editBuf.text)) {
+        wd.appendChild(
+          p.t === "eq"
+            ? document.createTextNode(`${p.w} `)
+            : el("span", { class: p.t, text: `${p.w} ` }),
+        );
+      }
+      body.appendChild(
+        el("div", { class: "diffline" }, [
+          el("span", { class: "k", text: "텍스트" }),
+          wd,
+        ]),
+      );
+    }
+    if (to !== slot.tier) {
+      body.appendChild(
+        el("div", { class: "diffline" }, [
+          el("span", { class: "k", text: "티어" }),
+          el("span", {}, [
+            tierBadge(slot.tier),
+            document.createTextNode(" → "),
+            tierBadge(to),
+          ]),
+        ]),
+      );
+    }
+    if (evChanged) {
+      const evd = el("span", { class: "evd" });
+      for (const e of slot.evidence || [])
+        if (!editBuf.evidence.includes(e))
+          evd.appendChild(el("span", { class: "del", text: e }));
+      for (const e of editBuf.evidence)
+        if (!(slot.evidence || []).includes(e))
+          evd.appendChild(el("span", { class: "add", text: `+${e}` }));
+      if (evd.childNodes.length)
+        body.appendChild(
+          el("div", { class: "diffline" }, [
+            el("span", { class: "k", text: "근거" }),
+            evd,
+          ]),
+        );
+    }
+  }
+
+  // 한 슬롯의 인라인 편집기 — 읽기 텍스트가 있던 자리에서 그대로 펼쳐진다.
+  function editBlock(slot) {
+    // 방어: startEdit 을 거치지 않고 열리는 경로(복원 버튼 등)에서도 버퍼를 만든다.
+    if (!editBuf)
+      editBuf = {
+        text: slot.text || "",
+        evidence: (slot.evidence || []).slice(),
+      };
+    const tierLive = el("span", { class: "tier-live" });
+    const textArea = el("textarea", { spellcheck: "false" });
+    textArea.value = editBuf.text;
+    const chipInput = el("input", {
+      type: "text",
+      placeholder: "근거 file:line — 입력 후 ; 또는 Enter",
+    });
+    const chipBox = el("div", { class: "chipfield" }, chipInput);
+    const sealCap = el("div", { class: "seal-cap", hidden: true });
+    const save = el("button", {
+      type: "button",
+      class: "btn primary sm",
+      text: "저장",
+      onclick: () => saveEdit(slot.address),
+    });
+    const diffBody = el("div", { class: "diffbody" });
+
+    live.tierLive = tierLive;
+    live.sealCap = sealCap;
+    live.save = save;
+    live.diffBody = diffBody;
+    live.chipBox = chipBox;
+    live.chipInput = chipInput;
+    live.textArea = textArea;
+
+    const grow = () => {
+      textArea.style.height = "auto";
+      textArea.style.height = `${textArea.scrollHeight}px`;
+    };
+    textArea.addEventListener("input", () => {
+      editBuf.text = textArea.value;
+      grow();
+      updateLive();
+    });
+    chipInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === ";" || e.key === ",") {
+        e.preventDefault();
+        commitChip();
+      } else if (
+        e.key === "Backspace" &&
+        !chipInput.value &&
+        editBuf.evidence.length
+      ) {
+        editBuf.evidence.pop();
+        renderChips();
+        updateLive();
+      }
+    });
+    chipInput.addEventListener("blur", () => {
+      if (chipInput.value.trim()) commitChip();
+    });
+    chipBox.addEventListener("click", (e) => {
+      if (e.target === chipBox) chipInput.focus();
+    });
+
+    const block = el("div", { class: "slot-edit" }, [
+      el("div", { class: "toprow" }, tierLive),
+      textArea,
+      el("div", { class: "fieldlab", text: "근거 (evidence)" }),
+      chipBox,
+      sealCap,
+      el("div", { class: "editacts" }, [
+        save,
+        el("button", {
+          type: "button",
+          class: "btn ghost sm",
+          text: "취소",
+          onclick: cancelEdit,
+        }),
+        el("span", { class: "kbd" }, [
+          el("b", { text: "esc" }),
+          " 취소 · ",
+          el("b", { text: "⌘/Ctrl+↵" }),
+          " 저장",
+        ]),
+      ]),
+      el("details", { class: "diffbox" }, [
+        el("summary", { text: "무엇이 바뀌나" }),
+        diffBody,
+      ]),
+    ]);
+    block.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelEdit();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (!save.disabled) saveEdit(slot.address);
+      }
+    });
+    // DOM에 붙은 뒤 실행 — 높이 맞춤·칩·프리뷰 초기화 + 포커스
+    setTimeout(() => {
+      grow();
+      renderChips();
+      updateLive();
+      textArea.focus();
+      textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+    }, 0);
+    return block;
+  }
+
+  // ② 충돌 화해 카드 — 서버가 409에 실어 보낸 current/overlap을 그대로 쓴다.
+  // 같은 칸에 대한 서로 다른 두 해석은 자동 병합하지 않는다: 사람이 고른다.
+  function reconcileCard(address) {
+    const theirs = getSlot(reconcileFor.doc.body, address) || {};
+    const mineText = (editBuf && editBuf.text) || "";
+    const mineEv = editBuf ? editBuf.evidence.slice() : [];
+    const theirEv = theirs.evidence || [];
+    const union = theirEv.concat(mineEv.filter((e) => !theirEv.includes(e)));
+    const mergeTA = el("textarea", { spellcheck: "false" });
+    mergeTA.value = theirs.text || "";
+    const resolveWith = (text, ev) =>
+      commitSlot(address, text, ev, reconcileFor.doc.body, reconcileFor.rev);
+
+    return el("div", { class: "reconcile" }, [
+      el("div", { class: "rhead" }, [
+        "충돌 — 같은 슬롯을 두 사람이 동시에 고쳤습니다 ",
+        el("span", { class: "addr", text: address }),
+      ]),
+      el("div", { class: "panes" }, [
+        el("div", { class: "pane mine" }, [
+          el("div", { class: "plab" }, [
+            el("span", { text: "내 편집" }),
+            el("span", { class: "who", text: currentUser.id }),
+          ]),
+          el("div", { class: "ptext", text: mineText }),
+          el("div", { class: "pev", text: mineEv.join(" · ") || "근거 없음" }),
+          el("button", {
+            type: "button",
+            class: "btn sm",
+            text: "내 것으로",
+            onclick: () => resolveWith(mineText, mineEv),
+          }),
+        ]),
+        el("div", { class: "pane" }, [
+          el("div", { class: "plab" }, [
+            el("span", { text: "현재 저장본" }),
+            el("span", { class: "who", text: theirs.by || "" }),
+          ]),
+          el("div", { class: "ptext", text: theirs.text || "" }),
+          el("div", { class: "pev", text: theirEv.join(" · ") || "근거 없음" }),
+          el("button", {
+            type: "button",
+            class: "btn sm",
+            text: "상대 것으로",
+            onclick: () => {
+              // 내 편집을 버리고 서버 상태를 받는다 — 다시 읽어오는 쪽이 정확하다.
+              editingAddr = null;
+              editBuf = null;
+              reconcileFor = null;
+              reload();
+            },
+          }),
+        ]),
+      ]),
+      el("details", { class: "merge" }, [
+        el("summary", { text: "직접 병합 — 두 해석을 사람이 읽고 하나로" }),
+        mergeTA,
+        el("div", {
+          class: "pev",
+          text: `근거(합집합): ${union.join(" · ") || "없음"}`,
+        }),
+        el("button", {
+          type: "button",
+          class: "btn primary sm",
+          text: "이걸로 저장",
+          onclick: () => {
+            if (!mergeTA.value.trim()) {
+              toast("텍스트가 비었습니다.");
+              return;
+            }
+            resolveWith(mergeTA.value, union);
+          },
+        }),
+      ]),
+      el(
+        "div",
+        { class: "rcancel" },
+        el("button", {
+          type: "button",
+          class: "btn ghost sm",
+          text: "취소(내 편집 유지)",
+          onclick: () => {
+            reconcileFor = null;
+            renderInner();
+          },
+        }),
+      ),
     ]);
   }
 
   // .ps row (purpose / query note)
   function psRow(slot) {
-    if (editingAddr === slot.address) {
-      return el("div", { class: "ps editing" }, [
-        tierBadge(slot.tier),
-        el("div", { class: "txt2" }, slotEditFields(slot)),
-        slotEditActs(slot),
+    if (reconcileFor && reconcileFor.address === slot.address)
+      return el("div", { class: "ps", "data-addr": slot.address }, [
+        reconcileCard(slot.address),
       ]);
-    }
-    return el("div", { class: "ps" }, [
+    if (editingAddr === slot.address)
+      return el("div", { class: "ps editing", "data-addr": slot.address }, [
+        editBlock(slot),
+      ]);
+    return el("div", { class: "ps", "data-addr": slot.address }, [
       tierBadge(slot.tier),
       el("div", { class: "txt2" }, [
         slotReadText(slot),
@@ -762,14 +1150,15 @@ async function renderDocScreen(type, id) {
         { class: "cslot" },
         el("span", { class: "dim", text: "—" }),
       );
-    if (editingAddr === slot.address) {
-      return el("div", { class: "cslot editing" }, [
-        tierBadge(slot.tier),
-        el("span", { class: "txt3" }, slotEditFields(slot)),
-        slotEditActs(slot),
+    if (reconcileFor && reconcileFor.address === slot.address)
+      return el("div", { class: "cslot", "data-addr": slot.address }, [
+        reconcileCard(slot.address),
       ]);
-    }
-    return el("div", { class: "cslot" }, [
+    if (editingAddr === slot.address)
+      return el("div", { class: "cslot editing", "data-addr": slot.address }, [
+        editBlock(slot),
+      ]);
+    return el("div", { class: "cslot", "data-addr": slot.address }, [
       tierBadge(slot.tier),
       el("span", { class: "txt3" }, [
         slotReadText(slot),
@@ -949,33 +1338,92 @@ async function renderDocScreen(type, id) {
     );
   }
 
-  async function saveEdit(address) {
-    const f = inputs[address];
-    if (!f) return;
-    const clientBody = structuredClone(doc.body);
-    const text = f.textArea.value.trim();
-    const ev = f.evidenceInput.value
-      .split(";")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  // 저장 시 그 행만 반짝여서 "어디가 저장됐는지"를 보여준다.
+  function shimmer(address) {
+    setTimeout(() => {
+      const row = section.querySelector(`[data-addr="${CSS.escape(address)}"]`);
+      if (!row) return;
+      row.classList.add("shimmer");
+      setTimeout(() => row.classList.remove("shimmer"), 1000);
+    }, 0);
+  }
+
+  // 한 슬롯을 baseBody 위에 얹어 PUT 한다. 평범한 저장과 화해 카드의
+  // 세 갈래 해결이 같은 경로를 쓴다 — base/If-Match 짝만 다르다.
+  async function commitSlot(address, text, ev, baseBody, ifMatch) {
+    const clientBody = structuredClone(baseBody);
     const existing = getSlot(clientBody, address) || {};
     setSlot(clientBody, address, {
-      text: text || null,
+      text: text.trim() || null,
       tier: existing.tier,
-      evidence: ev,
+      evidence: ev.slice(),
     });
     const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}`, {
       method: "PUT",
-      headers: { "if-match": rev },
+      headers: { "if-match": ifMatch },
       body: clientBody,
     });
+    await handleEditResult(r, address);
+  }
+
+  async function saveEdit(address) {
+    if (!editBuf) return;
+    await commitSlot(address, editBuf.text, editBuf.evidence, doc.body, rev);
+  }
+
+  async function handleEditResult(r, address) {
+    if (r.ok) {
+      const rebased = !!r.data.rebased;
+      editingAddr = null;
+      editBuf = null;
+      reconcileFor = null;
+      // rebase 는 남의 편집이 같이 들어온 것이라 이 화면의 다른 슬롯도 낡았다
+      // — 그때만 전체를 다시 읽는다. 평범한 저장은 그 슬롯만 갈아끼운다.
+      if (rebased) {
+        // reload()가 이 화면을 통째로 다시 만들면서 notice 노드도 갈아치우므로,
+        // 이 알림은 화면 밖에 사는 toast로 띄운다.
+        await reload();
+        toast(
+          "자동 병합됨 — 다른 사람이 다른 슬롯을 고쳐서 두 편집이 모두 남았습니다.",
+        );
+        return;
+      }
+      doc = r.data.json;
+      rev = r.data.rev;
+      const entry = slots.find((s) => s.address === address);
+      const saved = getSlot(doc.body, address) || {};
+      if (entry) {
+        entry.text = saved.text ?? null;
+        entry.tier = saved.tier;
+        entry.evidence = saved.evidence || [];
+      }
+      notice.replaceChildren();
+      renderInner();
+      shimmer(address);
+      toast(
+        saved.tier === "confirmed" ? "저장됨" : "저장됨 · 추정으로 반영",
+        "ok",
+      );
+      renderDocTree().catch(() => {}); // 사이드바 티어 집계만 뒤에서 갱신
+      return;
+    }
+    if (r.status === 409 && r.data && r.data.error === "slot_conflict") {
+      // 서버가 실어 보낸 현재 문서로 나란히 비교시킨다 — 작업을 버리지 않는다.
+      reconcileFor = {
+        address,
+        doc: r.data.current,
+        rev: r.data.currentRev,
+        overlap: r.data.overlap || [address],
+      };
+      notice.replaceChildren();
+      renderInner();
+      return;
+    }
     if (r.status === 409) {
       notice.replaceChildren(
         el("div", { class: "notice" }, [
-          el("strong", {
-            text: "충돌 — 다른 사용자가 같은 슬롯을 먼저 고쳤습니다: ",
-          }),
-          el("span", { text: (r.data.overlap || []).join(", ") }),
+          el("strong", { text: "문서가 그 사이 바뀌었습니다 " }),
+          el("span", { text: "— 최신 내용을 다시 불러온 뒤 편집하세요." }),
           el("button", {
             type: "button",
             class: "btn ghost sm",
@@ -986,11 +1434,11 @@ async function renderDocScreen(type, id) {
       );
       return;
     }
-    if (!r.ok) {
-      toast(`저장 실패 (${r.status})`, "error");
+    if (r.status === 400 && r.data && r.data.error === "edit_rejected") {
+      toast(r.data.message || "저장이 거부되었습니다 (근거 필요).", "error");
       return;
     }
-    reload();
+    toast(`저장 실패 (${r.status})`, "error");
   }
 
   renderInner();

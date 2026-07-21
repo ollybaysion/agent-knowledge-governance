@@ -8,26 +8,26 @@
  * ========================================================================== */
 :root {
   color-scheme: light;
-  /* surfaces — demo-fe cool-gray */
-  --canvas: #f4f5f7;
-  --surface-soft: #e9ebef;
-  --surface-card: #dde0e6;
-  --surface-strong: #ced3db;
+  /* surfaces — indigo ink (light) */
+  --canvas: #f5f6fc;
+  --surface-soft: #eaebf7;
+  --surface-card: #dcdcf1;
+  --surface-strong: #c9c9e8;
   /* text */
-  --ink: #14171c;
-  --body: #3a3f47;
-  --body-strong: #1c1f24;
-  --muted: #6b7280;
-  --muted-soft: #9ca3af;
+  --ink: #16162b;
+  --body: #3a3a55;
+  --body-strong: #1c1c38;
+  --muted: #6a6a88;
+  --muted-soft: #9a9ab5;
   /* hairlines */
-  --hairline: #d1d5db;
-  --hairline-soft: #dde1e7;
+  --hairline: #d1d1e6;
+  --hairline-soft: #e2e2f0;
   /* brand */
-  --primary: #4f6d8a;
-  --primary-active: #3a5874;
+  --primary: #4657cf;
+  --primary-active: #3442a0;
   --on-primary: #ffffff;
-  --accent-soft: #e6edf4;
-  --teal-ink: #2e7d6e;
+  --accent-soft: #e9e9fc;
+  --teal-ink: #3f7d8a;
   --amber: #e8a55a;
   /* semantic fill(공통) + ink(테마 보정) */
   --success: #5db872;
@@ -50,23 +50,23 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* surfaces — demo-fe dark (FDC warm-dark) */
-  --canvas: #1a1814;
-  --surface-soft: #221f1a;
-  --surface-card: #2a2620;
-  --surface-strong: #312c25;
-  --ink: #f5f1e8;
-  --body: #d4cfc1;
-  --body-strong: #ebe6db;
-  --muted: #9b958a;
-  --muted-soft: #6c6a64;
-  --hairline: #3a352d;
-  --hairline-soft: #2e2a23;
-  --primary: #d68870;
-  --primary-active: #b86a52;
-  --on-primary: #1a1814;
-  --accent-soft: rgba(214, 136, 112, 0.16);
-  --teal-ink: #5db8a6;
+  /* surfaces — indigo ink (dark, navy) */
+  --canvas: #111120;
+  --surface-soft: #191a2c;
+  --surface-card: #212239;
+  --surface-strong: #2b2c48;
+  --ink: #eeeefc;
+  --body: #c5c5da;
+  --body-strong: #f2f2fd;
+  --muted: #8a8ba8;
+  --muted-soft: #605f7d;
+  --hairline: #303151;
+  --hairline-soft: #23243a;
+  --primary: #8b93ec;
+  --primary-active: #a7adf2;
+  --on-primary: #111120;
+  --accent-soft: rgba(139, 147, 236, 0.18);
+  --teal-ink: #5fb8c2;
   --success-ink: #5db872;
   --warning-ink: #d4a017;
   --error-ink: #e08585;
@@ -1674,4 +1674,428 @@ ol.steps > li p {
 }
 [hidden] {
   display: none !important;
+}
+
+/* ============================================================
+ * 편집 인터랙션 (#14) — 도장 프리뷰·근거 칩·충돌 화해·마이크로
+ * ============================================================ */
+
+/* 클릭-투-편집 어포던스: hover 시 연필 힌트 */
+.editable:hover::after {
+  content: "✎";
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: 5px;
+}
+
+/* ① 라이브 도장 모핑 + 캡션 */
+.tier-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tier-live .from.demote {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.tier-live .from.keep {
+  opacity: 0.55;
+}
+.tier-live .arrow {
+  color: var(--warning-ink);
+  font-weight: 700;
+  animation: tl-slide 0.3s ease;
+}
+@keyframes tl-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.seal-cap {
+  font-size: 11.5px;
+  color: var(--warning-ink);
+  background: rgba(212, 160, 23, 0.1);
+  border-left: 2px solid var(--warning);
+  border-radius: 0 4px 4px 0;
+  padding: 3px 8px;
+  margin-top: 6px;
+}
+.seal-cap.promote {
+  color: var(--success-ink);
+  border-left-color: var(--success);
+  background: rgba(93, 184, 114, 0.1);
+}
+
+/* 인라인 편집 블록 */
+.slot-edit {
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--accent-soft);
+  width: 100%;
+}
+.slot-edit .toprow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.slot-edit textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 7px 9px;
+  resize: none;
+  overflow: hidden;
+  min-height: 38px;
+}
+.slot-edit textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+.fieldlab {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 8px 0 3px;
+}
+
+/* ② 근거 칩 필드 */
+.chipfield {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 5px 6px;
+  min-height: 32px;
+}
+.chipfield:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+.evchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  background: var(--surface-card);
+  color: var(--body-strong);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 4px 1px 8px;
+}
+.evchip.new {
+  border-color: rgba(93, 184, 114, 0.5);
+  background: rgba(93, 184, 114, 0.1);
+}
+.evchip button {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  line-height: 1;
+}
+.evchip button:hover {
+  background: var(--error);
+  color: #fff;
+}
+.chipfield input {
+  flex: 1;
+  min-width: 120px;
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--mono);
+  border: 0;
+  background: none;
+  color: var(--body-strong);
+  padding: 2px;
+  outline: none;
+}
+.chipfield input::placeholder {
+  font-family: var(--sans);
+  color: var(--muted-soft);
+}
+
+/* 액션 줄 + 키보드 힌트 */
+.editacts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.editacts .kbd {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--muted-soft);
+}
+.editacts .kbd b {
+  font-family: var(--mono);
+  color: var(--muted);
+  background: var(--surface-card);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-weight: 400;
+}
+
+/* ④ 저장 전 diff */
+.diffbox {
+  margin-top: 9px;
+  border-top: 1px dashed var(--hairline);
+  padding-top: 7px;
+}
+.diffbox summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--muted);
+  list-style: none;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.diffbox summary::-webkit-details-marker {
+  display: none;
+}
+.diffbox summary::before {
+  content: "▸";
+}
+.diffbox[open] summary::before {
+  content: "▾";
+}
+.diffbody {
+  font-size: 12px;
+  margin-top: 7px;
+  display: grid;
+  gap: 5px;
+}
+.diffline {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+}
+.diffline .k {
+  flex: none;
+  width: 52px;
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.wd .del {
+  color: var(--error-ink);
+  text-decoration: line-through;
+}
+.wd .add {
+  color: var(--success-ink);
+  background: rgba(93, 184, 114, 0.12);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.evd .del {
+  color: var(--error-ink);
+  text-decoration: line-through;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  margin-right: 6px;
+}
+.evd .add {
+  color: var(--success-ink);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  margin-right: 6px;
+}
+
+/* ② 충돌 화해 카드 */
+.reconcile {
+  border: 1.5px solid var(--error);
+  border-radius: 10px;
+  background: var(--canvas);
+  padding: 11px 12px;
+  width: 100%;
+}
+.reconcile .rhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  color: var(--error-ink);
+  font-size: 12.5px;
+  margin-bottom: 9px;
+}
+.reconcile .rhead .addr {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--body-strong);
+  background: var(--surface-card);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 400;
+}
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+@media (max-width: 620px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+}
+.pane {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 9px;
+  background: var(--surface-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.pane.mine {
+  border-color: var(--primary);
+}
+.pane .plab {
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.pane .plab .who {
+  color: var(--body-strong);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.pane .ptext {
+  font-size: 12.5px;
+  color: var(--body-strong);
+  flex: 1;
+}
+.pane .pev {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+.merge {
+  margin-top: 10px;
+  border-top: 1px dashed var(--hairline);
+  padding-top: 9px;
+}
+.merge summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--muted);
+  list-style: none;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.merge summary::-webkit-details-marker {
+  display: none;
+}
+.merge summary::before {
+  content: "▸";
+}
+.merge[open] summary::before {
+  content: "▾";
+}
+.merge textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 7px 9px;
+  resize: vertical;
+  margin-top: 7px;
+  min-height: 56px;
+}
+.merge .pev {
+  margin-top: 6px;
+}
+.merge > .btn {
+  margin-top: 8px;
+}
+.rcancel {
+  margin-top: 9px;
+}
+
+/* 저장 시 shimmer (해당 행만) */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    var(--accent-soft) 50%,
+    transparent 70%
+  );
+  animation: sh-sweep 1s ease;
+}
+@keyframes sh-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* dirty 가드 플래시 */
+.dirtyflash {
+  animation: dirty-flash 0.5s ease;
+}
+@keyframes dirty-flash {
+  0%,
+  100% {
+    background: none;
+  }
+  30% {
+    background: rgba(212, 160, 23, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tier-live .arrow,
+  .shimmer::after,
+  .dirtyflash {
+    animation: none;
+  }
 }
