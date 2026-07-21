@@ -205,3 +205,61 @@ node bin/akg.mjs catalog-push t.sensor describe.json
 Prints `catalog pushed: db-schema/t.sensor (rev <rev>)`. The target doc must
 already exist — this route never creates one; a 404 means propose (or the
 dashboard) needs to create it first.
+
+## 7. Bulk intake: `POST .../batch` and `PUT .../facts`
+
+These are HTTP routes, not CLI subcommands yet — the importer that will call
+them (akg-collector) drives them directly.
+
+### `POST /api/docs/:type/batch` (editor or agent)
+
+N documents in **one commit**, for the case `POST /api/docs/:type` was never
+meant to carry: a schema import of a few hundred tables.
+
+```json
+{ "runId": "import-2026-07-22", "docs": [/* full documents */] }
+```
+
+Everything it creates **lands `inactive`**, whatever the payload says. That is
+the route's reason to exist: an import cannot reach a prompt, so the decision
+to inject stays with an approver (issue #7). Nothing else about the corpus can
+be changed here — an id that already exists is a 409 for the whole batch.
+
+It is **all or nothing**. One invalid document rejects the batch with a
+per-document reason, and nothing is written; a half-applied import would leave
+the caller to work out which half landed.
+
+Chunk it. The body limit is 512 KiB — measured, that is roughly **200
+db-schema documents of a dozen columns**. Past it the route answers `413
+payload_too_large` with the limit and a note to split, rather than Fastify's
+bare "body too large".
+
+`runId` is optional and goes into the commit message, so the audit view shows
+which run produced a document. There is no per-document author field for
+machine writes, because facts carry no tier and the slots a batch creates are
+empty (issue #12, §7-3).
+
+### `PUT /api/docs/:type/:id/facts` (editor or agent)
+
+`catalog-push` for every type, and it **creates the document if absent**
+(landing `inactive`, as above). Send a whole body; the route takes the facts
+and **ignores the slot values in it entirely**:
+
+- a slot address that survives keeps the value it already had — including
+  `confirmed`
+- a slot address the new facts introduce starts empty (`scaffold`). A machine
+  replacing facts has no standing to assert an interpretation; that is what
+  `propose` is for
+- a slot address the new facts no longer have is an orphan, and follows the
+  rule `catalog-push` set: dropped if never annotated, kept as `deprecated`
+  if it carried real text. The response lists them under `orphans`
+
+No per-type branching is involved: a slot is wherever the type schema says
+`$ref: common/tiered-value.v1`, so this works the same for `db-schema` and
+`msg-format`. `PUT /api/docs/db-schema/:id/catalog` still exists and is
+unchanged.
+
+Note that an `agent` token can write facts but cannot read documents back
+(`GET` needs `viewer`, and `agent` sits outside that ladder — D6), and cannot
+activate anything. That asymmetry is the safety argument for letting machines
+write here at all.

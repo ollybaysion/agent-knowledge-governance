@@ -137,6 +137,22 @@ export async function buildApp({
     reply.code(404).send({ error: "not_found", path: request.url });
   });
 
+  // The batch route (#12) is the one place a caller routinely approaches the
+  // body limit, and it is a machine that has to decide what to do next.
+  // Fastify's default 413 says the body was too large but not that the fix is
+  // to send fewer documents — measured, ~200 db-schema docs fit in 512 KiB.
+  app.setErrorHandler((err, request, reply) => {
+    if (err.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+      return reply.code(413).send({
+        error: "payload_too_large",
+        limitBytes: BODY_LIMIT,
+        message:
+          "요청 본문이 상한을 넘었습니다. 배치를 더 작게 나눠 여러 번 보내세요.",
+      });
+    }
+    reply.send(err);
+  });
+
   return app;
 }
 
