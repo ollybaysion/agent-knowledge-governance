@@ -177,31 +177,65 @@ function showApp() {
   $("login").hidden = true;
 }
 function renderMeta() {
+  const anon = currentUser.anonymous === true;
   $("meta-store").replaceChildren(
-    el("span", { text: `${currentUser.id} (${currentUser.role})` }),
+    el("span", {
+      class: anon ? "whoami anon" : "whoami",
+      text: anon ? "열람 전용" : `${currentUser.id} (${currentUser.role})`,
+    }),
+    el("button", {
+      type: "button",
+      id: "auth-toggle",
+      class: "btn ghost sm",
+      text: anon ? "로그인" : "로그아웃",
+      onclick: anon ? () => showLogin() : logout,
+    }),
   );
+}
+// Ask the server who we are with whatever credential is in storage — none is a
+// valid answer when anonymous read is on, and that is what boots the read-only
+// view. Returns the identity, or null if even anonymous access was refused.
+async function loadMe() {
+  const res = await api("/api/me");
+  if (!res.ok) return null;
+  currentUser = res.data;
+  renderMeta();
+  return currentUser;
 }
 async function tryLogin(token) {
   setToken(token);
-  const res = await api("/api/me");
-  if (!res.ok) {
+  const me = await loadMe();
+  if (!me) {
     clearToken();
-    showLogin(
-      res.status === 401
-        ? "토큰이 유효하지 않습니다."
-        : `로그인 실패 (${res.status})`,
-    );
+    showLogin("토큰이 유효하지 않습니다.");
     return false;
   }
-  currentUser = res.data;
-  renderMeta();
   showApp();
   return true;
+}
+// Anonymous browsing: no token at all. Only reachable when the server allows it
+// (AKG_ANON_READ), otherwise /api/me 401s and the caller falls back to login.
+async function tryAnon() {
+  clearToken();
+  const me = await loadMe();
+  if (!me) return false;
+  showApp();
+  return true;
+}
+async function logout() {
+  clearToken();
+  if (await tryAnon()) enterApp();
+  else showLogin("로그아웃했습니다.");
 }
 $("token-submit").addEventListener("click", async () => {
   const val = $("token-input").value.trim();
   if (!val) return;
   if (await tryLogin(val)) enterApp();
+});
+// Escape hatch from the login screen back to anonymous browsing — without it a
+// logged-out user who opens login has no way back to the read-only view.
+$("login-cancel").addEventListener("click", async () => {
+  if (await tryAnon()) enterApp();
 });
 
 // ---------- URL token pickup (convenience only — S1 still enforced server-side) ----------
@@ -725,7 +759,9 @@ async function renderDocScreen(type, id) {
     const b = doc.body;
     const mdChildren = [];
     if (type === "db-schema") {
-      mdChildren.push(el("h1", { text: `${b.owner}.${b.table}` }));
+      mdChildren.push(
+        el("h1", { text: b.owner ? `${b.owner}.${b.table}` : b.table }),
+      );
       mdChildren.push(psRow(slotByAddr("purpose")));
       const colRows = (b.catalog.columns || []).map((col) =>
         el("tr", {}, [
@@ -1377,6 +1413,13 @@ function enterApp() {
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   const token = consumeUrlToken() || getToken();
-  if (!token) return showLogin();
-  if (await tryLogin(token)) enterApp();
+  // With a token, log in as that user. Without one, try anonymous first — the
+  // login screen is now an opt-in action, not the front gate. It only appears
+  // if the server refuses anonymous reads.
+  if (token) {
+    if (await tryLogin(token)) enterApp();
+    return;
+  }
+  if (await tryAnon()) enterApp();
+  else showLogin();
 })();

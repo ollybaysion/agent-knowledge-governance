@@ -165,6 +165,13 @@ nav button:focus-visible {
 #meta .ok {
   color: var(--success-ink);
 }
+/* Anonymous visitors get a plain "열람 전용" chip where the id (role) goes, so
+   the reason edit controls are missing is visible without opening anything. */
+#meta .whoami.anon {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 10px;
+}
 #theme-toggle {
   font: inherit;
   font-size: 11px;
