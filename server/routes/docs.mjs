@@ -1,4 +1,5 @@
-// §6 document CRUD: GET list/single, POST create, PUT edit (S4/S5/S6), PUT catalog.
+// §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
+// (S4/S5/S6), PUT facts (#12), PUT catalog.
 import { validateDocument } from "../../src/envelope.mjs";
 import {
   readJson,
@@ -6,10 +7,18 @@ import {
   revOfPath,
   readJsonAtRev,
   listIds,
+  commitFiles,
+  isValidId,
 } from "../store.mjs";
-import { persistDoc, archiveDoc, renderDocMd } from "../render-store.mjs";
+import {
+  persistDoc,
+  archiveDoc,
+  renderDocMd,
+  docWrites,
+} from "../render-store.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
+import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
 
 const DOC_TYPES = ["db-schema", "msg-format", "domain-skill"];
@@ -255,6 +264,176 @@ export function registerDocsRoutes(app) {
           return {
             status: 200,
             body: { rev, json: newDoc, rebased: outcome.rebased },
+          };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // Issue #12 R3 — N documents, one commit. The point of the route is that an
+  // import cannot reach a prompt: everything it creates lands inactive, so the
+  // decision to inject stays where #7 put it, with an approver.
+  app.post(
+    "/api/docs/:type/batch",
+    { config: { roles: ["editor", "agent"] } },
+    async (request, reply) => {
+      const { type } = request.params;
+      const schemaId = `${type}/v1`;
+      const bodySchema = refs[schemaId];
+      if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
+      const submitted = request.body?.docs;
+      if (!Array.isArray(submitted) || submitted.length === 0)
+        return reply.code(400).send({ error: "docs_required" });
+      const runId = request.body?.runId;
+      if (runId !== undefined && !/^[\w.:-]{1,64}$/.test(runId))
+        return reply.code(400).send({ error: "invalid_run_id" });
+
+      const now = new Date().toISOString();
+      const docs = [];
+      const rejected = [];
+      const seen = new Set();
+      for (const [i, raw] of submitted.entries()) {
+        const at = { index: i, id: raw?.id };
+        if (!raw || raw.schema !== schemaId) {
+          rejected.push({ ...at, error: "schema_mismatch" });
+          continue;
+        }
+        if (!isValidId(raw.id)) {
+          rejected.push({ ...at, error: "invalid_id" });
+          continue;
+        }
+        // Two entries writing the same file in one commit would silently
+        // leave whichever came last, with no record that the other existed.
+        if (seen.has(raw.id)) {
+          rejected.push({ ...at, error: "duplicate_in_batch" });
+          continue;
+        }
+        seen.add(raw.id);
+        let body;
+        try {
+          body = applyEdit(bodySchema, null, raw.body, request.user.id, now);
+        } catch (err) {
+          if (err instanceof EditError) {
+            rejected.push({
+              ...at,
+              error: "edit_rejected",
+              message: err.message,
+            });
+            continue;
+          }
+          throw err;
+        }
+        const doc = { ...raw, status: "inactive", body };
+        const errors = validateDocument(doc, refs);
+        if (errors.length) {
+          rejected.push({ ...at, error: "validation_failed", details: errors });
+          continue;
+        }
+        docs.push(doc);
+      }
+
+      // All or nothing. A partially applied import leaves the caller to work
+      // out which half landed, and the whole reason to batch is one commit.
+      if (rejected.length)
+        return reply.code(400).send({ error: "batch_rejected", rejected });
+
+      const result = await queue.enqueue(
+        async () => {
+          const existing = docs
+            .filter((d) => readJson(storeDir, `${type}/${d.id}.json`))
+            .map((d) => d.id);
+          if (existing.length)
+            return {
+              status: 409,
+              body: { error: "already_exists", ids: existing },
+            };
+
+          // docWrites recompiles the index per document, so N documents mean N
+          // writes to the same index path. Keyed by relpath, last wins — which
+          // is the same file either way, since nothing in a batch is active
+          // and compileIndex only ever lists active documents.
+          const byPath = new Map();
+          const removes = [];
+          for (const doc of docs) {
+            const w = docWrites(storeDir, type, doc);
+            for (const write of w.writes) byPath.set(write.relpath, write);
+            removes.push(...w.removes);
+          }
+          const writes = [...byPath.values()];
+          const rev = commitFiles(storeDir, {
+            author: request.user.id,
+            message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}`,
+            writes,
+            removes,
+          });
+          return {
+            status: 201,
+            body: { rev, created: docs.map((d) => d.id), status: "inactive" },
+          };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // Issue #12 R4 — the type-agnostic form of catalog-push, with upsert.
+  // Facts go in verbatim; slot values survive at their addresses; addresses
+  // the new facts no longer have follow the orphan rule catalog-push set.
+  // Same roles as catalog-push: the boundary that matters is facts vs slots,
+  // not who is holding the token (issue #12, §7-2).
+  app.put(
+    "/api/docs/:type/:id/facts",
+    { config: { roles: ["editor", "agent"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      const schemaId = `${type}/v1`;
+      const bodySchema = refs[schemaId];
+      if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
+      const submitted = request.body;
+      if (!submitted || typeof submitted !== "object")
+        return reply.code(400).send({ error: "invalid_body" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const current = readJson(storeDir, relpath);
+          const now = new Date().toISOString();
+          const { body, orphans } = mergeFacts(
+            bodySchema,
+            current?.body ?? null,
+            submitted.body ?? submitted,
+            { by: `deprecate:facts-push`, at: now },
+          );
+
+          // Creating: land inactive, like every other bulk path (#7). An
+          // existing document keeps whatever status it already had — pushing
+          // facts is not a decision to change what is injected.
+          const doc = current
+            ? { ...current, body }
+            : {
+                schema: schemaId,
+                id,
+                keywords: submitted.keywords ?? [],
+                status: "inactive",
+                body,
+              };
+          const errors = validateDocument(doc, refs);
+          if (errors.length)
+            return {
+              status: 400,
+              body: { error: "validation_failed", details: errors },
+            };
+
+          const rev = persistDoc(storeDir, type, doc, {
+            author: request.user.id,
+            message: `facts-push ${type}/${id}`,
+          });
+          return {
+            status: current ? 200 : 201,
+            body: { rev, json: doc, orphans, created: !current },
           };
         },
         { priority: priorityOf(request.user) },
