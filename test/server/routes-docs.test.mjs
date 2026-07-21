@@ -151,6 +151,60 @@ test("PUT without If-Match is rejected (428); with a stale but non-overlapping r
   await cleanup();
 });
 
+// Regression: `git commit` fails on an empty index, so writing a document's
+// existing bytes back surfaced as a 500. Re-pushing an unchanged doc is the
+// most ordinary thing a producer does (a re-run factory, a retried `akg
+// push`), and the returned rev has to stay usable as the next If-Match.
+test("PUT with an unchanged body is idempotent — same rev, no empty commit, still editable", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  try {
+    const doc = newDbSchemaDoc();
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("edtok"),
+      payload: doc,
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    const rev0 = created.json().rev;
+
+    // Another document commits in between, so HEAD no longer belongs to ours.
+    const other = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("edtok"),
+      payload: newDbSchemaDoc({ id: "t.y", body: { ...doc.body, table: "Y" } }),
+    });
+    assert.equal(other.statusCode, 201, other.body);
+
+    const noop = await app.inject({
+      method: "PUT",
+      url: "/api/docs/db-schema/t.x",
+      headers: { ...auth("edtok"), "if-match": rev0 },
+      payload: doc.body,
+    });
+    assert.equal(noop.statusCode, 200, noop.body);
+    assert.equal(noop.json().rev, rev0, "unchanged content keeps its rev");
+
+    // The rev it handed back must still be accepted as the base of a real edit.
+    const real = await app.inject({
+      method: "PUT",
+      url: "/api/docs/db-schema/t.x",
+      headers: { ...auth("edtok"), "if-match": noop.json().rev },
+      payload: {
+        ...doc.body,
+        purpose: { text: "실제 편집.", tier: "inferred", evidence: ["t.x:1"] },
+      },
+    });
+    assert.equal(real.statusCode, 200, real.body);
+    assert.notEqual(real.json().rev, rev0);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
