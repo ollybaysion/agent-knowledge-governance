@@ -9,6 +9,15 @@ claude-hooks' `keyword-docs` provider at that mirror. claude-hooks itself is
 Phase 3 (design §8.1, section 6 below): push changes back to the hub with
 `akg propose` and `akg catalog-push` — the CLI's write side.
 
+**Only active documents are in the bundle.** A document can also be `inactive`
+— present on the server and readable through the API and dashboard, but not
+rendered, not indexed, and so never mirrored or injected (issue #7). That is
+where bulk-loaded documents land: the injection budget is two documents per
+turn, so a hundred skeletons landing straight into the corpus would crowd out
+the ones somebody actually confirmed. An approver activates the few worth
+carrying. If a document you expect is missing from the mirror, check its
+status before suspecting the sync.
+
 ## 1. One-time setup
 
 ```sh

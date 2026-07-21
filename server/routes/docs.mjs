@@ -7,7 +7,7 @@ import {
   readJsonAtRev,
   listIds,
 } from "../store.mjs";
-import { persistDoc, archiveDoc } from "../render-store.mjs";
+import { persistDoc, archiveDoc, renderDocMd } from "../render-store.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { resolveConflict } from "../conflict.mjs";
@@ -18,6 +18,14 @@ function mdRelPath(type, doc) {
   if (type === "domain-skill")
     return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
   return `rendered/${type}/docs/${doc.id}.md`;
+}
+
+// Published md if there is one, otherwise rendered on the spot. Only an active
+// doc has a file in rendered/ (issue #7), and a doc nobody can preview is a doc
+// nobody can judge — which would make the inactive state unusable in the very
+// review it exists to enable.
+function docMd(storeDir, type, doc) {
+  return readText(storeDir, mdRelPath(type, doc)) ?? renderDocMd(type, doc);
 }
 
 function priorityOf(user) {
@@ -68,7 +76,7 @@ export function registerDocsRoutes(app) {
           return reply.code(304).send();
         if (rev) reply.header("etag", rev);
         reply.type("text/markdown; charset=utf-8");
-        return reply.send(readText(storeDir, mdRelPath(type, doc)) ?? "");
+        return reply.send(docMd(storeDir, type, doc) ?? "");
       }
       if (rev) reply.header("etag", rev);
       const bodySchema = refs[`${type}/v1`];
@@ -80,7 +88,7 @@ export function registerDocsRoutes(app) {
         : [];
       return {
         json: doc,
-        md: readText(storeDir, mdRelPath(type, doc)),
+        md: docMd(storeDir, type, doc),
         rev,
         tiers: bodySchema ? tierSummary(bodySchema, doc.body) : {},
         slots,
@@ -313,6 +321,71 @@ export function registerDocsRoutes(app) {
       return reply.code(result.status).send(result.body);
     },
   );
+
+  // Issue #7 — the active/inactive transition. Bulk-loaded docs land inactive:
+  // fully readable through this API, but absent from rendered/ and the index,
+  // so they never reach a mirror or compete for an injection slot. Turning one
+  // on is an approver decision, the same rule D4 puts on promoting a slot —
+  // both are a human accepting responsibility for what enters a prompt.
+  for (const [action, target] of [
+    ["activate", "active"],
+    ["deactivate", "inactive"],
+  ]) {
+    app.post(
+      `/api/docs/:type/:id/${action}`,
+      { config: { roles: ["approver"] } },
+      async (request, reply) => {
+        const { type, id } = request.params;
+        if (!refs[`${type}/v1`])
+          return reply.code(400).send({ error: "unknown_type" });
+        const ifMatch = request.headers["if-match"];
+        if (!ifMatch)
+          return reply.code(428).send({ error: "if_match_required" });
+
+        const result = await queue.enqueue(
+          async () => {
+            const relpath = `${type}/${id}.json`;
+            const doc = readJson(storeDir, relpath);
+            if (!doc) return { status: 404, body: { error: "not_found" } };
+            // S5: revalidate the rev inside the worker, right before committing.
+            const currentRev = revOfPath(storeDir, relpath);
+            if (ifMatch !== currentRev)
+              return {
+                status: 409,
+                body: { error: "unknown_base_rev", currentRev, current: doc },
+              };
+
+            // Archiving is a decision to stop carrying the doc at all; coming
+            // back from it is not this route's business.
+            if (doc.status === "archived")
+              return { status: 400, body: { error: "doc_archived" } };
+            // Idempotent: committing an identical tree would fail in git.
+            if (doc.status === target)
+              return {
+                status: 200,
+                body: { rev: currentRev, unchanged: true },
+              };
+
+            const newDoc = { ...doc, status: target };
+            const errors = validateDocument(newDoc, refs);
+            if (errors.length)
+              return {
+                status: 400,
+                body: { error: "validation_failed", details: errors },
+              };
+
+            const rev = persistDoc(storeDir, type, newDoc, {
+              author: request.user.id,
+              message: `${action} ${type}/${id}`,
+            });
+            return { status: 200, body: { rev, json: newDoc } };
+          },
+          { priority: priorityOf(request.user) },
+        );
+        return reply.code(result.status).send(result.body);
+      },
+    );
+  }
 
   // §6 DELETE — soft archive (status: archived): dropped from the compiled
   // injection index, but the JSON + git history are preserved.

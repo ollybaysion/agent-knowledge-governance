@@ -180,9 +180,14 @@ export function commitFiles(
     writeFileSync(p, content);
     touched.push(relpath);
   }
+  // `removes` means "ensure absent", not "delete an existing file". A caller
+  // that keeps a derivative out of the tree (issue #7: an inactive doc's
+  // rendered md) cannot know whether it was ever written, and staging a path
+  // that never existed makes `git add` fail on the whole commit.
   for (const relpath of removes) {
     const p = safeJoin(dir, relpath);
-    if (existsSync(p)) rmSync(p);
+    if (!existsSync(p)) continue;
+    rmSync(p);
     touched.push(relpath);
   }
   if (touched.length === 0) throw new StoreError("커밋할 변경이 없습니다", 400);
