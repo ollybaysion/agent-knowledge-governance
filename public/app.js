@@ -1296,7 +1296,7 @@ async function renderDocScreen(type, id) {
       }),
     );
 
-    section.replaceChildren(
+    const parts = [
       el("div", { class: "dochead" }, [
         el("span", { class: "id", text: id }),
         el("span", { class: "chip", text: type }),
@@ -1329,13 +1329,17 @@ async function renderDocScreen(type, id) {
             el("span", {
               class: "dim",
               text: canEdit
-                ? `If-Match: ${shortRev(rev)} · 값을 클릭하면 바로 편집 · 슬롯 안 겹치면 자동 재베이스(S6)`
-                : `If-Match: ${shortRev(rev)} · 편집·확정·폐기는 슬롯 단위`,
+                ? "값을 클릭하면 바로 편집 · 슬롯이 안 겹치면 자동 재베이스"
+                : "편집·확정·폐기는 슬롯 단위",
             }),
           ),
         ]),
       ),
-    );
+    ];
+    // el() 의 children 루프와 달리 replaceChildren() 은 null 을 걸러내지 않고
+    // 문자열 "null" 로 바꿔 텍스트 노드로 넣는다. 활성 문서(=안내바 없음)에서
+    // dochead 아래에 null 이 찍히던 원인이라, 넘기기 전에 떨궈낸다.
+    section.replaceChildren(...parts.filter(Boolean));
   }
 
   // 저장 시 그 행만 반짝여서 "어디가 저장됐는지"를 보여준다.
