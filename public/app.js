@@ -197,17 +197,29 @@ function renderMeta() {
 // view. Returns the identity, or null if even anonymous access was refused.
 async function loadMe() {
   const res = await api("/api/me");
-  if (!res.ok) return null;
+  // The status is carried out, not swallowed: "wrong token" and "server is
+  // rate-limiting you" and "the auth store is broken" are different problems
+  // and the login screen has to be able to say which one happened.
+  if (!res.ok) return { ok: false, status: res.status };
   currentUser = res.data;
   renderMeta();
-  return currentUser;
+  return { ok: true };
+}
+function loginFailureMessage(status) {
+  if (status === 401)
+    return "토큰이 유효하지 않습니다 — 오타이거나, 만료됐거나, 회수된 토큰입니다.";
+  if (status === 429)
+    return "인증 시도가 너무 많습니다. 잠시 후 다시 시도하세요.";
+  if (status === 500)
+    return "서버의 인증 저장소를 읽지 못했습니다. 관리자에게 문의하세요.";
+  return `로그인 실패 (${status})`;
 }
 async function tryLogin(token) {
   setToken(token);
   const me = await loadMe();
-  if (!me) {
+  if (!me.ok) {
     clearToken();
-    showLogin("토큰이 유효하지 않습니다.");
+    showLogin(loginFailureMessage(me.status));
     return false;
   }
   showApp();
@@ -218,7 +230,7 @@ async function tryLogin(token) {
 async function tryAnon() {
   clearToken();
   const me = await loadMe();
-  if (!me) return false;
+  if (!me.ok) return false;
   showApp();
   return true;
 }
@@ -229,8 +241,14 @@ async function logout() {
 }
 $("token-submit").addEventListener("click", async () => {
   const val = $("token-input").value.trim();
-  if (!val) return;
+  // An empty submit used to do nothing at all, which reads as a broken button.
+  if (!val) return showLogin("토큰을 입력하세요.");
   if (await tryLogin(val)) enterApp();
+});
+// The input is not inside a <form>, so Enter would otherwise do nothing —
+// which is the first thing anyone tries in a password field.
+$("token-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("token-submit").click();
 });
 // Escape hatch from the login screen back to anonymous browsing — without it a
 // logged-out user who opens login has no way back to the read-only view.
