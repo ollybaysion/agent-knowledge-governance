@@ -33,6 +33,34 @@ function minimalDbSchemaDoc() {
   };
 }
 
+// `owner` is optional — an unqualified table is stored under just its name.
+test("db-schema: owner may be omitted, and then id is lower(table)", () => {
+  const doc = minimalDbSchemaDoc();
+  delete doc.body.owner;
+  doc.id = "x";
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("db-schema: without owner, an owner-qualified id is rejected", () => {
+  const doc = minimalDbSchemaDoc();
+  delete doc.body.owner;
+  // id still carries a schema prefix the body no longer names
+  const errors = validateDocument(doc, refs);
+  assert.ok(
+    errors.some((e) => e.includes('expected "x" (lower(table))')),
+    `expected an id mismatch, got: ${JSON.stringify(errors)}`,
+  );
+});
+
+test("db-schema: with owner, id must still be lower(owner.table)", () => {
+  const doc = minimalDbSchemaDoc();
+  doc.id = "x"; // dropped the owner prefix while the body still has one
+  const errors = validateDocument(doc, refs);
+  assert.ok(
+    errors.some((e) => e.includes('expected "t.x" (lower(owner.table))')),
+  );
+});
+
 test("additionalProperties:false rejects an unknown key at envelope level", () => {
   const doc = { ...minimalDbSchemaDoc(), extra: true };
   const errors = validateDocument(doc, refs);

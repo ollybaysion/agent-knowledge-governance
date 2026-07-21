@@ -16,7 +16,7 @@ import { AkgApiError } from "../src/client/errors.mjs";
 const USAGE = `usage:
   akg sync [--skills] [--server <url>] [--mirror <dir>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
-  akg catalog-push <owner.table> <describe.json> [--server <url>] [--mirror <dir>]
+  akg catalog-push <owner.table|table> <describe.json> [--server <url>] [--mirror <dir>]
 `;
 
 function parseArgs(argv) {
@@ -127,6 +127,13 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
     }
   } catch (err) {
     process.stderr.write(`akg sync failed: ${err.message}\n`);
+    // A 401 with no token means this server has anonymous read turned off —
+    // say so, because "no token" is otherwise an invisible cause here.
+    if (err instanceof AkgSyncError && err.status === 401 && !token) {
+      process.stderr.write(
+        "akg sync: this server requires a token to read (AKG_ANON_READ=0) — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
+      );
+    }
     // Fail-open (§9.2): a sync failure must never block a CC session — the
     // existing mirror (if any) is untouched, so exit 0. Two exceptions, both
     // permanent conditions that a retry cannot clear and that leave the
@@ -218,8 +225,12 @@ async function main() {
 
   const mirrorDir = resolveMirrorDir(flags);
 
+  // A token is required to WRITE. `sync` only reads, and a server with
+  // anonymous read on (AKG_ANON_READ, the default) serves the bundle without
+  // one — so pulling a mirror needs no setup at all. If that server does
+  // require a token, the 401 path below says so.
   const token = resolveToken();
-  if (!token) {
+  if (!token && cmd !== "sync") {
     process.stderr.write(
       "akg: no token — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
     );

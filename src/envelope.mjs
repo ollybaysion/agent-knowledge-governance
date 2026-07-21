@@ -68,12 +68,17 @@ function fail(errors, msg) {
 const SEMANTIC_CHECKS = {
   "db-schema/v1"(doc, errors) {
     const { owner, table, catalog, columnDescs } = doc.body;
-    if (owner && table) {
-      const wantId = `${owner}.${table}`.toLowerCase();
+    // `owner` is optional: a schema-qualified table is `owner.table`, an
+    // unqualified one is just `table`. Either way the id is the lowercased
+    // form of whatever the document actually names, so the id keeps being
+    // derivable from the body rather than a second place to get it wrong.
+    if (table) {
+      const qualified = owner ? `${owner}.${table}` : table;
+      const wantId = qualified.toLowerCase();
       if (doc.id !== wantId)
         fail(
           errors,
-          `$.id: expected "${wantId}" (lower(owner.table)), got "${doc.id}"`,
+          `$.id: expected "${wantId}" (lower(${owner ? "owner.table" : "table"})), got "${doc.id}"`,
         );
     }
     if (catalog?.columns && columnDescs) {

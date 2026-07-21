@@ -142,8 +142,11 @@ export async function syncMirror({
 }) {
   const localRev = readLocalRev(mirrorDir);
 
+  // No token = an anonymous pull. Send no Authorization header at all rather
+  // than "Bearer null" — a malformed credential is a failed auth (401), while
+  // sending none is what the server's anonymous-read path accepts.
   const res = await fetchImpl(bundleUrl(serverUrl, localRev), {
-    headers: { authorization: `Bearer ${token}` },
+    headers: token ? { authorization: `Bearer ${token}` } : {},
   });
 
   if (res.status === 304) return { changed: false, rev: localRev };

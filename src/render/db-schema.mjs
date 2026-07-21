@@ -86,7 +86,7 @@ function renderQueries(queries) {
 export function renderDbSchemaMd(doc) {
   const b = doc.body;
   return [
-    `# ${b.owner}.${b.table}`,
+    `# ${b.owner ? `${b.owner}.${b.table}` : b.table}`,
     "",
     region("manual", "purpose", renderTiered(b.purpose)),
     "",

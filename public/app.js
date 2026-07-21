@@ -86,11 +86,22 @@ async function api(path, opts = {}) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(body);
   }
-  const res = await fetch(path, {
-    method: opts.method || "GET",
-    headers,
-    body,
-  });
+  // fetch throws rather than resolving for two reachable cases: the network is
+  // down, and the token carries a character that cannot go in a header (a
+  // mis-paste — Korean text, a stray newline). Both used to surface as an
+  // unhandled rejection, which meant the UI showed nothing at all and left
+  // whatever message was on screen before. Status 0 = "the request never went
+  // out", distinct from any status a server can return.
+  let res;
+  try {
+    res = await fetch(path, {
+      method: opts.method || "GET",
+      headers,
+      body,
+    });
+  } catch {
+    return { ok: false, status: 0, etag: null, data: null };
+  }
   let data = null;
   try {
     data = await res.json();
@@ -177,31 +188,85 @@ function showApp() {
   $("login").hidden = true;
 }
 function renderMeta() {
+  const anon = currentUser.anonymous === true;
   $("meta-store").replaceChildren(
-    el("span", { text: `${currentUser.id} (${currentUser.role})` }),
+    el("span", {
+      class: anon ? "whoami anon" : "whoami",
+      text: anon ? "열람 전용" : `${currentUser.id} (${currentUser.role})`,
+    }),
+    el("button", {
+      type: "button",
+      id: "auth-toggle",
+      class: "btn ghost sm",
+      text: anon ? "로그인" : "로그아웃",
+      onclick: anon ? () => showLogin() : logout,
+    }),
   );
+}
+// Ask the server who we are with whatever credential is in storage — none is a
+// valid answer when anonymous read is on, and that is what boots the read-only
+// view. Returns the identity, or null if even anonymous access was refused.
+async function loadMe() {
+  const res = await api("/api/me");
+  // The status is carried out, not swallowed: "wrong token" and "server is
+  // rate-limiting you" and "the auth store is broken" are different problems
+  // and the login screen has to be able to say which one happened.
+  if (!res.ok) return { ok: false, status: res.status };
+  currentUser = res.data;
+  renderMeta();
+  return { ok: true };
+}
+function loginFailureMessage(status) {
+  if (status === 0)
+    return "요청을 보내지 못했습니다 — 서버에 연결할 수 없거나, 토큰에 쓸 수 없는 문자가 섞여 있습니다.";
+  if (status === 401)
+    return "토큰이 유효하지 않습니다 — 오타이거나, 만료됐거나, 회수된 토큰입니다.";
+  if (status === 429)
+    return "인증 시도가 너무 많습니다. 잠시 후 다시 시도하세요.";
+  if (status === 500)
+    return "서버의 인증 저장소를 읽지 못했습니다. 관리자에게 문의하세요.";
+  return `로그인 실패 (${status})`;
 }
 async function tryLogin(token) {
   setToken(token);
-  const res = await api("/api/me");
-  if (!res.ok) {
+  const me = await loadMe();
+  if (!me.ok) {
     clearToken();
-    showLogin(
-      res.status === 401
-        ? "토큰이 유효하지 않습니다."
-        : `로그인 실패 (${res.status})`,
-    );
+    showLogin(loginFailureMessage(me.status));
     return false;
   }
-  currentUser = res.data;
-  renderMeta();
   showApp();
   return true;
 }
+// Anonymous browsing: no token at all. Only reachable when the server allows it
+// (AKG_ANON_READ), otherwise /api/me 401s and the caller falls back to login.
+async function tryAnon() {
+  clearToken();
+  const me = await loadMe();
+  if (!me.ok) return false;
+  showApp();
+  return true;
+}
+async function logout() {
+  clearToken();
+  if (await tryAnon()) enterApp();
+  else showLogin("로그아웃했습니다.");
+}
 $("token-submit").addEventListener("click", async () => {
   const val = $("token-input").value.trim();
-  if (!val) return;
+  // An empty submit used to do nothing at all, which reads as a broken button.
+  if (!val) return showLogin("토큰을 입력하세요.");
   if (await tryLogin(val)) enterApp();
+});
+// The input is not inside a <form>, so Enter would otherwise do nothing —
+// which is the first thing anyone tries in a password field.
+$("token-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("token-submit").click();
+});
+// Escape hatch from the login screen back to anonymous browsing — without it a
+// logged-out user who opens login has no way back to the read-only view.
+$("login-cancel").addEventListener("click", async () => {
+  if (await tryAnon()) enterApp();
 });
 
 // ---------- URL token pickup (convenience only — S1 still enforced server-side) ----------
@@ -1114,7 +1179,9 @@ async function renderDocScreen(type, id) {
     const b = doc.body;
     const mdChildren = [];
     if (type === "db-schema") {
-      mdChildren.push(el("h1", { text: `${b.owner}.${b.table}` }));
+      mdChildren.push(
+        el("h1", { text: b.owner ? `${b.owner}.${b.table}` : b.table }),
+      );
       mdChildren.push(psRow(slotByAddr("purpose")));
       const colRows = (b.catalog.columns || []).map((col) =>
         el("tr", {}, [
@@ -1825,6 +1892,13 @@ function enterApp() {
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   const token = consumeUrlToken() || getToken();
-  if (!token) return showLogin();
-  if (await tryLogin(token)) enterApp();
+  // With a token, log in as that user. Without one, try anonymous first — the
+  // login screen is now an opt-in action, not the front gate. It only appears
+  // if the server refuses anonymous reads.
+  if (token) {
+    if (await tryLogin(token)) enterApp();
+    return;
+  }
+  if (await tryAnon()) enterApp();
+  else showLogin();
 })();
