@@ -43,26 +43,53 @@ function docMdPath(type, doc) {
   return `rendered/${type}/docs/${doc.id}.md`;
 }
 
+function rendererFor(type, doc) {
+  return (
+    RENDERERS[doc.schema] ??
+    (type === "domain-skill" ? renderDomainSkillMd : null)
+  );
+}
+
+/**
+ * The md for a doc, computed rather than read. An inactive doc has no file in
+ * rendered/ by design (see docWrites), but the dashboard still has to show it —
+ * being readable while staying out of the injection path is the entire point of
+ * the state. Safe because rendering is pure: json-spec §1.1 makes
+ * `render(json) === md` a contract, so this returns what the file would hold.
+ * Null for types with no renderer (unclassified, whose truth is already md).
+ */
+export function renderDocMd(type, doc) {
+  return rendererFor(type, doc)?.(doc) ?? null;
+}
+
 /**
  * The file writes one doc's persistence needs: store/<type>/<id>.json + its
  * rendered md + (if indexed) a freshly recompiled rendered/<type>/index.json.
  * Split from persistDoc so callers that need to combine a doc write with
  * OTHER writes in the same commit (proposals adopt/reject move a file too —
  * S8 atomicity) can merge write-lists before calling store.commitFiles once.
+ *
+ * Only an active doc gets a rendered md. Anything else — inactive (issue #7)
+ * or archived — has its md REMOVED rather than skipped, because /api/bundle
+ * tars rendered/ wholesale (routes/misc.mjs): a stale file left behind there
+ * ships to every mirror, which is exactly what the inactive state exists to
+ * prevent. Dropping it from the index is not enough.
+ *
+ * @returns {{writes: {relpath:string, content:string}[], removes: string[]}}
  */
 export function docWrites(storeDir, type, doc) {
   const writes = [
     { relpath: `${type}/${doc.id}.json`, content: stableJson(doc) },
   ];
+  const removes = [];
 
-  const renderFn = RENDERERS[doc.schema];
-  if (renderFn) {
-    writes.push({ relpath: docMdPath(type, doc), content: renderFn(doc) });
-  } else if (type === "domain-skill") {
-    writes.push({
-      relpath: docMdPath(type, doc),
-      content: renderDomainSkillMd(doc),
-    });
+  const render = rendererFor(type, doc);
+  if (render) {
+    if (doc.status === "active") {
+      writes.push({ relpath: docMdPath(type, doc), content: render(doc) });
+    } else {
+      removes.push(docMdPath(type, doc));
+    }
   }
 
   if (INDEXED_TYPES.has(type)) {
@@ -77,7 +104,7 @@ export function docWrites(storeDir, type, doc) {
       content: stableJson(compileIndex(allDocs)),
     });
   }
-  return writes;
+  return { writes, removes };
 }
 
 /**
@@ -87,11 +114,8 @@ export function docWrites(storeDir, type, doc) {
  * checks BEFORE calling this (this function just writes what it's given).
  */
 export function persistDoc(storeDir, type, doc, { author, message }) {
-  return commitFiles(storeDir, {
-    author,
-    message,
-    writes: docWrites(storeDir, type, doc),
-  });
+  const { writes, removes } = docWrites(storeDir, type, doc);
+  return commitFiles(storeDir, { author, message, writes, removes });
 }
 
 /** Archive (soft-delete): drop from the compiled index without touching the JSON's history. */

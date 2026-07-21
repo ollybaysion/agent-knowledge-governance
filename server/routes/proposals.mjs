@@ -152,8 +152,9 @@ export function registerProposalsRoutes(app) {
               body: { error: "validation_failed", details: errors },
             };
 
+          const doc = docWrites(storeDir, type, newDoc);
           const writes = [
-            ...docWrites(storeDir, type, newDoc),
+            ...doc.writes,
             {
               relpath: `proposals/archive/${pid}.json`,
               content:
@@ -173,7 +174,9 @@ export function registerProposalsRoutes(app) {
             author: request.user.id,
             message: `adopt proposal ${pid} -> ${type}/${docId}`,
             writes,
-            removes: [`proposals/pending/${pid}.json`],
+            // doc.removes is non-empty when adopting into a non-active doc —
+            // its md must stay out of rendered/ (issue #7).
+            removes: [`proposals/pending/${pid}.json`, ...doc.removes],
           });
           return { status: 200, body: { rev, json: newDoc } };
         },

@@ -51,7 +51,10 @@ const ENVELOPE_SCHEMA = {
     schema: { type: "string", pattern: "^[a-z-]+/v[0-9]+$" },
     id: { type: "string", pattern: "^[a-z0-9._-]+$" },
     keywords: { type: "array", minItems: 1, items: KEYWORD_SCHEMA },
-    status: { type: "string", enum: ["active", "archived"] },
+    // "inactive": exists and is readable through the API, but is kept out of
+    // every derivative — no rendered md, no index entry, so it never reaches a
+    // mirror or an injection slot. Bulk imports land here (issue #7).
+    status: { type: "string", enum: ["active", "inactive", "archived"] },
     body: { type: "object" },
   },
 };
