@@ -2,7 +2,14 @@
 // design (§11 S1): missing/empty/unreadable users.json must refuse server
 // boot, never silently run with auth off the way the observability server's
 // loopback-trust model does.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 
 export class AuthBootError extends Error {}
@@ -55,10 +62,23 @@ export function loadUsers(path) {
   return users;
 }
 
+// Write via a temp file and rename, rather than writeFileSync onto `path`.
+// Two distinct reasons, both of which only bite on a real deployment:
+//   - writeFileSync's `mode` applies only when it *creates* the file, so
+//     rewriting a users.json that is somehow already 0644 leaves it 0644 —
+//     and loadUsers then refuses to boot the server, with no CLI path back.
+//     Renaming a fresh 0600 file over it repairs the permissions instead.
+//   - a crash, a signal, or a full disk partway through the rewrite would
+//     truncate the one piece of state that is not in git. Every token in the
+//     deployment would be gone. Rename is atomic: either the old list or the
+//     new one, never a half-written file.
 export function saveUsers(path, users) {
-  writeFileSync(path, JSON.stringify({ users }, null, 2) + "\n", {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ users }, null, 2) + "\n", {
     mode: 0o600,
   });
+  chmodSync(tmp, 0o600); // in case a leftover tmp from a crashed run was looser
+  renameSync(tmp, path);
 }
 
 function isExpired(user, now) {

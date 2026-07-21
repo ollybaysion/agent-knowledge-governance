@@ -13,12 +13,24 @@ import {
 const USERS_PATH = process.env.AKG_USERS_PATH ?? "./.akg-data/users.json";
 const DEFAULT_EXPIRY_DAYS = 90; // S14
 
-function readUsersOrEmpty(path) {
+// An absent file is an empty user list — that is the bootstrap case, and the
+// first `add` legitimately creates it. A file that EXISTS but will not load is
+// not empty, and must never be treated as such: every caller below follows
+// this with saveUsers(), so returning [] would silently replace all existing
+// users with whatever the current command produces. On a shared server that is
+// every colleague's token gone at once, with no copy anywhere (users.json is
+// the one piece of state outside git). The likeliest trigger is mundane — a
+// deploy step or an editor leaving the file 0644, which loadUsers rejects.
+function readUsers(path) {
   if (!existsSync(path)) return [];
   try {
     return loadUsers(path);
-  } catch {
-    return []; // e.g. permission mismatch on a hand-edited file — let saveUsers fix it below
+  } catch (err) {
+    throw new Error(
+      `${path}을(를) 읽지 못했습니다 — 그대로 진행하면 기존 사용자가 전부 사라지므로 중단합니다.\n` +
+        `  원인: ${err.message}\n` +
+        `  권한 문제라면: chmod 600 ${path} 후 다시 실행하세요.`,
+    );
   }
 }
 
@@ -26,7 +38,7 @@ function cmdAdd(id, role, { expiresDays = DEFAULT_EXPIRY_DAYS } = {}) {
   if (!ROLES.includes(role)) {
     throw new Error(`알 수 없는 역할: ${role} (허용: ${ROLES.join(", ")})`);
   }
-  const users = readUsersOrEmpty(USERS_PATH).filter((u) => u.id !== id);
+  const users = readUsers(USERS_PATH).filter((u) => u.id !== id);
   const token = generateToken();
   const now = new Date();
   const expiresAt = new Date(
@@ -45,7 +57,7 @@ function cmdAdd(id, role, { expiresDays = DEFAULT_EXPIRY_DAYS } = {}) {
 }
 
 function cmdRevoke(id) {
-  const users = readUsersOrEmpty(USERS_PATH);
+  const users = readUsers(USERS_PATH);
   const next = users.filter((u) => u.id !== id);
   if (next.length === users.length) {
     console.log(`${id} 없음 — 변경 없음`);
@@ -56,7 +68,7 @@ function cmdRevoke(id) {
 }
 
 function cmdList() {
-  const users = readUsersOrEmpty(USERS_PATH);
+  const users = readUsers(USERS_PATH);
   for (const u of users) {
     console.log(`${u.id}\t${u.role}\texpiresAt=${u.expiresAt ?? "-"}`);
   }
@@ -64,12 +76,24 @@ function cmdList() {
 }
 
 const [, , cmd, ...rest] = process.argv;
+// Refusals from readUsers() are operator-facing instructions ("chmod 600 …"),
+// not crashes — print the message and exit nonzero rather than dumping a stack
+// trace that buries it.
+function run(fn) {
+  try {
+    fn();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+}
+
 if (cmd === "add") {
-  cmdAdd(rest[0], rest[1]);
+  run(() => cmdAdd(rest[0], rest[1]));
 } else if (cmd === "revoke") {
-  cmdRevoke(rest[0]);
+  run(() => cmdRevoke(rest[0]));
 } else if (cmd === "list") {
-  cmdList();
+  run(cmdList);
 } else {
   console.error("사용법: akg-user.mjs add <id> <role> | revoke <id> | list");
   console.error(`  role ∈ ${ROLES.join(", ")}`);
