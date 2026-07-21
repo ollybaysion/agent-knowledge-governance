@@ -22,12 +22,27 @@ import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 
 export class AkgSyncError extends Error {
-  constructor(message, { status } = {}) {
+  constructor(message, { status, code } = {}) {
     super(message);
     this.name = "AkgSyncError";
     this.status = status;
+    this.code = code;
   }
 }
+
+/**
+ * Marks failures that will not fix themselves: the bundle's shape is one this
+ * CLI refuses to install (unknown layout → the client is older than the
+ * server) or one it considers hostile (traversal, symlinks). sync otherwise
+ * fails open so a flaky server never blocks a CC session, but swallowing
+ * THESE means the mirror stops updating and says nothing — the exact failure
+ * that motivated the split. Transient trouble (HTTP errors, a corrupt or
+ * truncated download) keeps failing open, because a retry genuinely fixes it.
+ */
+export const REJECTED = "bundle_rejected";
+
+// Node's spawnSync default is 1MB of captured output.
+const MAX_BUFFER = 64 * 1024 * 1024;
 
 // §5.6 mirror layout's known type folders. "domain" (domain-doc render) has
 // no schema yet (json-spec §5.5 lists it as a future type) but is allowed
@@ -37,6 +52,9 @@ const ALLOWED_TYPE_DIRS = new Set([
   "msg-format",
   "domain",
   "domain-skill",
+  // Same reasoning as "domain": listed before the server emits it, so that
+  // turning it on server-side does not require every client to upgrade first.
+  "unclassified",
 ]);
 
 function readLocalRev(mirrorDir) {
@@ -63,13 +81,19 @@ function assertSafeEntries(names) {
   for (const name of names) {
     if (!name) continue;
     if (name.startsWith("/")) {
-      throw new AkgSyncError(`unsafe tar entry (absolute path): ${name}`);
+      throw new AkgSyncError(`unsafe tar entry (absolute path): ${name}`, {
+        code: REJECTED,
+      });
     }
     if (name !== "rendered" && !name.startsWith("rendered/")) {
-      throw new AkgSyncError(`unexpected tar entry outside rendered/: ${name}`);
+      throw new AkgSyncError(`unexpected tar entry outside rendered/: ${name}`, {
+        code: REJECTED,
+      });
     }
     if (name.split("/").includes("..")) {
-      throw new AkgSyncError(`unsafe tar entry (path traversal): ${name}`);
+      throw new AkgSyncError(`unsafe tar entry (path traversal): ${name}`, {
+        code: REJECTED,
+      });
     }
   }
 }
@@ -79,7 +103,9 @@ function assertSafeEntries(names) {
 function assertKnownTopLevel(dir) {
   for (const entry of readdirSync(dir)) {
     if (!ALLOWED_TYPE_DIRS.has(entry)) {
-      throw new AkgSyncError(`unexpected top-level entry in bundle: ${entry}`);
+      throw new AkgSyncError(`unexpected top-level entry in bundle: ${entry}`, {
+        code: REJECTED,
+      });
     }
   }
 }
@@ -91,7 +117,9 @@ function assertNoSymlinks(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
     if (entry.isSymbolicLink()) {
-      throw new AkgSyncError(`refusing symlink in bundle: ${p}`);
+      throw new AkgSyncError(`refusing symlink in bundle: ${p}`, {
+        code: REJECTED,
+      });
     }
     if (entry.isDirectory()) assertNoSymlinks(p);
   }
@@ -130,9 +158,12 @@ export async function syncMirror({
 
   const buf = Buffer.from(await res.arrayBuffer());
 
+  // maxBuffer: the listing is one line per file, so it grows with the corpus
+  // — the same 1MB default that broke the server's bundle route applies here.
   const listing = spawnSync("tar", ["-tzf", "-"], {
     input: buf,
     encoding: "utf8",
+    maxBuffer: MAX_BUFFER,
   });
   if (listing.status !== 0) {
     throw new AkgSyncError(
@@ -149,7 +180,7 @@ export async function syncMirror({
     const extract = spawnSync(
       "tar",
       ["-xzf", "-", "-C", tmpDir, "--strip-components=1"],
-      { input: buf },
+      { input: buf, maxBuffer: MAX_BUFFER },
     );
     if (extract.status !== 0) {
       throw new AkgSyncError(

@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadSchemas } from "../src/envelope.mjs";
-import { initStore } from "./store.mjs";
+import { initStore, isValidId } from "./store.mjs";
 import {
   loadUsers,
   authenticate,
@@ -58,6 +58,22 @@ export async function buildApp({
     );
     reply.header("x-content-type-options", "nosniff");
     return payload;
+  });
+
+  // CS7: route params that name a stored object become file path segments.
+  // Guarding them here rather than per-route means a newly added route cannot
+  // reintroduce the traversal by forgetting to validate — the same reason the
+  // auth hook below is global. `:type` is separately allowlisted by its route;
+  // it is included because it is also a path segment.
+  app.addHook("onRequest", async (request, reply) => {
+    for (const key of ["id", "pid", "type"]) {
+      const value = request.params?.[key];
+      if (value !== undefined && !isValidId(value)) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_path_param", param: key });
+      }
+    }
   });
 
   // S1/S14: every route must opt into either `config.public` or an explicit

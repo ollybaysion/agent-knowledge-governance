@@ -23,15 +23,39 @@ export class StoreError extends Error {
   }
 }
 
+/**
+ * Non-throwing form — route entry points use this to answer 400 themselves
+ * (the app has no StoreError handler, so a throw would surface as a 500).
+ */
+export function isValidId(id) {
+  return typeof id === "string" && ID_RE.test(id) && !id.includes("..");
+}
+
 export function validateId(id) {
-  if (typeof id !== "string" || !ID_RE.test(id) || id.includes("..")) {
+  if (!isValidId(id)) {
     throw new StoreError(`유효하지 않은 id: ${JSON.stringify(id)}`, 400);
   }
   return id;
 }
 
-// S11: id는 파일명이 된다 — realpath가 store/ 밖으로 못 나가는지 마지막으로 한 번 더 확인.
+// S11 + CS7: id·경로 파라미터는 그대로 파일 경로가 된다. 가드는 두 겹이고 둘 다 필요하다.
+//
+// ① 상위 참조(`..`) 금지 — store 루트 검사만으로는 store *내부*의 하위트리 간
+//    이동을 못 막는다. `proposals/pending/<pid>`의 pid에 `../../db-schema/x`가
+//    들어오면 루트 안에 머무르므로 통과해 버렸다(editor가 approver 전용
+//    DELETE를 우회하던 경로). 정당한 relpath는 전부 리터럴 접두사 + id 형태라
+//    `..`를 쓸 일이 없으므로, 세그먼트 단위로 전면 거부한다. 그러면 relpath는
+//    자기 리터럴 접두사가 정한 하위트리를 벗어날 수 없다.
+// ② store 루트 밖 금지 — 절대경로 part나 심링크된 루트에 대한 최종 백스톱.
 function safeJoin(dir, ...parts) {
+  for (const part of parts) {
+    if (String(part).split(/[/\\]/).includes("..")) {
+      throw new StoreError(
+        `경로에 상위 참조가 있습니다: ${parts.join("/")}`,
+        400,
+      );
+    }
+  }
   const p = resolve(dir, ...parts);
   const base = resolve(dir);
   if (p !== base && !p.startsWith(base + "/")) {

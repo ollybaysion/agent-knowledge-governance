@@ -2,7 +2,7 @@
 // GET /api/index/:type (viewer), GET /api/bundle (viewer).
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { git } from "../git.mjs";
 import { readJson } from "../store.mjs";
 
@@ -80,17 +80,49 @@ export function registerMiscRoutes(app) {
       if (!existsSync(join(storeDir, "rendered")))
         return reply.code(404).send({ error: "nothing_rendered_yet" });
 
-      const r = spawnSync("tar", ["-czf", "-", "-C", storeDir, "rendered"], {
-        encoding: "buffer",
+      // Streamed, not buffered. The previous spawnSync had two problems that
+      // both scale with the corpus: it blocked the event loop for the whole
+      // tar (no other request could be served), and it capped output at
+      // maxBuffer — 1MB by default. Crossing ~1MB gzipped turned this route
+      // into a permanent 500 whose cause was invisible (the failure lands in
+      // r.error, which was never read), and `akg sync` fails open, so every
+      // mirror would have stopped updating without anyone being told.
+      const child = spawn("tar", ["-czf", "-", "-C", storeDir, "rendered"], {
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      if (r.status !== 0) {
+
+      // Distinguish "tar never started" (answerable with a clean 500, nothing
+      // has been written yet) from "tar died mid-stream" (headers are already
+      // out — see the destroy below).
+      const started = await new Promise((resolve) => {
+        child.once("spawn", () => resolve(true));
+        child.once("error", () => resolve(false));
+      });
+      if (!started) {
         return reply
           .code(500)
-          .send({ error: "bundle_failed", message: r.stderr?.toString() });
+          .send({ error: "bundle_failed", message: "tar를 실행하지 못했습니다" });
       }
+
+      let stderr = "";
+      child.stderr.on("data", (d) => {
+        if (stderr.length < 4096) stderr += d.toString();
+      });
+      // A tar that dies mid-stream must not be mistaken for a complete bundle.
+      // Destroying stdout truncates the gzip, and a truncated gzip fails to
+      // extract — so the client rejects it rather than installing a partial
+      // corpus.
+      child.on("close", (code) => {
+        if (code !== 0) {
+          child.stdout.destroy(
+            new Error(`tar exited ${code}: ${stderr.trim()}`),
+          );
+        }
+      });
+
       reply.header("etag", headRev);
       reply.header("content-type", "application/gzip");
-      return reply.send(r.stdout);
+      return reply.send(child.stdout);
     },
   );
 }
