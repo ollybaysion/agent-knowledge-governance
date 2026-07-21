@@ -56,9 +56,17 @@ test("a protected route without a token returns 401; with a wrong token also 401
     usersPath: join(home, "users.json"),
   });
 
-  const noAuth = await app.inject({ method: "GET", url: "/api/docs" });
+  // A write route is the protected one now: reads opt into anonymous access
+  // (see anon-read.test.mjs), writes never do.
+  const noAuth = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema",
+    payload: {},
+  });
   assert.equal(noAuth.statusCode, 401);
 
+  // A wrong token 401s on a read route too — presenting a bad credential is
+  // not the same as presenting none, so it is never downgraded to anonymous.
   const wrongAuth = await app.inject({
     method: "GET",
     url: "/api/docs",

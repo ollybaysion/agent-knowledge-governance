@@ -47,10 +47,13 @@ test("GET /app.js and /app.css are served publicly with the right content types"
   await cleanup();
 });
 
-test("GET /api/me requires auth and echoes id/role without leaking tokenHash", async () => {
+test("GET /api/me echoes id/role without leaking tokenHash", async () => {
   const { app, cleanup } = await setup();
+  // Without a token this now answers as the anonymous viewer — that response is
+  // what boots the dashboard's read-only view (see anon-read.test.mjs).
   const anon = await app.inject({ method: "GET", url: "/api/me" });
-  assert.equal(anon.statusCode, 401);
+  assert.equal(anon.statusCode, 200);
+  assert.equal(anon.json().anonymous, true);
 
   const res = await app.inject({
     method: "GET",
@@ -58,6 +61,10 @@ test("GET /api/me requires auth and echoes id/role without leaking tokenHash", a
     headers: { authorization: "Bearer t" },
   });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json(), { id: "renoir", role: "approver" });
+  assert.deepEqual(res.json(), {
+    id: "renoir",
+    role: "approver",
+    anonymous: false,
+  });
   await cleanup();
 });

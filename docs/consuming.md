@@ -20,15 +20,25 @@ status before suspecting the sync.
 
 ## 1. One-time setup
 
+**Usually none.** A server with anonymous read on — the default, see
+`AKG_ANON_READ` — serves the bundle without a credential, so `sync` works with
+nothing configured. Skip to §2.
+
+You need a token only if either is true:
+
+- the server sets `AKG_ANON_READ=0`, so reads require a viewer token; or
+- you are going to `propose` / `catalog-push`, which are writes and always
+  require one (`agent` role or higher).
+
 ```sh
 mkdir -p ~/.claude/akg
 echo "<your-token>" > ~/.claude/akg/token
 chmod 600 ~/.claude/akg/token
 ```
 
-The token is a viewer-role (or higher) token issued by the akg server's user
-admin CLI (`server/cli/akg-user.mjs`). `AKG_TOKEN` in the environment takes
-precedence over the token file if both are set.
+Tokens are issued by the akg server's user admin CLI
+(`server/cli/akg-user.mjs`). `AKG_TOKEN` in the environment takes precedence
+over the token file if both are set.
 
 ## 2. First sync
 
@@ -112,7 +122,8 @@ network fails, it logs the reason to stderr and exits `0`. The existing
 mirror is left exactly as it was — a broken/absent server never blocks a CC
 session or removes previously-synced docs. The only exit codes that mean
 "you need to fix something" are `1` for an auth failure (401 — your token is
-wrong or revoked) or a config error (no token / no server URL resolvable).
+wrong or revoked, or the server has `AKG_ANON_READ=0` and you sent none) or a
+config error (no server URL resolvable).
 
 ## 5. Manual rehearsal procedure
 

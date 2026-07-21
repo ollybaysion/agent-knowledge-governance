@@ -29,6 +29,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 const BODY_LIMIT = 512 * 1024; // S13
 
+// Anonymous read: a request carrying NO token may pass on routes that opt in
+// with `config.anonOk`. This does not loosen S1 — S1's rule is "유효 토큰 없는
+// 쓰기 = 무조건 401", and the threat S3 describes (a doc becoming a prompt
+// injection channel for every session) is a write-side threat. The defense
+// line for reads is the network boundary (S2: loopback + reverse proxy).
+// Default ON so an in-house deploy needs no flag; AKG_ANON_READ=0 requires a
+// viewer token for reads too.
+const ANON_READ = process.env.AKG_ANON_READ !== "0";
+// Frozen: this object is shared across requests, so a handler must not mutate it.
+const ANON_USER = Object.freeze({ id: null, role: "viewer", anon: true });
+
 /**
  * @param {{storeDir: string, usersPath: string, schemasDir?: string}} opts
  * @returns {Promise<import("fastify").FastifyInstance>}
@@ -105,12 +116,21 @@ export async function buildApp({
 
     const authz = request.headers.authorization ?? "";
     const token = authz.startsWith("Bearer ") ? authz.slice(7) : null;
-    const user = token ? authenticate(users, token) : null;
-    if (!user) {
-      recordAuthFailure(ip);
-      return reply.code(401).send({ error: "unauthorized" });
+    // Only a request with NO credential at all can fall through to the
+    // anonymous identity. A token that is present but wrong/expired is a
+    // failed authentication, not an anonymous visit — it still 401s and still
+    // counts toward the rate limit, so anonymous read can never be used to
+    // probe tokens for free.
+    if (!token && ANON_READ && cfg.anonOk) {
+      request.user = ANON_USER;
+    } else {
+      const user = token ? authenticate(users, token) : null;
+      if (!user) {
+        recordAuthFailure(ip);
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      request.user = user;
     }
-    request.user = user;
 
     const roles = cfg.roles;
     if (!roles) {
@@ -121,7 +141,7 @@ export async function buildApp({
         message: "이 경로는 config.roles가 없습니다",
       });
     }
-    if (!hasRole(user, roles)) {
+    if (!hasRole(request.user, roles)) {
       return reply.code(403).send({ error: "forbidden" });
     }
   });
