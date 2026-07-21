@@ -442,7 +442,9 @@ function stat(value, label, klass) {
 }
 
 // ================= 문서 (단일 문서 뷰) =================
-let editMode = false;
+// 편집은 슬롯 단위 클릭-투-편집(도착 상태 텍스트를 바로 누르면 그 슬롯만
+// 편집 필드로 바뀜) — 문서 전체를 편집 모드로 앞서 전환하는 버튼은 없다.
+let editingAddr = null; // null | slot address currently being edited
 async function renderDocScreen(type, id) {
   const section = $("doc");
   section.replaceChildren(el("p", { class: "loading", text: "불러오는 중…" }));
@@ -458,7 +460,7 @@ async function renderDocScreen(type, id) {
   }
   lastDoc = { type, id };
   highlightTree();
-  editMode = false;
+  editingAddr = null;
   const { json: doc, rev, slots, md } = res.data;
   const canApprove = currentUser.role === "approver";
   const canEdit = canApprove || currentUser.role === "editor";
@@ -516,7 +518,7 @@ async function renderDocScreen(type, id) {
           type: "button",
           class: "btn ghost sm",
           onclick: () => {
-            editMode = true;
+            editingAddr = slot.address;
             renderInner();
           },
           text: "복원",
@@ -541,14 +543,30 @@ async function renderDocScreen(type, id) {
     confirmed: "t-conf",
     deprecated: "t-conf",
   };
+  function startEdit(address) {
+    editingAddr = address;
+    renderInner();
+  }
+  function cancelEdit() {
+    editingAddr = null;
+    renderInner();
+  }
   function slotReadText(slot) {
+    const editable = canEdit && slot.tier !== "deprecated";
+    const common = editable
+      ? { title: "클릭해서 편집", onclick: () => startEdit(slot.address) }
+      : {};
     if (slot.tier === "scaffold")
-      return el("span", { class: "t-sc", text: "{{설명}}" });
-    const span = el("span", {
-      class: `${tierTextClass[slot.tier]}${slot.tier === "deprecated" ? " strike" : ""}`,
+      return el("span", {
+        class: editable ? "t-sc editable" : "t-sc",
+        text: "{{설명}}",
+        ...common,
+      });
+    return el("span", {
+      class: `${tierTextClass[slot.tier]}${slot.tier === "deprecated" ? " strike" : ""}${editable ? " editable" : ""}`,
       text: slot.text || "",
+      ...common,
     });
-    return span;
   }
   function slotEditFields(slot) {
     const textArea = el("textarea", { text: slot.text ?? "" });
@@ -560,13 +578,31 @@ async function renderDocScreen(type, id) {
     inputs[slot.address] = { textArea, evidenceInput };
     return [textArea, evidenceInput];
   }
+  // Save/Cancel pair shown inline next to whichever slot is being edited.
+  function slotEditActs(slot) {
+    return el("span", { class: "acts" }, [
+      el("button", {
+        type: "button",
+        class: "btn primary sm",
+        onclick: () => saveEdit(slot.address),
+        text: "저장",
+      }),
+      el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        onclick: cancelEdit,
+        text: "취소",
+      }),
+    ]);
+  }
 
   // .ps row (purpose / query note)
   function psRow(slot) {
-    if (editMode && slot.tier !== "deprecated") {
-      return el("div", { class: "ps" }, [
+    if (editingAddr === slot.address) {
+      return el("div", { class: "ps editing" }, [
         tierBadge(slot.tier),
         el("div", { class: "txt2" }, slotEditFields(slot)),
+        slotEditActs(slot),
       ]);
     }
     return el("div", { class: "ps" }, [
@@ -586,10 +622,11 @@ async function renderDocScreen(type, id) {
         { class: "cslot" },
         el("span", { class: "dim", text: "—" }),
       );
-    if (editMode && slot.tier !== "deprecated") {
-      return el("div", { class: "cslot" }, [
+    if (editingAddr === slot.address) {
+      return el("div", { class: "cslot editing" }, [
         tierBadge(slot.tier),
         el("span", { class: "txt3" }, slotEditFields(slot)),
+        slotEditActs(slot),
       ]);
     }
     return el("div", { class: "cslot" }, [
@@ -728,45 +765,12 @@ async function renderDocScreen(type, id) {
       }),
     );
 
-    const editToggle = canEdit
-      ? el("button", {
-          type: "button",
-          class: `btn sm${editMode ? " primary" : " ghost"}`,
-          onclick: () => {
-            editMode = !editMode;
-            renderInner();
-          },
-          text: editMode ? "편집 취소" : "편집",
-        })
-      : null;
-
-    const cardBtns = editMode
-      ? [
-          el("button", {
-            type: "button",
-            class: "btn primary",
-            onclick: saveEdit,
-            text: "저장",
-          }),
-          el("span", {
-            class: "dim",
-            text: `If-Match: ${shortRev(rev)} · 슬롯 안 겹치면 자동 재베이스(S6)`,
-          }),
-        ]
-      : [
-          el("span", {
-            class: "dim",
-            text: `If-Match: ${shortRev(rev)} · 편집·확정·폐기는 슬롯 단위`,
-          }),
-        ];
-
     section.replaceChildren(
       el("div", { class: "dochead" }, [
         el("span", { class: "id", text: id }),
         el("span", { class: "chip", text: type }),
         el("span", { class: "chip", text: doc.status }),
         el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
-        editToggle,
         el("span", { class: "brk" }),
         ...keywordChips(doc.keywords || []),
       ]),
@@ -776,27 +780,36 @@ async function renderDocScreen(type, id) {
         { class: "docwrap" },
         el("div", { class: "card" }, [
           el("div", { class: "md" }, mdChildren),
-          el("div", { class: "savebar" }, cardBtns),
+          el(
+            "div",
+            { class: "savebar" },
+            el("span", {
+              class: "dim",
+              text: canEdit
+                ? `If-Match: ${shortRev(rev)} · 값을 클릭하면 바로 편집 · 슬롯 안 겹치면 자동 재베이스(S6)`
+                : `If-Match: ${shortRev(rev)} · 편집·확정·폐기는 슬롯 단위`,
+            }),
+          ),
         ]),
       ),
     );
   }
 
-  async function saveEdit() {
+  async function saveEdit(address) {
+    const f = inputs[address];
+    if (!f) return;
     const clientBody = structuredClone(doc.body);
-    for (const [address, f] of Object.entries(inputs)) {
-      const text = f.textArea.value.trim();
-      const ev = f.evidenceInput.value
-        .split(";")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const existing = getSlot(clientBody, address) || {};
-      setSlot(clientBody, address, {
-        text: text || null,
-        tier: existing.tier,
-        evidence: ev,
-      });
-    }
+    const text = f.textArea.value.trim();
+    const ev = f.evidenceInput.value
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const existing = getSlot(clientBody, address) || {};
+    setSlot(clientBody, address, {
+      text: text || null,
+      tier: existing.tier,
+      evidence: ev,
+    });
     const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "if-match": rev },
