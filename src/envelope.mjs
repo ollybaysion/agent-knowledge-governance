@@ -223,7 +223,14 @@ function relaxSchema(schema) {
   if (schema.$ref) return { ...schema }; // leave referenced schemas strict
   const out = {};
   for (const [k, v] of Object.entries(schema)) {
-    if (k === "required" || k === "minItems") continue;
+    // Relax the constraints that make a field "complete": presence (required,
+    // dependentRequired), count (minItems), and non-emptiness/shape of a value
+    // that IS there (pattern, minLength). A half-typed column (a name but no
+    // type yet) must save. `type`/`enum`/`additionalProperties` stay — a draft
+    // still can't put a number where a string goes or invent unknown keys. The
+    // full pattern is re-checked at activation.
+    if (["required", "minItems", "pattern", "minLength", "dependentRequired"].includes(k))
+      continue;
     if (k === "properties") {
       out.properties = {};
       for (const [pk, pv] of Object.entries(v)) out.properties[pk] = relaxSchema(pv);

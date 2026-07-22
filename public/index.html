@@ -53,7 +53,10 @@
     </section>
 
     <div class="layout" hidden id="app-layout">
-      <aside aria-label="문서 트리" id="doc-tree"></aside>
+      <aside aria-label="문서 트리" class="sidebar">
+        <div id="doc-tree"></div>
+        <div id="tree-actions"></div>
+      </aside>
       <main>
         <!-- 개요 -->
         <section id="corpus" class="on">
@@ -182,6 +185,9 @@
 
         <!-- 문서 -->
         <section id="doc"></section>
+
+        <!-- 새 문서 드래프트 (저장 전, 로컬) -->
+        <section id="draft"></section>
 
         <!-- 검토 대기열 -->
         <section id="queue"></section>
