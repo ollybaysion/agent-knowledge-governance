@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>akg — 지식이 쌓이는 구조 (아키텍처 한눈에)</title>
+<style>
+/* ── 토큰 (akg 하우스 스타일 승계) ───────────────────────── */
+:root {
+  color-scheme: light;
+  --bg: #fbfcfc;
+  --fg: #1b2326;
+  --muted: #5b6a70;
+  --faint: #8b989e;
+  --border: #bfcbcf;
+  --line: #93a5ab;
+  --surface: #f1f5f6;
+  --sunken: #e7eef0;
+
+  --blue: #2f6ba8;      --blue-soft: #dde9f5;
+  --orange: #a85c2c;    --orange-soft: #f6e7db;
+  --purple: #6a52c0;    --purple-soft: #e9e5f8;
+  --teal: #2a7b7b;      --teal-soft: #dcefee;
+  --rose: #a83a63;      --rose-soft: #f8e0e8;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "D2Coding", monospace;
+
+  --a1: var(--blue);   --a1-soft: var(--blue-soft);
+  --a2: var(--orange); --a2-soft: var(--orange-soft);
+  --a3: var(--purple); --a3-soft: var(--purple-soft);
+  --a4: var(--teal);   --a4-soft: var(--teal-soft);
+  --a5: var(--rose);   --a5-soft: var(--rose-soft);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1416;
+    --fg: #e3ecee;
+    --muted: #97a6ac;
+    --faint: #6d7c82;
+    --border: #44545a;
+    --line: #66797f;
+    --surface: #161f22;
+    --sunken: #1d282b;
+
+    --blue: #6aa9e0;    --blue-soft: #14263a;
+    --orange: #dd9155;  --orange-soft: #33241a;
+    --purple: #a693e8;  --purple-soft: #241f36;
+    --teal: #63c3bb;    --teal-soft: #14302f;
+    --rose: #e88aae;    --rose-soft: #351a24;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1416; --fg: #e3ecee; --muted: #97a6ac; --faint: #6d7c82;
+  --border: #44545a; --line: #66797f; --surface: #161f22; --sunken: #1d282b;
+  --blue: #6aa9e0; --blue-soft: #14263a; --orange: #dd9155; --orange-soft: #33241a;
+  --purple: #a693e8; --purple-soft: #241f36; --teal: #63c3bb; --teal-soft: #14302f;
+  --rose: #e88aae; --rose-soft: #351a24;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.page { max-width: 1180px; margin: 0 auto; padding: 1.4rem 1.4rem 4rem; }
+p, li { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }
+code, .mono { font-family: var(--font-mono); word-break: normal; }
+
+/* ── 머리 ── */
+.masthead { padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+h1 { font-size: 1.42rem; font-weight: 800; margin: 0 0 0.2rem; letter-spacing: -0.01em; }
+.masthead .sub { margin: 0; color: var(--muted); font-size: 0.92rem; }
+.masthead .sub b { color: var(--fg); }
+
+.legend {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; align-items: center;
+  padding: 0.85rem 0 0.2rem; font-size: 0.82rem; color: var(--muted);
+}
+.legend .item { display: flex; align-items: center; gap: 0.4rem; }
+.legend .dot { width: 12px; height: 12px; border-radius: 3px; border: 2px solid currentColor; }
+.legend .k1 { color: var(--a1); } .legend .k2 { color: var(--a2); }
+.legend .k3 { color: var(--a3); } .legend .k4 { color: var(--a4); }
+.legend .k5 { color: var(--a5); }
+
+/* ── 층(band) ── */
+.band {
+  display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.9rem;
+  margin-top: 1.15rem; align-items: start;
+}
+.rail {
+  font-size: 0.82rem; font-weight: 700; color: var(--fg);
+  border-left: 3px solid var(--line); padding: 0.15rem 0 0.15rem 0.65rem;
+  position: sticky; top: 0.4rem;
+}
+.rail .n { display: block; font-family: var(--font-mono); color: var(--faint); font-size: 0.9em; font-weight: 700; }
+.rail .sm { display: block; font-weight: 400; color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+
+/* ── 노드 카드 ── */
+.node {
+  border: 1.5px solid var(--border); border-radius: 12px;
+  background: var(--surface); padding: 0.6rem 0.75rem;
+}
+.node h3 { margin: 0 0 0.25rem; font-size: 0.94rem; font-weight: 700; }
+.node p { margin: 0.15rem 0; font-size: 0.83rem; color: var(--muted); }
+.node p b { color: var(--fg); font-weight: 600; }
+.node .tag {
+  display: inline-block; font-family: var(--font-mono); font-size: 0.72rem;
+  background: var(--sunken); color: var(--muted); border-radius: 5px;
+  padding: 0.02rem 0.35rem; margin: 0.12rem 0.2rem 0 0;
+}
+.k1 { --c: var(--a1); --c-soft: var(--a1-soft); }
+.k2 { --c: var(--a2); --c-soft: var(--a2-soft); }
+.k3 { --c: var(--a3); --c-soft: var(--a3-soft); }
+.k4 { --c: var(--a4); --c-soft: var(--a4-soft); }
+.k5 { --c: var(--a5); --c-soft: var(--a5-soft); }
+.node.tint { border-color: var(--c); background: var(--c-soft); }
+.node.tint h3 { color: var(--c); }
+
+/* ── ① 입력: 3채널 ── */
+.ingress { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+.chan { display: flex; flex-direction: column; gap: 0.4rem; }
+.chan > .head {
+  font-weight: 800; font-size: 0.92rem; color: var(--c);
+  border: 1.5px solid var(--c); border-radius: 10px; background: var(--c-soft);
+  padding: 0.4rem 0.6rem; text-align: center;
+}
+.chan > .head span { display: block; font-weight: 500; font-size: 0.76rem; color: var(--muted); }
+.step {
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  padding: 0.45rem 0.6rem; font-size: 0.82rem;
+}
+.step b { color: var(--fg); }
+.step .who { font-family: var(--font-mono); font-size: 0.72rem; color: var(--c); font-weight: 700; }
+.step .tag {
+  display: inline-block; font-family: var(--font-mono); font-size: 0.71rem;
+  background: var(--sunken); color: var(--muted); border-radius: 5px;
+  padding: 0.02rem 0.35rem; margin-top: 0.15rem;
+}
+.down { text-align: center; color: var(--faint); font-size: 0.85rem; line-height: 1; margin: -0.1rem 0; }
+
+/* ── 합류 띠 ── */
+.joiner {
+  margin-top: 0.9rem; grid-column: 2; text-align: center;
+  border: 1.5px dashed var(--a4); border-radius: 10px; background: var(--a4-soft);
+  color: var(--fg); font-size: 0.85rem; padding: 0.45rem 0.7rem;
+}
+.joiner b { color: var(--a4); }
+.bandflow { grid-column: 2; text-align: center; color: var(--faint); font-size: 0.9rem; padding: 0.25rem 0; }
+.bandflow b { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
+
+/* ── ② 관문 ── */
+.gates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+@media (max-width: 720px) { .gates { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── ③ store ── */
+.store-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 0.75rem; }
+.store-grid .col { display: flex; flex-direction: column; gap: 0.6rem; }
+.envelope { border: 1.5px solid var(--a4); border-radius: 12px; background: var(--a4-soft); padding: 0.6rem 0.7rem; }
+.envelope h3 { margin: 0 0 0.35rem; font-size: 0.9rem; color: var(--a4); font-weight: 700; }
+.nest { border: 1px solid var(--border); border-radius: 9px; background: var(--bg); padding: 0.4rem 0.55rem; font-size: 0.8rem; }
+.nest + .nest { margin-top: 0.35rem; }
+.nest .lbl { font-family: var(--font-mono); font-size: 0.72rem; color: var(--faint); font-weight: 700; }
+.nest b { color: var(--fg); }
+.hemis { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin-top: 0.35rem; }
+.hemi { border-radius: 8px; padding: 0.35rem 0.45rem; font-size: 0.76rem; border: 1px solid var(--border); }
+.hemi.fact { background: var(--purple-soft); }
+.hemi.slot { background: var(--rose-soft); }
+.hemi .h { display: block; font-weight: 700; font-size: 0.8rem; margin-bottom: 0.1rem; }
+.hemi.fact .h { color: var(--purple); }
+.hemi.slot .h { color: var(--rose); }
+
+/* 타입 칩 */
+.types { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.15rem; }
+.chip {
+  font-family: var(--font-mono); font-size: 0.73rem; font-weight: 700;
+  border: 1px solid var(--a4); color: var(--a4); border-radius: 999px;
+  padding: 0.08rem 0.5rem; background: var(--bg);
+}
+.chip.plain { border-color: var(--border); color: var(--muted); }
+
+/* ── ④ 티어 체인 ── */
+.tierchain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.35rem; }
+.tier {
+  flex: 1 1 8rem; min-width: 7.5rem; border-radius: 10px; padding: 0.5rem 0.55rem;
+  border: 1.5px solid var(--c); background: var(--c-soft);
+}
+.tier .t { font-family: var(--font-mono); font-weight: 800; font-size: 0.86rem; color: var(--c); }
+.tier .d { font-size: 0.76rem; color: var(--muted); margin-top: 0.1rem; }
+.tsep { align-self: center; color: var(--faint); font-weight: 700; padding: 0 0.1rem; }
+.t-scaffold { --c: var(--faint); --c-soft: var(--sunken); }
+.t-inferred { --c: var(--a1); --c-soft: var(--a1-soft); }
+.t-confirmed { --c: var(--a4); --c-soft: var(--a4-soft); }
+.t-deprecated { --c: var(--a2); --c-soft: var(--a2-soft); }
+.tiernote { font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+.tiernote b { color: var(--fg); }
+.tiernote .mono { color: var(--fg); font-size: 0.76rem; }
+
+/* ── ⑤ 소비 ── */
+.egress { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem; }
+@media (max-width: 720px) {
+  .ingress { grid-template-columns: 1fr; }
+  .store-grid, .egress { grid-template-columns: 1fr; }
+  .band { grid-template-columns: 1fr; }
+  .rail { position: static; border-left: none; border-top: 3px solid var(--line); padding: 0.5rem 0 0; }
+  .joiner, .bandflow { grid-column: 1; }
+}
+
+/* ── 불변식 ── */
+.rules { margin-top: 1.6rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.rules h2 { font-size: 0.95rem; margin: 0 0 0.6rem; }
+.rulegrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+@media (max-width: 720px) { .rulegrid { grid-template-columns: 1fr; } }
+.rule { border: 1.5px solid var(--border); border-left: 4px solid var(--a5); border-radius: 9px; padding: 0.5rem 0.7rem; background: var(--surface); }
+.rule b { color: var(--a5); }
+.rule p { margin: 0.15rem 0 0; font-size: 0.82rem; color: var(--muted); }
+.foot { margin-top: 1.4rem; color: var(--faint); font-size: 0.76rem; font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <h1>agent-knowledge-governance — 지식이 쌓이는 구조</h1>
+    <p class="sub">사내 도메인 지식의 <b>SSoT</b>. 지식은 세 경로로 들어와(신규 저작 · 기존 문서 수집 · 스키마·팩트),
+      관문을 통과해 <b>git store</b>에 진실원으로 앉고, 슬롯 티어 생애를 거쳐 로컬로 <b>주입</b>된다.</p>
+    <div class="legend">
+      <span class="item k1"><span class="dot"></span>신규 저작(사람·에이전트)</span>
+      <span class="item k2"><span class="dot"></span>수집기(외부 문서)</span>
+      <span class="item k3"><span class="dot"></span>스키마·기계 팩트</span>
+      <span class="item k4"><span class="dot"></span>서버 / SSoT(git)</span>
+      <span class="item k5"><span class="dot"></span>소비 / 주입</span>
+    </div>
+  </header>
+
+  <!-- ① 입력 -->
+  <section class="band">
+    <div class="rail"><span class="n">①</span>입력<span class="sm">지식이 들어오는 세 경로</span></div>
+    <div class="ingress">
+
+      <!-- 채널 1: 신규 저작 -->
+      <div class="chan k1">
+        <div class="head">신규 저작<span>아예 처음부터 새 문서</span></div>
+        <div class="step"><span class="who">사람 · editor</span><br><b>대시보드 폼</b>으로 새 문서 생성 — 슬롯은 <code>scaffold</code>(빈칸)로 시작</div>
+        <div class="down">▼</div>
+        <div class="step"><span class="who">agent · foundry</span><br>proposal JSON 제출 — 에이전트·구술·foundry 스킬은 <b>직접 못 쓰고</b> 제안만<span class="tag">POST /api/proposals</span></div>
+        <div class="down">▼</div>
+        <div class="step">제안 큐에 적재 — 슬롯 값 하나 단위 검토<span class="tag">store/proposals/&lt;type&gt;/</span></div>
+      </div>
+
+      <!-- 채널 2: 수집기 -->
+      <div class="chan k2">
+        <div class="head">기존 문서 수집<span>만들어둔 문서를 업로드</span></div>
+        <div class="step"><span class="who">어댑터 · 신뢰경계 밖</span><br><b>repo-fs</b>(내장)·사내 위키 스크립트 → 항목당 <b>JSONL 한 줄</b><span class="tag">stdout</span></div>
+        <div class="down">▼</div>
+        <div class="step"><span class="who">수집 코어 · 순수함수</span><br>정규화 → 출처 지문 → 제안 상태와 <b>차분</b>(create·update·rename·orphan)</div>
+        <div class="down">▼</div>
+        <div class="step"><b>수집 배치</b>로 착지 — 실행 1회=배치 1건, 청크 제출, 기본 200개 상한(지정 수집)<span class="tag">POST /api/intake/*</span></div>
+      </div>
+
+      <!-- 채널 3: 스키마·팩트 -->
+      <div class="chan k3">
+        <div class="head">스키마 · 기계 팩트<span>정형 정의와 자동 사실</span></div>
+        <div class="step"><b>JSON Schema 파일</b>이 포맷 진실원 — 타입 5종 정의, <b>모르는 키 거부</b><span class="tag">schemas/&lt;type&gt;/v1.schema.json</span></div>
+        <div class="down">▼</div>
+        <div class="step"><span class="who">catalog-push</span><br>DB·코드에서 팩트 자동 갱신(컬럼표·PK·관계) — 티어 없음, 신선도만<span class="tag">describe_table</span></div>
+        <div class="down">▼</div>
+        <div class="step"><span class="who">akg-collector</span><br>Oracle 카탈로그 → db-schema 문서 시드(별도 수집기)</div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="band">
+    <div class="rail" aria-hidden="true"></div>
+    <div class="joiner">세 경로 모두 <b>서버 API 한 곳</b>을 통과 — 서버가 store의 <b>유일한 writer</b>, 모든 변이 = 쓰기 큐 직렬화 → git commit 1건(=감사 행)</div>
+  </div>
+
+  <!-- ② 관문 -->
+  <section class="band">
+    <div class="rail"><span class="n">②</span>관문<span class="sm">통과해야 store에 앉는다</span></div>
+    <div class="gates">
+      <div class="node tint k3"><h3>스키마 검증</h3><p>타입 스키마로 검증(수제 ajv). 전 층위 <b>additionalProperties:false</b> — 모르는 키·버전 거부.</p></div>
+      <div class="node tint k2"><h3>격리(quarantine)</h3><p>수집물은 예외 없이 <b>quarantined</b> 착지. <b>안 보임이 아니라 안 나감</b> — rendered/·번들에서 제외, 주입·배포 차단.</p></div>
+      <div class="node tint k1"><h3>검토 대기열</h3><p>사람이 슬롯/배치 단위로 열람·채택. proposals·intake 큐 모두 <b>git 안</b>이라 재시작에도 살아남고 diff로 읽힘.</p></div>
+      <div class="node tint k4"><h3>채택 · 활성화</h3><p>채택=inferred 반영(에이전트 경로 한계). 수집물 <b>activate</b>=키워드 확정+렌더(approver).</p></div>
+    </div>
+  </section>
+
+  <div class="band"><div class="rail" aria-hidden="true"></div><div class="bandflow">▼ <b>진실원 저장 + 파생물 렌더가 한 커밋</b></div></div>
+
+  <!-- ③ SSoT -->
+  <section class="band">
+    <div class="rail"><span class="n">③</span>SSoT<span class="sm">git 레포 store/ — 운영 DB 없음</span></div>
+    <div class="store-grid">
+
+      <div class="col">
+        <div class="envelope">
+          <h3>진실원 문서 = store/&lt;type&gt;/&lt;id&gt;.json</h3>
+          <div class="nest"><span class="lbl">봉투 (5키 고정)</span><br><b>schema · id · keywords · status · body</b> — 라우팅·주입 메타</div>
+          <div class="nest"><span class="lbl">└ body</span> — 타입별 알맹이
+            <div class="hemis">
+              <div class="hemi fact"><span class="h">팩트 (기계)</span>원천과 <b>대조</b>로 참/거짓. 티어 없음·신선도만. catalog-push 자동.</div>
+              <div class="hemi slot"><span class="h">슬롯 (사람)</span>해석 = <b>티어드 값</b> <code>{text,tier,evidence,by,at}</code>. 검토·승격 단위.</div>
+            </div>
+          </div>
+        </div>
+        <div class="node k4">
+          <h3>타입 5종</h3>
+          <div class="types">
+            <span class="chip">db-schema</span><span class="chip">msg-format</span>
+            <span class="chip">domain-skill</span><span class="chip">domain-doc</span>
+            <span class="chip plain">unclassified</span>
+          </div>
+          <p>정형 4종은 JSON 진실원. <b>unclassified</b>만 md가 진실원(수집물 기본 착지 타입).</p>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="node k4"><h3>파생물 (같은 커밋에 자동 생성)</h3>
+          <p><b>render(json)</b>의 결정적 산출 — 어긋난 상태가 존재 불가.</p>
+          <p><span class="tag">rendered/&lt;type&gt;/index.json</span> 프로바이더 계약</p>
+          <p><span class="tag">rendered/&lt;type&gt;/docs/&lt;id&gt;.md</span> 주입용 md</p>
+        </div>
+        <div class="node k4"><h3>큐 · 이력도 git</h3>
+          <p><span class="tag">proposals/</span> <span class="tag">intake/</span> 검토 대기열 = 디렉토리</p>
+          <p>감사 = <b>git 이력 그 자체</b>(author·시각·경로·메시지). <code>GET /api/audit</code>=git log.</p>
+        </div>
+        <div class="node"><h3>유일한 비-git 상태</h3>
+          <p><span class="tag">users.json</span> (0600) — 토큰 sha256 해시 + 역할. 시크릿이라 git 밖.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ④ 티어 생애 -->
+  <section class="band">
+    <div class="rail"><span class="n">④</span>슬롯 티어 생애<span class="sm">사람 지식의 신뢰도 (이 전이가 곧 쓰기 검증 사양)</span></div>
+    <div>
+      <div class="tierchain">
+        <div class="tier t-scaffold"><span class="t">scaffold</span><div class="d">빈칸 — text=null. 문서 생성·새 슬롯 등장.</div></div>
+        <span class="tsep">→</span>
+        <div class="tier t-inferred"><span class="t">inferred</span><div class="d">채택·편집. <b>evidence 1개 이상 필수</b>. 에이전트는 여기까지.</div></div>
+        <span class="tsep">→</span>
+        <div class="tier t-confirmed"><span class="t">confirmed</span><div class="d">promote — <b>approver 전용</b>. text·evidence 불변.</div></div>
+        <span class="tsep">→</span>
+        <div class="tier t-deprecated"><span class="t">deprecated</span><div class="d">신뢰 철회 — 원천 소멸(자동) or 수동 폐기. 내용 보존, 렌더·주입 제외.</div></div>
+      </div>
+      <p class="tiernote"><b>못 박힌 규칙:</b> confirmed로 들어오는 화살표는 <span class="mono">promote</span> 하나뿐 — 어떤 쓰기 경로도 confirmed를 직접 생성 못 함.
+        confirmed 슬롯을 고치면 <b>자동 강등(→inferred)</b>. agent 토큰은 티어드 값을 직접 못 씀(제안만). deprecated 복원 = 재채택 → 항상 inferred(재검토 강제), 제거 확정 = approver.</p>
+    </div>
+  </section>
+
+  <div class="band"><div class="rail" aria-hidden="true"></div><div class="bandflow">▼ <b>sync(미러 당김) · 키워드 매치 시 주입</b></div></div>
+
+  <!-- ⑤ 소비 -->
+  <section class="band">
+    <div class="rail"><span class="n">⑤</span>소비<span class="sm">각자 로컬(CC)로 주입</span></div>
+    <div class="egress">
+      <div class="node tint k5"><h3>akg CLI</h3>
+        <p><b>sync</b> 미러 당김 · <b>propose</b> 제안 푸시 · <b>catalog-push</b> 팩트 갱신</p>
+        <p>미러 = 로컬 캐시 <span class="tag">~/.claude/akg/&lt;type&gt;/</span> — 서버가 죽어도 마지막 미러로 계속 동작.</p>
+      </div>
+      <div class="node tint k5"><h3>키워드 매치 → 주입</h3>
+        <p>키워드 매치는 항상 로컬 미러 인덱스. 본문은 두 모드:</p>
+        <p><b>A모드</b> — 미러 md 주입(claude-hooks 무수정, 기본)</p>
+        <p><b>B모드</b> — 매치 시 허브 신선본 fetch(하드 타임아웃 → 실패 시 미러 폴백)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 불변식 -->
+  <section class="rules">
+    <h2>한눈 요약 — 이 구조를 지탱하는 불변식 4</h2>
+    <div class="rulegrid">
+      <div class="rule"><b>서버가 유일한 writer</b><p>모든 변이는 서버 API → 쓰기 큐 직렬화 → git commit 1건. 단일 프로세스라 머지 충돌이 원천 부재.</p></div>
+      <div class="rule"><b>모르는 키 거부</b><p>JSON 진실원 + 전 층위 스키마 검증. md 시절 "무경고 유실"을 스키마 마이그레이션으로 드러낸다.</p></div>
+      <div class="rule"><b>사람만 승격</b><p>agent=제안만, editor=채택·편집(inferred), approver=승격(confirmed)·삭제 확정. 신뢰는 사람 관문을 통과해야 오른다.</p></div>
+      <div class="rule"><b>격리는 "안 나감"</b><p>수집물은 quarantined 착지 → rendered/·번들에서 제외. 검토 전 외부 텍스트가 주입·배포 표면에 못 오른다(프롬프트 주입 방어).</p></div>
+    </div>
+    <p class="foot">정본: docs/agent-knowledge-governance-design.md (§2·§3·D2~D6) · json-spec.md (§1 세 축·§3 티어드 값) · collector-design.md (§3·C0~C9)</p>
+  </section>
+
+</div>
+</body>
+</html>

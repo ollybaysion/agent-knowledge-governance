@@ -75,6 +75,41 @@ function toast(message, klass) {
   toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
 }
 
+// ---------- JSON 보기 패널 (승인자 전용 — 문서를 좌우로 갈라 원본 store JSON) ----------
+// 모달로 문서를 덮지 않고, 문서 뷰를 좌우로 갈라 오른쪽에 붙인다 — 렌더된 문서와
+// 원본 JSON 을 나란히 대조하며 승격을 판단하게. renderInner 가 다시 그릴 때마다
+// 최신 doc 으로 새로 만들어지므로 편집·승격 직후 JSON 도 즉시 갱신된다(상태는
+// 여는 여부뿐). CSP(script-src 'self') 아래라 인라인 없이 el/addEventListener 로만.
+function jsonPane(title, obj, onClose) {
+  const pretty = JSON.stringify(obj, null, 2);
+  return el("aside", { class: "json-pane", "aria-label": "원본 JSON" }, [
+    el("div", { class: "jm-head" }, [
+      el("span", { class: "jm-title", text: title }),
+      el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        text: "복사",
+        onclick: async () => {
+          try {
+            await navigator.clipboard.writeText(pretty);
+            toast("JSON 을 복사했습니다.");
+          } catch {
+            toast("복사할 수 없습니다 — 텍스트를 직접 선택해 복사하세요.", "error");
+          }
+        },
+      }),
+      el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        "aria-label": "JSON 패널 닫기",
+        text: "✕",
+        onclick: onClose,
+      }),
+    ]),
+    el("pre", { class: "jm-body", text: pretty }),
+  ]);
+}
+
 // ---------- theme ----------
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -582,6 +617,7 @@ async function renderDocScreen(type, id) {
   let editBuf = null; // {text, evidence[]} — working copy of the open slot
   let reconcileFor = null; // {address, doc, rev, overlap} — 409 화해 카드 상태
   const live = {}; // live refs of the open editor (badge/caption/save/diff)
+  let jsonOpen = false; // 승인자 원본 JSON 좌우 분할 패널이 열려 있는지
 
   const notice = el("div", { id: "doc-notice" });
 
@@ -1321,6 +1357,25 @@ async function renderDocScreen(type, id) {
         el("span", { class: "brk" }),
         ...keywordChips(doc.keywords || []),
         statusSwitch(),
+        // 승인자는 렌더에 안 드러나는 필드(티어드 값의 by/at/evidence, catalog
+        // 팩트)까지 원본 store JSON 으로 확인할 수 있다. 데이터는 이미 응답에
+        // 있으므로 버튼만 더하는 열람 affordance(승인자 전용).
+        canApprove
+          ? el(
+              "button",
+              {
+                type: "button",
+                class: `btn ghost sm json-view${jsonOpen ? " on" : ""}`,
+                "aria-pressed": jsonOpen ? "true" : "false",
+                title: "문서를 좌우로 갈라 원본 store JSON 을 함께 봅니다(승인자 전용).",
+                onclick: () => {
+                  jsonOpen = !jsonOpen;
+                  renderInner();
+                },
+              },
+              "JSON",
+            )
+          : null,
       ]),
       // Say it on the document itself. Someone reading an inactive doc is
       // deciding whether to turn it on; the badge alone does not tell them
@@ -1334,22 +1389,36 @@ async function renderDocScreen(type, id) {
           ])
         : null,
       notice,
+      // 승인자가 JSON 을 열면 문서(좌)와 원본 JSON(우)을 좌우로 가른다. 닫혀
+      // 있으면 docwrap 이 그대로 한 폭을 쓴다(기존과 동일). 좁은 화면은 세로로 쌓임.
       el(
         "div",
-        { class: "docwrap" },
-        el("div", { class: "card" }, [
-          el("div", { class: "md" }, mdChildren),
+        { class: `doc-split${jsonOpen ? " open" : ""}` },
+        [
           el(
             "div",
-            { class: "savebar" },
-            el("span", {
-              class: "dim",
-              text: canEdit
-                ? "값을 클릭하면 바로 편집 · 슬롯이 안 겹치면 자동 재베이스"
-                : "편집·확정·폐기는 슬롯 단위",
-            }),
+            { class: "docwrap" },
+            el("div", { class: "card" }, [
+              el("div", { class: "md" }, mdChildren),
+              el(
+                "div",
+                { class: "savebar" },
+                el("span", {
+                  class: "dim",
+                  text: canEdit
+                    ? "값을 클릭하면 바로 편집 · 슬롯이 안 겹치면 자동 재베이스"
+                    : "편집·확정·폐기는 슬롯 단위",
+                }),
+              ),
+            ]),
           ),
-        ]),
+          jsonOpen
+            ? jsonPane(`${type}/${id}.json`, doc, () => {
+                jsonOpen = false;
+                renderInner();
+              })
+            : null,
+        ],
       ),
     ];
     // el() 의 children 루프와 달리 replaceChildren() 은 null 을 걸러내지 않고
