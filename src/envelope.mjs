@@ -82,7 +82,9 @@ export function deriveId(schema, body) {
       return qualified.toLowerCase();
     }
     case "msg-format/v1":
-      return body.command ? body.command.toLowerCase().replace(/_/g, "-") : null;
+      return body.command
+        ? body.command.toLowerCase().replace(/_/g, "-")
+        : null;
     case "domain-skill/v1":
       return body.name ?? null;
     default:
@@ -92,7 +94,8 @@ export function deriveId(schema, body) {
 
 /** How deriveId got its answer, for error messages that name the source field. */
 const ID_SOURCE = {
-  "db-schema/v1": (body) => (body?.owner ? "lower(owner.table)" : "lower(table)"),
+  "db-schema/v1": (body) =>
+    body?.owner ? "lower(owner.table)" : "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
 };
@@ -146,6 +149,64 @@ const SEMANTIC_CHECKS = {
         "$.body.steps: no step declares produces — 답의 완결성 바닥(반드시 포함)이 비게 됩니다",
       );
     }
+    // steps[].binds coherence (issue #32). The schema sees one bind source at
+    // a time; whether it points at anything is a sibling-node question. A
+    // step that declares binds gets three checks — a step without binds is
+    // left alone, so pre-binds specs and prose-only consumers stay valid.
+    const inputNames = new Set(
+      (Array.isArray(doc.body.inputs) ? doc.body.inputs : [])
+        .map((inp) => inp?.name)
+        .filter(Boolean),
+    );
+    (Array.isArray(doc.body.steps) ? doc.body.steps : []).forEach((step, i) => {
+      const binds = step?.binds;
+      if (binds === undefined || binds === null || typeof binds !== "object")
+        return;
+      for (const [name, src] of Object.entries(binds)) {
+        if (src?.from === "arg" && !inputNames.has(src.arg)) {
+          fail(
+            errors,
+            `$.body.steps[${i}].binds.${name}: no input named "${src.arg}"`,
+          );
+        }
+        if (
+          src?.from === "step" &&
+          !(Number.isInteger(src.step) && src.step >= 0 && src.step < i)
+        ) {
+          fail(
+            errors,
+            `$.body.steps[${i}].binds.${name}: step ${src.step} is not an earlier step`,
+          );
+        }
+      }
+      // The SQL's :vars and the declared binds must match exactly — a
+      // missing bind is an unexecutable step, an extra one is a claim about
+      // SQL that does not use it. Quoted literals are stripped first so a
+      // ':' inside a string (date masks etc.) is not read as a bind.
+      const sqlVars = new Set(
+        [
+          ...String(step.sql ?? "")
+            .replace(/'[^']*'/g, "''")
+            .matchAll(/:([A-Za-z][A-Za-z0-9_]*)/g),
+        ].map((m) => m[1]),
+      );
+      for (const v of sqlVars) {
+        if (!(v in binds)) {
+          fail(
+            errors,
+            `$.body.steps[${i}].binds: sql uses :${v} but it is not declared`,
+          );
+        }
+      }
+      for (const name of Object.keys(binds)) {
+        if (!sqlVars.has(name)) {
+          fail(
+            errors,
+            `$.body.steps[${i}].binds.${name}: declared but sql has no :${name}`,
+          );
+        }
+      }
+    });
   },
 };
 

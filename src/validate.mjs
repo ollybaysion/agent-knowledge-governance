@@ -7,10 +7,10 @@
 // draft 2020-12 JSON Schema — a real validator (ajv, in the Phase 1
 // server per design §5.0) can read them unmodified later.
 //
-// Supported keywords: type, enum, const, pattern, minLength, minItems,
-// items, properties, required, additionalProperties (bool|schema),
-// dependentRequired, if/then/else, $ref (resolved against a caller-supplied
-// map of schema-id -> schema, not fetched over a network).
+// Supported keywords: type (incl. integer), enum, const, pattern, minLength,
+// minItems, items, properties, required, additionalProperties (bool|schema),
+// minimum, dependentRequired, if/then/else, $ref (resolved against a
+// caller-supplied map of schema-id -> schema, not fetched over a network).
 
 function typeOf(value) {
   if (value === null) return "null";
@@ -18,10 +18,20 @@ function typeOf(value) {
   return typeof value; // "object" | "string" | "number" | "boolean"
 }
 
+// "integer" is a real draft-2020-12 type, not an alias for number — a schema
+// that says integer must reject 1.5 here too, or the hand-rolled layer would
+// silently pass what ajv later rejects.
+function matchesType(want, value) {
+  if (want === "integer") {
+    return typeof value === "number" && Number.isInteger(value);
+  }
+  return want === typeOf(value);
+}
+
 function checkType(schema, data, path, errors) {
   if (schema.type === undefined) return;
   const wanted = Array.isArray(schema.type) ? schema.type : [schema.type];
-  if (!wanted.includes(typeOf(data))) {
+  if (!wanted.some((w) => matchesType(w, data))) {
     errors.push(
       `${path}: expected type ${wanted.join("|")}, got ${typeOf(data)}`,
     );
@@ -54,6 +64,13 @@ function checkStringConstraints(schema, data, path, errors) {
   }
   if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(data)) {
     errors.push(`${path}: does not match pattern ${schema.pattern}`);
+  }
+}
+
+function checkNumberConstraints(schema, data, path, errors) {
+  if (typeof data !== "number") return;
+  if (schema.minimum !== undefined && data < schema.minimum) {
+    errors.push(`${path}: ${data} < minimum ${schema.minimum}`);
   }
 }
 
@@ -137,6 +154,7 @@ export function validateNode(schema, data, path, refs, errors) {
   checkType(schema, data, path, errors);
   checkEnumConst(schema, data, path, errors);
   checkStringConstraints(schema, data, path, errors);
+  checkNumberConstraints(schema, data, path, errors);
   checkArrayConstraints(schema, data, path, refs, errors);
   checkObjectConstraints(schema, data, path, refs, errors);
   checkConditional(schema, data, path, refs, errors);

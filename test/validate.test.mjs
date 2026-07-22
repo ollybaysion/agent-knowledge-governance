@@ -297,6 +297,128 @@ test("domain-skill: examples require a contrasting pair, ask stays inline", () =
   );
 });
 
+// steps[].binds (issue #32) — executor wiring absorbed from the consumer
+// sidecar. The schema shapes each source; the envelope semantic check sees
+// the spec around it (inputs, earlier steps, the SQL itself).
+const BOUND_BODY = () => {
+  const body = V2_BODY();
+  body.steps = [
+    {
+      title: "s1",
+      produces: "현재 상태",
+      sql: "SELECT eqp_id FROM t WHERE x = :x",
+      binds: { x: { from: "arg", arg: "id" } },
+    },
+    {
+      title: "s2",
+      sql: "SELECT 1 FROM u WHERE e = :e",
+      binds: { e: { from: "step", step: 0, column: "EQP_ID" } },
+    },
+  ];
+  return body;
+};
+
+const boundDoc = () => ({
+  schema: "domain-skill/v1",
+  id: "x",
+  keywords: [{ kw: "x", inject: "full" }],
+  status: "active",
+  body: BOUND_BODY(),
+});
+
+test("domain-skill: binds — both source shapes are valid", () => {
+  assert.deepEqual(validate(refs["domain-skill/v1"], BOUND_BODY(), refs), []);
+  assert.deepEqual(validateDocument(boundDoc(), refs), []);
+});
+
+test("domain-skill: binds — cross-shape and unknown keys are rejected", () => {
+  const schema = refs["domain-skill/v1"];
+
+  // arg 형이 step 형의 키를 가짐 — then 분기의 additionalProperties가 잡는다.
+  const argWithColumn = BOUND_BODY();
+  argWithColumn.steps[0].binds.x.column = "EQP_ID";
+  assert.ok(
+    validate(schema, argWithColumn, refs).some((e) => e.includes("column")),
+  );
+
+  const typo = BOUND_BODY();
+  typo.steps[1].binds.e.colunm = "EQP_ID";
+  assert.ok(validate(schema, typo, refs).some((e) => e.includes("colunm")));
+});
+
+test("domain-skill: binds — step must be an integer", () => {
+  const body = BOUND_BODY();
+  body.steps[1].binds.e.step = 0.5;
+  assert.ok(
+    validate(refs["domain-skill/v1"], body, refs).some((e) =>
+      e.includes("integer"),
+    ),
+  );
+});
+
+test("domain-skill: binds semantic — arg must name a real input", () => {
+  const doc = boundDoc();
+  doc.body.steps[0].binds.x.arg = "nope";
+  assert.ok(
+    validateDocument(doc, refs).some((e) =>
+      e.includes('no input named "nope"'),
+    ),
+  );
+});
+
+test("domain-skill: binds semantic — step must point at an earlier step", () => {
+  const doc = boundDoc();
+  doc.body.steps[1].binds.e.step = 1; // 자기 자신 — 미래 참조와 같은 거부
+  assert.ok(
+    validateDocument(doc, refs).some((e) => e.includes("not an earlier step")),
+  );
+});
+
+test("domain-skill: binds semantic — sql :vars and binds keys match exactly", () => {
+  // 빠짐: SQL 이 :x 를 쓰는데 binds 가 선언 안 함 → 실행 불가 스텝.
+  const missing = boundDoc();
+  missing.body.steps[0].binds = {};
+  assert.ok(
+    validateDocument(missing, refs).some((e) =>
+      e.includes("sql uses :x but it is not declared"),
+    ),
+  );
+
+  // 남음: binds 가 SQL 에 없는 :y 를 주장함.
+  const extra = boundDoc();
+  extra.body.steps[0].sql = "SELECT eqp_id FROM t WHERE x = :x AND y = :y";
+  extra.body.steps[0].binds.y = { from: "arg", arg: "id" };
+  const okExtra = validateDocument(extra, refs);
+  assert.deepEqual(okExtra, []);
+  delete extra.body.steps[0].binds.y;
+  assert.ok(
+    validateDocument(extra, refs).some((e) =>
+      e.includes("sql uses :y but it is not declared"),
+    ),
+  );
+
+  const unused = boundDoc();
+  unused.body.steps[1].binds.ghost = { from: "step", step: 0, column: "C" };
+  assert.ok(
+    validateDocument(unused, refs).some((e) =>
+      e.includes("declared but sql has no :ghost"),
+    ),
+  );
+
+  // 따옴표 리터럴 속 ':' 는 bind 가 아니다 — 날짜 마스크가 오탐되면 안 된다.
+  const mask = boundDoc();
+  mask.body.steps[0].sql =
+    "SELECT TO_CHAR(t, 'HH24:MI') FROM d WHERE x = :x";
+  assert.deepEqual(validateDocument(mask, refs), []);
+});
+
+test("domain-skill: a spec without binds stays valid (prose-only consumers)", () => {
+  const doc = boundDoc();
+  delete doc.body.steps[0].binds;
+  delete doc.body.steps[1].binds;
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
 test("whitespace-only strings are rejected by the \\S pattern", () => {
   const schema = refs["domain-skill/v1"];
   const body = {
