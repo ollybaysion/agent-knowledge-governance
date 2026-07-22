@@ -28,29 +28,16 @@
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "단위",
-        "카디널리티",
-        "의도"
-      ],
+      "required": ["단위", "카디널리티", "의도"],
       "properties": {
         "단위": {
-          "enum": [
-            "설비",
-            "챔버",
-            "센서"
-          ]
+          "enum": ["설비", "챔버", "센서"]
         },
         "카디널리티": {
-          "enum": [
-            "단일"
-          ]
+          "enum": ["단일"]
         },
         "의도": {
-          "enum": [
-            "상태",
-            "생성 이력"
-          ]
+          "enum": ["상태", "생성 이력"]
         }
       }
     },
@@ -73,11 +60,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "required",
-          "description"
-        ],
+        "required": ["name", "required", "description"],
         "properties": {
           "name": {
             "type": "string",
@@ -99,9 +82,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "mcp"
-        ],
+        "required": ["mcp"],
         "properties": {
           "mcp": {
             "type": "string",
@@ -128,10 +109,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "title",
-          "sql"
-        ],
+        "required": ["title", "sql"],
         "properties": {
           "title": {
             "type": "string",
@@ -150,16 +128,66 @@
             "type": "string",
             "pattern": "\\S"
           },
+          "binds": {
+            "type": "object",
+            "description": "Executor wiring — where each :bind variable in this step's sql comes from (issue #32). Optional: a spec without binds is still valid for prose consumers (the LLM reads lead), but a deterministic executor needs it. Keys are the sql's bind variable names; coherence with the surrounding spec (arg exists in inputs, step is an earlier index, exact :var coverage) is the envelope.mjs semantic check, which schema keywords cannot see.",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["from"],
+              "properties": {
+                "from": {
+                  "enum": ["arg", "step"]
+                }
+              },
+              "if": {
+                "required": ["from"],
+                "properties": {
+                  "from": {
+                    "const": "arg"
+                  }
+                }
+              },
+              "then": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "arg"],
+                "properties": {
+                  "from": {
+                    "const": "arg"
+                  },
+                  "arg": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              "else": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "step", "column"],
+                "properties": {
+                  "from": {
+                    "const": "step"
+                  },
+                  "step": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "column": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            }
+          },
           "branches": {
             "type": "array",
             "minItems": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "when",
-                "then"
-              ],
+              "required": ["when", "then"],
               "properties": {
                 "when": {
                   "type": "string",
@@ -182,10 +210,7 @@
     "output": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "avoid",
-        "examples"
-      ],
+      "required": ["avoid", "examples"],
       "properties": {
         "avoid": {
           "type": "array",
@@ -202,10 +227,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "ask",
-              "answer"
-            ],
+            "required": ["ask", "answer"],
             "properties": {
               "ask": {
                 "type": "string",
