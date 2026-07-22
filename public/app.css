@@ -1347,6 +1347,55 @@ ol.steps > li p {
   font-size: 13px;
 }
 
+/* 설치 카드 */
+.sk-install {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.sk-install-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sk-install-top .sk-h {
+  margin: 0;
+}
+.sk-install .dl-btn {
+  margin-left: auto;
+}
+.install-lead {
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+.install-lead code {
+  font-family: var(--mono);
+}
+.install-cmd-wrap {
+  position: relative;
+  margin: 8px 0 6px;
+}
+.install-cmd {
+  margin: 0;
+  padding: 10px 68px 10px 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--body-strong);
+  white-space: pre;
+}
+.install-cmd-wrap .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
 /* 검토 바 */
 .skbar {
   display: flex;

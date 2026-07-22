@@ -49,6 +49,22 @@ function el(tag, attrs, children) {
 }
 const $ = (id) => document.getElementById(id);
 
+// Save an in-memory string as a client-side download. No server round-trip: it
+// reuses text api() already fetched with the viewer's token, so it works the
+// same whether or not the deploy allows anonymous reads (AKG_ANON_READ) — a
+// bare <a href> to the md endpoint would 401 under AKG_ANON_READ=0 since anchors
+// carry no Authorization header. CSP-safe: a `download` anchor is not a fetch
+// the `default-src 'self'` policy governs.
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 // ---------- toast (prototype pattern — reused for notices/errors) ----------
 let toastTimer = null;
 function toast(message, klass) {
@@ -1566,6 +1582,56 @@ function renderSkillView(doc, rev, md, canEdit, canApprove) {
       ]),
     );
   wrap.appendChild(outCard);
+
+  // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
+  // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
+  // 다운로드는 클라이언트 blob(downloadTextFile) — 이미 로드된 md를 재사용한다.
+  if (md) {
+    const installCmd =
+      `mkdir -p ~/.claude/skills/${s.name}\n` +
+      `mv ~/Downloads/SKILL.md ~/.claude/skills/${s.name}/SKILL.md`;
+    wrap.appendChild(
+      el("div", { class: "sk-install" }, [
+        el("div", { class: "sk-install-top" }, [
+          el("h2", { class: "sk-h", text: "설치" }),
+          el("button", {
+            type: "button",
+            class: "btn primary sm dl-btn",
+            onclick: () => {
+              downloadTextFile("SKILL.md", md, "text/markdown;charset=utf-8");
+              toast("SKILL.md 다운로드 — 아래 위치에 넣으세요", "");
+            },
+            text: "↓ SKILL.md 다운로드",
+          }),
+        ]),
+        el("p", { class: "dim install-lead" }, [
+          "받은 ",
+          el("code", { text: "SKILL.md" }),
+          " 를 아래 위치에 넣으면 끝 — Claude Code·opencode 모두 이 경로를 읽습니다.",
+        ]),
+        el("div", { class: "install-cmd-wrap" }, [
+          el("pre", { class: "install-cmd", text: installCmd }),
+          el("button", {
+            type: "button",
+            class: "btn ghost sm copy-btn",
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(installCmd);
+                toast("복사했습니다", "");
+              } catch {
+                toast("복사 실패 — 명령을 직접 선택해 복사하세요", "error");
+              }
+            },
+            text: "복사",
+          }),
+        ]),
+        el("p", {
+          class: "dim",
+          text: "설치 후 새 세션(또는 스킬 새로고침)부터 이 스킬을 쓸 수 있습니다.",
+        }),
+      ]),
+    );
+  }
 
   const skbar = el("div", { class: "skbar" }, [
     el("span", { class: "b b-inf", text: "추정" }),
