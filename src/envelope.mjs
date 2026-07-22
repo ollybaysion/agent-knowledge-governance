@@ -208,13 +208,51 @@ const SEMANTIC_CHECKS = {
   },
 };
 
+// A draft — an inactive document being built up in the dashboard — is validated
+// against a RELAXED copy of its type schema: `required` and `minItems` are
+// dropped so a partial body validates, while every field that IS present still
+// has to be well-typed and no unknown key is allowed. $ref'd schemas
+// (tiered-value) are left strict — a scaffold slot already satisfies them and an
+// absent slot is fine once `required` is gone. This is safe because injection
+// never sees an inactive doc (render-store drops its md + index entry, #7), so
+// an incomplete draft on disk can never reach a prompt; the full schema is
+// enforced again the moment someone tries to activate it.
+function relaxSchema(schema) {
+  if (schema === null || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(relaxSchema);
+  if (schema.$ref) return { ...schema }; // leave referenced schemas strict
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === "required" || k === "minItems") continue;
+    if (k === "properties") {
+      out.properties = {};
+      for (const [pk, pv] of Object.entries(v)) out.properties[pk] = relaxSchema(pv);
+    } else if (["items", "additionalProperties", "if", "then", "else"].includes(k)) {
+      out[k] = v && typeof v === "object" ? relaxSchema(v) : v;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+const RELAXED = new WeakMap();
+function relaxedOf(schema) {
+  let r = RELAXED.get(schema);
+  if (!r) {
+    r = relaxSchema(schema);
+    RELAXED.set(schema, r);
+  }
+  return r;
+}
+
 /**
  * Validate a full document (envelope + body, or unclassified's flat meta).
  * @param {object} doc
  * @param {object} refs from loadSchemas()
+ * @param {{draft?: boolean}} [opts] draft = relaxed body (inactive drafts, see relaxSchema)
  * @returns {string[]} empty when valid
  */
-export function validateDocument(doc, refs) {
+export function validateDocument(doc, refs, { draft = false } = {}) {
   const errors = [];
   if (!doc || typeof doc !== "object" || typeof doc.schema !== "string") {
     return ['$: missing or invalid "schema" field'];
@@ -229,12 +267,45 @@ export function validateDocument(doc, refs) {
 
   validateNode(ENVELOPE_SCHEMA, doc, "$", refs, errors);
   if (doc.body && typeof doc.body === "object") {
-    validateNode(typeSchema, doc.body, "$.body", refs, errors);
+    validateNode(
+      draft ? relaxedOf(typeSchema) : typeSchema,
+      doc.body,
+      "$.body",
+      refs,
+      errors,
+    );
   }
   if (errors.length === 0) {
-    SEMANTIC_CHECKS[doc.schema]?.(doc, errors);
+    if (draft) {
+      // A draft skips the completeness/coherence checks a finished doc must
+      // pass, but the id must still name the document — the store filename and
+      // every later edit key off it. A body with no name has no id to save
+      // under, so it is rejected here (the dashboard blocks 저장 for the same
+      // reason).
+      const want = deriveId(doc.schema, doc.body);
+      if (want === null)
+        fail(
+          errors,
+          "$.id: 이름이 없어 문서 id 를 만들 수 없습니다 (테이블/커맨드/스킬명 필요)",
+        );
+      else if (doc.id !== want)
+        fail(
+          errors,
+          `$.id: expected "${want}" (${ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body"}), got "${doc.id}"`,
+        );
+    } else {
+      SEMANTIC_CHECKS[doc.schema]?.(doc, errors);
+    }
   }
   return errors;
+}
+
+// Validation strictness follows the RESULTING status: an inactive document is a
+// draft (relaxed — build it up over time), an active one must be complete. This
+// single rule is shared by every write route, and the activate route relies on
+// it as the completeness gate — flipping a doc to active re-runs the full schema.
+export function validateForStore(doc, refs) {
+  return validateDocument(doc, refs, { draft: doc.status === "inactive" });
 }
 
 export function assertValidDocument(doc, refs, label = doc?.id ?? "document") {

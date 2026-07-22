@@ -1,6 +1,6 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
-import { validateDocument } from "../../src/envelope.mjs";
+import { validateForStore } from "../../src/envelope.mjs";
 import {
   readJson,
   readText,
@@ -34,7 +34,17 @@ function mdRelPath(type, doc) {
 // nobody can judge — which would make the inactive state unusable in the very
 // review it exists to enable.
 function docMd(storeDir, type, doc) {
-  return readText(storeDir, mdRelPath(type, doc)) ?? renderDocMd(type, doc);
+  const stored = readText(storeDir, mdRelPath(type, doc));
+  if (stored != null) return stored;
+  // An inactive draft has no stored md and its body may be too incomplete to
+  // render — the dashboard builds the doc view from the JSON, not this md, so a
+  // failed render is not fatal. (Active docs always have a stored md, so they
+  // never reach this render path.)
+  try {
+    return renderDocMd(type, doc);
+  } catch {
+    return null;
+  }
 }
 
 function priorityOf(user) {
@@ -143,7 +153,7 @@ export function registerDocsRoutes(app) {
         throw err;
       }
       const doc = { ...submitted, body: resolvedBody };
-      const errors = validateDocument(doc, refs);
+      const errors = validateForStore(doc, refs);
       if (errors.length)
         return reply
           .code(400)
@@ -254,7 +264,7 @@ export function registerDocsRoutes(app) {
           }
 
           const newDoc = { ...currentDoc, body: mergedBody };
-          const errors = validateDocument(newDoc, refs);
+          const errors = validateForStore(newDoc, refs);
           if (errors.length)
             return {
               status: 400,
@@ -330,7 +340,7 @@ export function registerDocsRoutes(app) {
           throw err;
         }
         const doc = { ...raw, status: "inactive", body };
-        const errors = validateDocument(doc, refs);
+        const errors = validateForStore(doc, refs);
         if (errors.length) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
           continue;
@@ -424,7 +434,7 @@ export function registerDocsRoutes(app) {
                 status: "inactive",
                 body,
               };
-          const errors = validateDocument(doc, refs);
+          const errors = validateForStore(doc, refs);
           if (errors.length)
             return {
               status: 400,
@@ -486,7 +496,7 @@ export function registerDocsRoutes(app) {
             ...doc,
             body: { ...doc.body, catalog: newCatalog, columnDescs },
           };
-          const errors = validateDocument(newDoc, refs);
+          const errors = validateForStore(newDoc, refs);
           if (errors.length)
             return {
               status: 400,
@@ -550,7 +560,7 @@ export function registerDocsRoutes(app) {
               };
 
             const newDoc = { ...doc, status: target };
-            const errors = validateDocument(newDoc, refs);
+            const errors = validateForStore(newDoc, refs);
             if (errors.length)
               return {
                 status: 400,
