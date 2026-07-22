@@ -1,13 +1,9 @@
 {
   "schema": "db-schema/v1",
-  "id": "testuser.fdc_chamber",
+  "id": "fdc_chamber",
   "keywords": [
     {
       "kw": "fdc_chamber",
-      "inject": "full"
-    },
-    {
-      "kw": "testuser.fdc_chamber",
       "inject": "full"
     }
   ],
@@ -46,12 +42,16 @@
           "comment": null
         }
       ],
-      "primaryKey": ["CHM_ID"],
+      "primaryKey": [
+        "CHM_ID"
+      ],
       "indexes": [
         {
           "name": "SYS_C008832",
           "unique": true,
-          "columns": ["CHM_ID"]
+          "columns": [
+            "CHM_ID"
+          ]
         }
       ],
       "foreignKeys": [
@@ -100,7 +100,9 @@
       "STATUS_CD": {
         "text": "챔버 상태 코드 — values[]로 노출만, 값 의미 매핑은 코드에 없음",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:56"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:56"
+        ]
       }
     }
   }

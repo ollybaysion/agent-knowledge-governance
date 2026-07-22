@@ -23,7 +23,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "schemas"));
 
-test("db-schema: render(migrate(md)) === md, and the migrated doc is schema-valid", () => {
+test("db-schema: render(migrate(md)) differs from md only in the h1 owner split, and the migrated doc is schema-valid", () => {
   const md = `# T.X
 
 <!-- dbdoc:manual:purpose -->
@@ -56,7 +56,13 @@ test("db-schema: render(migrate(md)) === md, and the migrated doc is schema-vali
   });
   assert.deepEqual(warnings, []);
   assert.deepEqual(validateDocument(doc, refs), []);
-  assert.equal(renderDbSchemaMd(doc), md);
+  // id = lower(table); the H1's owner survives only as a body attribute, and
+  // the owner-qualified keyword is gone with it.
+  assert.equal(doc.id, "x");
+  assert.deepEqual(doc.keywords, [{ kw: "x", inject: "full" }]);
+  // render emits `# TABLE` + `owner: OWNER` where the legacy md had
+  // `# OWNER.TABLE` — everything below the h1 stays byte-identical.
+  assert.equal(renderDbSchemaMd(doc), md.replace("# T.X\n", "# X\nowner: T\n"));
 });
 
 test("db-schema: a scaffold column desc with no 추정)/[근거: marker migrates to catalog.columns[].comment, not a tiered value", () => {
@@ -88,7 +94,8 @@ test("db-schema: a scaffold column desc with no 추정)/[근거: marker migrates
   assert.deepEqual(warnings, []);
   assert.equal(doc.body.catalog.columns[0].comment, "원시 오라클 코멘트");
   assert.deepEqual(doc.body.columnDescs.A, { text: null, tier: "scaffold" });
-  assert.equal(renderDbSchemaMd(doc), md);
+  // legacy `# OWNER.TABLE` h1 renders back as `# TABLE` + `owner: OWNER`
+  assert.equal(renderDbSchemaMd(doc), md.replace("# T.X\n", "# X\nowner: T\n"));
 });
 
 test("db-schema migrate: reports the deprecated 마이그레이션 주의 section instead of dropping it silently", () => {

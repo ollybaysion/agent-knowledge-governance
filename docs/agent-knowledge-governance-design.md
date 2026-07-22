@@ -586,7 +586,7 @@ maxLength(S13), `id` 경로 화이트리스트(S11), 커밋 메시지에 유저 
   트리거: 수동 / cron / SessionStart 훅에서 fire-and-forget(5초 타임아웃, obs-client 패턴).
 - `akg propose <type>/<id> proposal.json` — 제안 푸시. 기존
   db-schema-propose-codebase 스킬은 산출한 proposal.json을 로컬 apply 대신 이걸로 넘기게 개조.
-- `akg catalog-push <owner.table> describe.json` — db-schema-docs 스킬의 새 출구:
+- `akg catalog-push <table> describe.json` — db-schema-docs 스킬의 새 출구:
   MCP `describe_table` 결과를 허브로. (스키마 문서 생성이 "로컬 md 쓰기"에서
   "허브 카탈로그 갱신"으로 바뀐다.)
 - 토큰: `~/.claude/akg/token`(0600) 또는 `AKG_TOKEN`.

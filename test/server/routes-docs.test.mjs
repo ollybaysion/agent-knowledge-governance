@@ -35,7 +35,7 @@ function auth(token) {
 function newDbSchemaDoc(overrides = {}) {
   return {
     schema: "db-schema/v1",
-    id: "t.x",
+    id: "x",
     keywords: [{ kw: "x", inject: "full" }],
     status: "active",
     body: {
@@ -83,13 +83,13 @@ test("create -> read -> edit round trip, and a fresh POST can never smuggle conf
 
   const get = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("vtok"),
   });
   assert.equal(get.statusCode, 200);
   assert.equal(get.json().json.body.purpose.text, "몰래 confirmed");
   assert.ok(get.json().rev);
-  assert.ok(get.json().md.includes("# T.X"));
+  assert.ok(get.json().md.includes("# X\nowner: T"));
 
   await cleanup();
 });
@@ -108,7 +108,7 @@ test("PUT without If-Match is rejected (428); with a stale but non-overlapping r
 
   const noIfMatch = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
     payload: newDbSchemaDoc().body,
   });
@@ -123,7 +123,7 @@ test("PUT without If-Match is rejected (428); with a stale but non-overlapping r
   };
   const editA = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: bodyA,
   });
@@ -139,7 +139,7 @@ test("PUT without If-Match is rejected (428); with a stale but non-overlapping r
   };
   const editB = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 }, // still rev0, now stale
     payload: bodyB,
   });
@@ -175,13 +175,13 @@ test("PUT with an unchanged body is idempotent — same rev, no empty commit, st
       method: "POST",
       url: "/api/docs/db-schema",
       headers: auth("edtok"),
-      payload: newDbSchemaDoc({ id: "t.y", body: { ...doc.body, table: "Y" } }),
+      payload: newDbSchemaDoc({ id: "y", body: { ...doc.body, table: "Y" } }),
     });
     assert.equal(other.statusCode, 201, other.body);
 
     const noop = await app.inject({
       method: "PUT",
-      url: "/api/docs/db-schema/t.x",
+      url: "/api/docs/db-schema/x",
       headers: { ...auth("edtok"), "if-match": rev0 },
       payload: doc.body,
     });
@@ -191,7 +191,7 @@ test("PUT with an unchanged body is idempotent — same rev, no empty commit, st
     // The rev it handed back must still be accepted as the base of a real edit.
     const real = await app.inject({
       method: "PUT",
-      url: "/api/docs/db-schema/t.x",
+      url: "/api/docs/db-schema/x",
       headers: { ...auth("edtok"), "if-match": noop.json().rev },
       payload: {
         ...doc.body,
@@ -225,7 +225,7 @@ test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)",
   };
   await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: bodyA1,
   });
@@ -238,7 +238,7 @@ test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)",
   };
   const conflict = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 }, // stale AND overlapping
     payload: bodyA2,
   });
@@ -264,21 +264,21 @@ test("DELETE archives a doc (approver only) — dropped from the index, JSON pre
   // editor cannot archive
   const forbidden = await app.inject({
     method: "DELETE",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(forbidden.statusCode, 403);
 
   const del = await app.inject({
     method: "DELETE",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
   assert.equal(del.statusCode, 200);
 
   const after = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
   assert.equal(after.json().json.status, "archived"); // JSON preserved, just archived
@@ -308,7 +308,7 @@ test("catalog-push replaces catalog and auto-deprecates an inferred slot whose c
 
   const editB = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: (() => {
       const b = newDbSchemaDoc().body;
@@ -325,7 +325,7 @@ test("catalog-push replaces catalog and auto-deprecates an inferred slot whose c
   // Column B drops out of the live catalog — its non-scaffold slot must auto-deprecate, not vanish.
   const push = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x/catalog",
+    url: "/api/docs/db-schema/x/catalog",
     headers: auth("edtok"),
     payload: {
       columns: [

@@ -188,15 +188,13 @@ export function migrateDbSchemaMd(
   const { columns, columnDescs } = parseColumns(columnsBody);
   const catalog = { columns, ...parseKeys(keysBody), fetchedAt };
   const queries = parseQueries(queriesBody);
-  const id = `${owner}.${table}`.toLowerCase();
+  // id = lower(table) — the H1's owner survives only as a body attribute.
+  const id = table.toLowerCase();
 
   const doc = {
     schema: "db-schema/v1",
     id,
-    keywords: [
-      { kw: table.toLowerCase(), inject: "full" },
-      { kw: id, inject: "full" },
-    ],
+    keywords: [{ kw: id, inject: "full" }],
     status: "active",
     body: {
       owner,

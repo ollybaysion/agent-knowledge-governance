@@ -33,17 +33,18 @@ async function setup() {
 
 const auth = (t) => ({ authorization: `Bearer ${t}` });
 
-// db-schema carries the invariant id === lower(owner.table), so the fixture
-// derives owner/table from the id rather than inventing them.
+// db-schema carries the invariant id === lower(table) — owner stays a plain
+// body attribute that never qualifies the id — so the fixture derives the
+// table from the id rather than inventing it.
 function dbDoc(id, columns = ["A"]) {
-  const [owner, table] = id.toUpperCase().split(".");
+  const table = id.toUpperCase();
   return {
     schema: "db-schema/v1",
     id,
     keywords: [{ kw: id, inject: "full" }],
     status: "active", // deliberately: the route must override this
     body: {
-      owner,
+      owner: "T",
       table,
       catalog: {
         columns: columns.map((name) => ({
@@ -88,13 +89,13 @@ test("a batch lands as one commit, and every document lands inactive", async () 
   });
   const countBefore = before.json().entries.length;
 
-  const res = await batch(app, [dbDoc("t.a"), dbDoc("t.b"), dbDoc("t.c")]);
+  const res = await batch(app, [dbDoc("a"), dbDoc("b"), dbDoc("c")]);
   assert.equal(res.statusCode, 201, res.payload);
-  assert.deepEqual(res.json().created, ["t.a", "t.b", "t.c"]);
+  assert.deepEqual(res.json().created, ["a", "b", "c"]);
 
   // Submitted as active; the route is what decides, not the caller — otherwise
   // an importer could put a few hundred skeletons straight into the budget.
-  for (const id of ["t.a", "t.b", "t.c"]) {
+  for (const id of ["a", "b", "c"]) {
     assert.equal(readJson(storeDir, `db-schema/${id}.json`).status, "inactive");
     assert.equal(
       existsSync(join(storeDir, `rendered/db-schema/docs/${id}.md`)),
@@ -119,19 +120,19 @@ test("a batch lands as one commit, and every document lands inactive", async () 
 test("one bad document rejects the whole batch, leaving nothing written", async () => {
   const { app, storeDir, cleanup } = await setup();
 
-  const bad = dbDoc("t.bad");
-  delete bad.body.owner; // fails the type schema
+  const bad = dbDoc("bad");
+  delete bad.body.table; // fails the type schema (table is required)
 
-  const res = await batch(app, [dbDoc("t.ok"), bad]);
+  const res = await batch(app, [dbDoc("ok"), bad]);
   assert.equal(res.statusCode, 400);
   const { rejected } = res.json();
   assert.equal(rejected.length, 1);
-  assert.equal(rejected[0].id, "t.bad");
+  assert.equal(rejected[0].id, "bad");
   assert.equal(rejected[0].error, "validation_failed");
 
   // The valid one must not have landed: a half-applied import leaves the
   // caller guessing which half is there.
-  assert.equal(readJson(storeDir, "db-schema/t.ok.json"), null);
+  assert.equal(readJson(storeDir, "db-schema/ok.json"), null);
 
   await cleanup();
 });
@@ -139,7 +140,7 @@ test("one bad document rejects the whole batch, leaving nothing written", async 
 test("a batch cannot smuggle a confirmed slot or a duplicate id", async () => {
   const { app, cleanup } = await setup();
 
-  const sneaky = dbDoc("t.sneak");
+  const sneaky = dbDoc("sneak");
   sneaky.body.purpose = {
     text: "확정인 척",
     tier: "confirmed",
@@ -151,7 +152,7 @@ test("a batch cannot smuggle a confirmed slot or a duplicate id", async () => {
   const stored = smuggle.json();
   assert.equal(stored.created.length, 1);
 
-  const dup = await batch(app, [dbDoc("t.dup"), dbDoc("t.dup")]);
+  const dup = await batch(app, [dbDoc("dup"), dbDoc("dup")]);
   assert.equal(dup.statusCode, 400);
   assert.equal(dup.json().rejected[0].error, "duplicate_in_batch");
 
@@ -160,7 +161,7 @@ test("a batch cannot smuggle a confirmed slot or a duplicate id", async () => {
 
 test("the created documents are never confirmed, whatever was submitted", async () => {
   const { app, storeDir, cleanup } = await setup();
-  const sneaky = dbDoc("t.sneak");
+  const sneaky = dbDoc("sneak");
   sneaky.body.purpose = {
     text: "확정인 척",
     tier: "confirmed",
@@ -168,7 +169,7 @@ test("the created documents are never confirmed, whatever was submitted", async 
   };
   await batch(app, [sneaky]);
 
-  const purpose = readJson(storeDir, "db-schema/t.sneak.json").body.purpose;
+  const purpose = readJson(storeDir, "db-schema/sneak.json").body.purpose;
   assert.notEqual(purpose.tier, "confirmed");
 
   await cleanup();
@@ -177,49 +178,49 @@ test("the created documents are never confirmed, whatever was submitted", async 
 test("facts upsert creates when absent — inactive, like every bulk path", async () => {
   const { app, storeDir, cleanup } = await setup();
 
-  const res = await facts(app, "t.new", dbDoc("t.new"));
+  const res = await facts(app, "new", dbDoc("new"));
   assert.equal(res.statusCode, 201, res.payload);
   assert.equal(res.json().created, true);
-  assert.equal(readJson(storeDir, "db-schema/t.new.json").status, "inactive");
+  assert.equal(readJson(storeDir, "db-schema/new.json").status, "inactive");
 
   await cleanup();
 });
 
 test("facts upsert replaces facts and leaves a confirmed slot untouched", async () => {
   const { app, storeDir, cleanup } = await setup();
-  await facts(app, "t.x", dbDoc("t.x", ["A", "B"]));
+  await facts(app, "x", dbDoc("x", ["A", "B"]));
 
   // Get a confirmed value in place the legitimate way: edit, then promote.
-  const doc = readJson(storeDir, "db-schema/t.x.json");
+  const doc = readJson(storeDir, "db-schema/x.json");
   const body = structuredClone(doc.body);
   body.purpose = { text: "설비 계측값", tier: "inferred", evidence: ["fdc:1"] };
   const rev0 = (
     await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.x",
+      url: "/api/docs/db-schema/x",
       headers: auth("edtok"),
     })
   ).json().rev;
   const put = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: body,
   });
   assert.equal(put.statusCode, 200, put.payload);
   const promoted = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/promote",
+    url: "/api/docs/db-schema/x/promote",
     headers: { ...auth("aptok"), "if-match": put.json().rev },
     payload: { slots: ["purpose"] },
   });
   assert.equal(promoted.statusCode, 200, promoted.payload);
 
   // Now push new facts: column C appears, B disappears.
-  const push = await facts(app, "t.x", dbDoc("t.x", ["A", "C"]));
+  const push = await facts(app, "x", dbDoc("x", ["A", "C"]));
   assert.equal(push.statusCode, 200, push.payload);
 
-  const after = readJson(storeDir, "db-schema/t.x.json").body;
+  const after = readJson(storeDir, "db-schema/x.json").body;
   assert.equal(after.purpose.tier, "confirmed");
   assert.equal(after.purpose.text, "설비 계측값");
   assert.deepEqual(
@@ -239,16 +240,16 @@ test("facts upsert replaces facts and leaves a confirmed slot untouched", async 
 
 test("an annotated slot whose column vanishes is kept as deprecated", async () => {
   const { app, storeDir, cleanup } = await setup();
-  await facts(app, "t.y", dbDoc("t.y", ["A", "B"]));
+  await facts(app, "y", dbDoc("y", ["A", "B"]));
 
   const rev = (
     await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.y",
+      url: "/api/docs/db-schema/y",
       headers: auth("edtok"),
     })
   ).json().rev;
-  const body = readJson(storeDir, "db-schema/t.y.json").body;
+  const body = readJson(storeDir, "db-schema/y.json").body;
   body.columnDescs.B = {
     text: "곧 사라질 컬럼",
     tier: "inferred",
@@ -256,15 +257,15 @@ test("an annotated slot whose column vanishes is kept as deprecated", async () =
   };
   await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.y",
+    url: "/api/docs/db-schema/y",
     headers: { ...auth("edtok"), "if-match": rev },
     payload: body,
   });
 
-  const push = await facts(app, "t.y", dbDoc("t.y", ["A"]));
+  const push = await facts(app, "y", dbDoc("y", ["A"]));
   assert.equal(push.statusCode, 200, push.payload);
 
-  const after = readJson(storeDir, "db-schema/t.y.json").body;
+  const after = readJson(storeDir, "db-schema/y.json").body;
   assert.equal(after.columnDescs.B.tier, "deprecated");
   assert.equal(after.columnDescs.B.text, "곧 사라질 컬럼");
   assert.deepEqual(push.json().orphans, [
@@ -277,18 +278,18 @@ test("an annotated slot whose column vanishes is kept as deprecated", async () =
 test("facts push ignores slot content in the incoming body", async () => {
   const { app, storeDir, cleanup } = await setup();
 
-  const claiming = dbDoc("t.z");
+  const claiming = dbDoc("z");
   claiming.body.purpose = {
     text: "기계가 주장하는 해석",
     tier: "confirmed",
     evidence: ["bot:1"],
   };
-  const res = await facts(app, "t.z", claiming);
+  const res = await facts(app, "z", claiming);
   assert.equal(res.statusCode, 201, res.payload);
 
   // A machine replacing facts has no standing to assert an interpretation —
   // that is what propose is for.
-  const after = readJson(storeDir, "db-schema/t.z.json").body;
+  const after = readJson(storeDir, "db-schema/z.json").body;
   assert.equal(after.purpose.tier, "scaffold");
   assert.equal(after.purpose.text, null);
 
@@ -336,7 +337,7 @@ test("facts push works for msg-format too — the point of generalising it", asy
 
 test("an agent may push facts but still cannot activate", async () => {
   const { app, cleanup } = await setup();
-  const created = await batch(app, [dbDoc("t.p")], "bottok");
+  const created = await batch(app, [dbDoc("p")], "bottok");
   assert.equal(created.statusCode, 201, created.payload);
 
   // Read with an editor token: an agent is its own bucket, outside the
@@ -344,13 +345,13 @@ test("an agent may push facts but still cannot activate", async () => {
   const rev = (
     await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.p",
+      url: "/api/docs/db-schema/p",
       headers: auth("edtok"),
     })
   ).json().rev;
   const activate = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.p/activate",
+    url: "/api/docs/db-schema/p/activate",
     headers: { ...auth("bottok"), "if-match": rev },
   });
   // The whole safety argument for letting agents write facts: they cannot
@@ -369,7 +370,7 @@ test("an oversized batch says to split it, not just that it was too big", async 
   const cols = ["A", "B", "C", "D", "E", "F", "G", "H"];
   const docs = [];
   while (Buffer.byteLength(JSON.stringify({ docs })) <= 512 * 1024) {
-    docs.push(dbDoc(`fdc.t_${String(docs.length).padStart(4, "0")}`, cols));
+    docs.push(dbDoc(`t_${String(docs.length).padStart(4, "0")}`, cols));
   }
   const res = await batch(app, docs);
 
@@ -386,7 +387,7 @@ test("an oversized batch says to split it, not just that it was too big", async 
 
 test("a runId is recorded where the audit view can see it", async () => {
   const { app, cleanup } = await setup();
-  await batch(app, [dbDoc("t.r")], "bottok", { runId: "import-2026-07-22" });
+  await batch(app, [dbDoc("r")], "bottok", { runId: "import-2026-07-22" });
 
   const audit = await app.inject({
     method: "GET",
@@ -398,7 +399,7 @@ test("a runId is recorded where the audit view can see it", async () => {
     JSON.stringify(audit.json().entries.slice(0, 3)),
   );
 
-  const bad = await batch(app, [dbDoc("t.s")], "bottok", {
+  const bad = await batch(app, [dbDoc("s")], "bottok", {
     runId: "no spaces allowed",
   });
   assert.equal(bad.statusCode, 400);

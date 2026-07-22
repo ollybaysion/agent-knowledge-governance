@@ -43,7 +43,7 @@ async function createDoc(app) {
     headers: auth("edtok"),
     payload: {
       schema: "db-schema/v1",
-      id: "t.x",
+      id: "x",
       keywords: [{ kw: "x", inject: "full" }],
       status: "active",
       body: {
@@ -64,20 +64,20 @@ async function createDoc(app) {
 test("reject: a traversing :pid cannot delete a document the caller may not delete", async () => {
   const { app, storeDir, cleanup } = await setup();
   await createDoc(app);
-  const docPath = join(storeDir, "db-schema", "t.x.json");
+  const docPath = join(storeDir, "db-schema", "x.json");
   assert.ok(existsSync(docPath));
 
   // The honest route is approver-only, so an editor has no legitimate way here.
   const honest = await app.inject({
     method: "DELETE",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(honest.statusCode, 403);
 
   const res = await app.inject({
     method: "POST",
-    url: `/api/proposals/${encodeURIComponent("../../db-schema/t.x")}/reject`,
+    url: `/api/proposals/${encodeURIComponent("../../db-schema/x")}/reject`,
     headers: auth("edtok"),
     payload: {},
   });
@@ -111,7 +111,7 @@ test("adopt rejects a traversing :pid before the If-Match check", async () => {
   const { app, cleanup } = await setup();
   const res = await app.inject({
     method: "POST",
-    url: `/api/proposals/${encodeURIComponent("../../db-schema/t.x")}/adopt`,
+    url: `/api/proposals/${encodeURIComponent("../../db-schema/x")}/adopt`,
     headers: { ...auth("edtok"), "if-match": "deadbeef" },
     payload: {},
   });
@@ -139,10 +139,19 @@ test("ordinary ids still work — the guard rejects traversal, not dots or hyphe
   await createDoc(app);
   const res = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(res.statusCode, 200);
-  assert.equal(res.json().json.id, "t.x");
+  assert.equal(res.json().json.id, "x");
+
+  // A dotted id passes the guard too: it is a clean 404 (no such doc), never
+  // the guard's 400 — dots are legal id characters, traversal is not.
+  const dotted = await app.inject({
+    method: "GET",
+    url: "/api/docs/db-schema/t.x",
+    headers: auth("edtok"),
+  });
+  assert.equal(dotted.statusCode, 404);
   await cleanup();
 });

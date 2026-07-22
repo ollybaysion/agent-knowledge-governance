@@ -1,13 +1,9 @@
 {
   "schema": "db-schema/v1",
-  "id": "testuser.fdc_sensor",
+  "id": "fdc_sensor",
   "keywords": [
     {
       "kw": "fdc_sensor",
-      "inject": "full"
-    },
-    {
-      "kw": "testuser.fdc_sensor",
       "inject": "full"
     }
   ],
@@ -53,12 +49,16 @@
           "comment": null
         }
       ],
-      "primaryKey": ["SNSR_ID"],
+      "primaryKey": [
+        "SNSR_ID"
+      ],
       "indexes": [
         {
           "name": "SYS_C008836",
           "unique": true,
-          "columns": ["SNSR_ID"]
+          "columns": [
+            "SNSR_ID"
+          ]
         }
       ],
       "foreignKeys": [
@@ -99,17 +99,23 @@
       "SNSR_TYPE_CD": {
         "text": "센서 유형 코드 — values[]로 노출만, 값 의미 매핑은 코드에 없음",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:63"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:63"
+        ]
       },
       "UNIT_CD": {
         "text": "측정 단위 코드 — values[]로 노출(2번째), 컬럼명 관례상 단위",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:63"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:63"
+        ]
       },
       "USE_YN": {
         "text": "values[]로 노출되는 값 컬럼(3번째) — 컬럼명 관례상 사용 여부 Y/N, 코드에 값 해석 없음",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:63"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:63"
+        ]
       }
     }
   }

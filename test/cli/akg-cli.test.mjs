@@ -141,8 +141,8 @@ test("cli catalog-push: end-to-end success -> exit 0, catalog replaced on the do
       headers: { authorization: "Bearer ed-tok" },
       payload: {
         schema: "db-schema/v1",
-        id: "t.sensor",
-        keywords: [{ kw: "t.sensor", inject: "full" }],
+        id: "sensor",
+        keywords: [{ kw: "sensor", inject: "full" }],
         status: "active",
         body: {
           owner: "T",
@@ -173,15 +173,17 @@ test("cli catalog-push: end-to-end success -> exit 0, catalog replaced on the do
       }),
     );
 
+    // a qualified owner.table argument is still accepted — the CLI strips the
+    // owner part, so the API call targets the bare-table id "sensor"
     const r = await runCli(["catalog-push", "t.sensor", describePath], {
       serverUrl,
     });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^catalog pushed: db-schema\/t\.sensor \(rev /);
+    assert.match(r.stdout, /^catalog pushed: db-schema\/sensor \(rev /);
 
     const got = await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.sensor",
+      url: "/api/docs/db-schema/sensor",
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.equal(got.json().json.body.catalog.columns.length, 2);

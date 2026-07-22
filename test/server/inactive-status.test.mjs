@@ -37,7 +37,7 @@ const auth = (t) => ({ authorization: `Bearer ${t}` });
 function doc(overrides = {}) {
   return {
     schema: "db-schema/v1",
-    id: "t.x",
+    id: "x",
     keywords: [{ kw: "x", inject: "full" }],
     status: "active",
     body: {
@@ -55,7 +55,7 @@ function doc(overrides = {}) {
   };
 }
 
-const MD = "rendered/db-schema/docs/t.x.md";
+const MD = "rendered/db-schema/docs/x.md";
 
 async function create(app, payload) {
   const res = await app.inject({
@@ -71,7 +71,7 @@ async function create(app, payload) {
 async function transition(app, action, rev, token = "aptok") {
   return app.inject({
     method: "POST",
-    url: `/api/docs/db-schema/t.x/${action}`,
+    url: `/api/docs/db-schema/x/${action}`,
     headers: { ...auth(token), "if-match": rev },
   });
 }
@@ -90,7 +90,7 @@ test("a doc created inactive produces no md and no index entry", async () => {
   // the whole point of choosing "inactive" over "don't import it yet".
   const read = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(read.statusCode, 200);
@@ -101,7 +101,7 @@ test("a doc created inactive produces no md and no index entry", async () => {
     url: "/api/docs",
     headers: auth("edtok"),
   });
-  assert.ok(list.json().docs.some((d) => d.id === "t.x"));
+  assert.ok(list.json().docs.some((d) => d.id === "x"));
 
   await cleanup();
 });
@@ -112,7 +112,7 @@ test("an inactive doc still previews, byte-identical to what activating would pu
 
   const published = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x?format=md",
+    url: "/api/docs/db-schema/x?format=md",
     headers: auth("edtok"),
   });
   assert.equal(published.statusCode, 200);
@@ -125,7 +125,7 @@ test("an inactive doc still previews, byte-identical to what activating would pu
   // reviewers would be judging something other than what they turn on.
   const preview = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x?format=md",
+    url: "/api/docs/db-schema/x?format=md",
     headers: auth("edtok"),
   });
   assert.equal(preview.statusCode, 200);
@@ -133,7 +133,7 @@ test("an inactive doc still previews, byte-identical to what activating would pu
 
   const full = await app.inject({
     method: "GET",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(full.json().md, published.payload);
@@ -178,7 +178,7 @@ test("an inactive doc is absent from the bundle every mirror installs", async ()
     input: res.rawPayload,
     encoding: "utf8",
   }).stdout;
-  assert.ok(!listing.includes("t.x.md"), listing);
+  assert.ok(!listing.includes("x.md"), listing);
 
   await cleanup();
 });
@@ -193,7 +193,7 @@ test("reactivating republishes the md and the index entry", async () => {
 
   assert.equal(existsSync(join(storeDir, MD)), true);
   assert.deepEqual(indexOf(storeDir), [
-    { keywords: ["x"], path: "docs/t.x.md" },
+    { keywords: ["x"], path: "docs/x.md" },
   ]);
 
   await cleanup();
@@ -206,7 +206,7 @@ test("archiving also removes the md — the pre-existing leak this closes", asyn
 
   const del = await app.inject({
     method: "DELETE",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
   assert.equal(del.statusCode, 200, del.payload);
@@ -228,7 +228,7 @@ test("turning a doc on is an approver decision, and needs a matching rev", async
 
   const noMatch = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/activate",
+    url: "/api/docs/db-schema/x/activate",
     headers: auth("aptok"),
   });
   assert.equal(noMatch.statusCode, 428);
@@ -256,7 +256,7 @@ test("repeating a transition is a no-op, and archived docs stay archived", async
 
   const del = await app.inject({
     method: "DELETE",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
   const revived = await transition(app, "activate", del.json().rev);

@@ -195,7 +195,7 @@ queue, S8; safe to retry). A human reviews and adopts/rejects it from the
 dashboard or `POST /api/proposals/:id/adopt|reject` — this CLI only submits,
 it never adopts (adoption is an editor-role action).
 
-### `akg catalog-push <owner.table> <describe.json>`
+### `akg catalog-push <table> <describe.json>`
 
 Pushes a fresh `describe_table` result (agent-db-plugin MCP output shape —
 `columns`/`primaryKey`/`foreignKeys`/`indexes`/`numRows`/`lastAnalyzed`/

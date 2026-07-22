@@ -16,7 +16,7 @@ const refs = loadSchemas(join(__dirname, "..", "schemas"));
 function minimalDbSchemaDoc() {
   return {
     schema: "db-schema/v1",
-    id: "t.x",
+    id: "x",
     keywords: [{ kw: "x", inject: "full" }],
     status: "active",
     body: {
@@ -33,7 +33,7 @@ function minimalDbSchemaDoc() {
   };
 }
 
-// `owner` is optional — an unqualified table is stored under just its name.
+// `owner` is optional — the id is the bare table name either way.
 test("db-schema: owner may be omitted, and then id is lower(table)", () => {
   const doc = minimalDbSchemaDoc();
   delete doc.body.owner;
@@ -44,7 +44,7 @@ test("db-schema: owner may be omitted, and then id is lower(table)", () => {
 test("db-schema: without owner, an owner-qualified id is rejected", () => {
   const doc = minimalDbSchemaDoc();
   delete doc.body.owner;
-  // id still carries a schema prefix the body no longer names
+  doc.id = "t.x"; // id carries a schema prefix the id rule never uses
   const errors = validateDocument(doc, refs);
   assert.ok(
     errors.some((e) => e.includes('expected "x" (lower(table))')),
@@ -52,12 +52,12 @@ test("db-schema: without owner, an owner-qualified id is rejected", () => {
   );
 });
 
-test("db-schema: with owner, id must still be lower(owner.table)", () => {
+test("db-schema: with owner, id is still lower(table) — an owner-qualified id is rejected", () => {
   const doc = minimalDbSchemaDoc();
-  doc.id = "x"; // dropped the owner prefix while the body still has one
+  doc.id = "t.x"; // owner is a plain attribute; it never qualifies the id
   const errors = validateDocument(doc, refs);
   assert.ok(
-    errors.some((e) => e.includes('expected "t.x" (lower(owner.table))')),
+    errors.some((e) => e.includes('expected "x" (lower(table))')),
   );
 });
 
@@ -123,11 +123,11 @@ test("db-schema: a DEPRECATED columnDescs entry not in catalog.columns is allowe
   assert.deepEqual(validateDocument(doc, refs), []);
 });
 
-test("db-schema: id must be lower(owner.table)", () => {
+test("db-schema: id must be lower(table)", () => {
   const doc = minimalDbSchemaDoc();
   doc.id = "wrong.id";
   const errors = validateDocument(doc, refs);
-  assert.ok(errors.some((e) => e.includes('expected "t.x"')));
+  assert.ok(errors.some((e) => e.includes('expected "x"')));
 });
 
 test("msg-format: id must be kebab(command)", () => {

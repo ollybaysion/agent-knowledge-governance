@@ -1,13 +1,9 @@
 {
   "schema": "db-schema/v1",
-  "id": "testuser.fdc_setup_event",
+  "id": "fdc_setup_event",
   "keywords": [
     {
       "kw": "fdc_setup_event",
-      "inject": "full"
-    },
-    {
-      "kw": "testuser.fdc_setup_event",
       "inject": "full"
     }
   ],
@@ -53,17 +49,24 @@
           "comment": null
         }
       ],
-      "primaryKey": ["EVT_ID"],
+      "primaryKey": [
+        "EVT_ID"
+      ],
       "indexes": [
         {
           "name": "SYS_C008841",
           "unique": true,
-          "columns": ["EVT_ID"]
+          "columns": [
+            "EVT_ID"
+          ]
         },
         {
           "name": "FDC_SETUP_EVENT_EQP_TIME_IX",
           "unique": false,
-          "columns": ["EQP_ID", "EVT_TIME"]
+          "columns": [
+            "EQP_ID",
+            "EVT_TIME"
+          ]
         }
       ],
       "foreignKeys": [
@@ -128,7 +131,9 @@
         "note": {
           "text": "설비별 이벤트 역순 조회",
           "tier": "inferred",
-          "evidence": ["fixtures/fdc-app/src/equipment-repo.ts:69-75"]
+          "evidence": [
+            "fixtures/fdc-app/src/equipment-repo.ts:69-75"
+          ]
         }
       }
     ]
