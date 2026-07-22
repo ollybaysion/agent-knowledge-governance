@@ -49,6 +49,22 @@ function el(tag, attrs, children) {
 }
 const $ = (id) => document.getElementById(id);
 
+// Save an in-memory string as a client-side download. No server round-trip: it
+// reuses text api() already fetched with the viewer's token, so it works the
+// same whether or not the deploy allows anonymous reads (AKG_ANON_READ) — a
+// bare <a href> to the md endpoint would 401 under AKG_ANON_READ=0 since anchors
+// carry no Authorization header. CSP-safe: a `download` anchor is not a fetch
+// the `default-src 'self'` policy governs.
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 // ---------- toast (prototype pattern — reused for notices/errors) ----------
 let toastTimer = null;
 function toast(message, klass) {
@@ -1575,6 +1591,22 @@ function renderSkillView(doc, rev, md, canEdit, canApprove) {
     }),
     el("span", { class: "mla" }),
   ]);
+  // Download the rendered SKILL.md — install-ready as-is under
+  // ~/.claude/skills/<name>/SKILL.md. Available to every reader (a skill is
+  // meant to be taken), reusing the md already loaded for this view.
+  if (md)
+    skbar.appendChild(
+      el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        title: `SKILL.md 파일로 내려받기 — ~/.claude/skills/${s.name}/ 에 넣으세요`,
+        onclick: () => {
+          downloadTextFile("SKILL.md", md, "text/markdown;charset=utf-8");
+          toast(`SKILL.md 다운로드 — skills/${s.name}/ 에 넣으세요`, "");
+        },
+        text: "↓ SKILL.md",
+      }),
+    );
   if (canApprove)
     skbar.appendChild(
       el("button", {
