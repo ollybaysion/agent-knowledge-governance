@@ -2853,3 +2853,30 @@ textarea.df-inp {
   line-height: 15px;
   font-weight: 600;
 }
+
+/* 드래프트 헤더의 편집 가능한 제목(= 이름) */
+.dftitle-wrap {
+  display: inline-flex;
+}
+.dftitle-wrap .df-v {
+  flex: 0 0 auto;
+}
+.df-click.df-title {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-color: transparent;
+}
+.df-click.df-title.empty {
+  font-weight: 400;
+  border-color: var(--hairline);
+}
+.df-click.df-title:hover {
+  border-color: var(--primary);
+  background: var(--surface-soft);
+}
+.df-inp.df-title {
+  font-size: 15px;
+  font-weight: 600;
+  max-width: 320px;
+}
