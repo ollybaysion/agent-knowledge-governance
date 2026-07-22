@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
+import { installSkills } from "../src/mirror/install-skills.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
 import { buildDocument, push, validateForPush } from "../src/client/push.mjs";
@@ -16,7 +17,7 @@ import { renderDocMd } from "../src/render/index.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
-  akg sync [--skills] [--server <url>] [--mirror <dir>]
+  akg sync [--skills] [--skills-dir <dir>] [--server <url>] [--mirror <dir>]
   akg push <type> <doc.json> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
@@ -30,6 +31,7 @@ function parseArgs(argv) {
   const [cmd, ...rest] = argv;
   const flags = {
     skills: false,
+    skillsDir: null,
     server: null,
     mirror: null,
     dryRun: false,
@@ -40,6 +42,7 @@ function parseArgs(argv) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--skills") flags.skills = true;
+    else if (a === "--skills-dir") flags.skillsDir = rest[++i];
     else if (a === "--dry-run") flags.dryRun = true;
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
@@ -101,6 +104,14 @@ function resolveMirrorDir(flags) {
   );
 }
 
+function resolveSkillsDir(flags) {
+  return (
+    flags.skillsDir ||
+    process.env.AKG_SKILLS_DIR ||
+    join(homedir(), ".claude", "skills")
+  );
+}
+
 function resolveServerUrl(flags, mirrorDir) {
   if (flags.server) return flags.server;
   if (process.env.AKG_SERVER) return process.env.AKG_SERVER;
@@ -147,7 +158,51 @@ function countSkills(mirrorDir) {
   }
 }
 
+// The mirror is not a place any agent looks, so a skill that stops here was
+// never installed. Runs on the 304 path too: the mirror is already correct
+// there, and re-running is how a hand-deleted skill comes back.
+//
+// Only ever with --skills. Without it the mirror has no domain-skill/, which
+// this would read as "the corpus has no skills" and uninstall everything akg
+// had put there — a plain `akg sync` must not do that.
+function runInstall(flags, mirrorDir, rev) {
+  const skillsDir = resolveSkillsDir(flags);
+  let result;
+  try {
+    result = installSkills({
+      sourceDir: join(mirrorDir, "domain-skill"),
+      skillsDir,
+      rev,
+    });
+  } catch (err) {
+    // Fail-open like the sync itself: the mirror is good, so report and go.
+    process.stderr.write(
+      `akg: skill 설치 실패 (${skillsDir}): ${err.message}\n`,
+    );
+    return;
+  }
+
+  // Silent when nothing moved — this runs on a timer for most people, and a
+  // line per run that always says the same thing stops being read.
+  const { installed, removed, skipped } = result;
+  if (installed.length || removed.length) {
+    process.stdout.write(
+      `installed ${installed.length} skills` +
+        `${removed.length ? `, removed ${removed.length}` : ""} → ${skillsDir}\n`,
+    );
+  }
+  // Never silent: a skipped skill is one the user asked for and did not get.
+  for (const { name, reason } of skipped) {
+    process.stderr.write(`akg: skill "${name}" 설치 건너뜀 — ${reason}\n`);
+  }
+}
+
 async function runSync(flags, mirrorDir, token, serverUrl) {
+  if (flags.skillsDir && !flags.skills) {
+    process.stderr.write(
+      "akg: --skills-dir 는 --skills 없이는 아무 일도 하지 않습니다\n",
+    );
+  }
   try {
     const result = await syncMirror({
       serverUrl,
@@ -164,6 +219,7 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
           `${skills ? `, ${skills} skills` : ""})\n`,
       );
     }
+    if (flags.skills) runInstall(flags, mirrorDir, result.rev);
   } catch (err) {
     process.stderr.write(`akg sync failed: ${err.message}\n`);
     // A 401 with no token means this server has anonymous read turned off —

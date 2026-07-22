@@ -1,12 +1,12 @@
 # Consuming and producing with akg from a local CC environment
 
-Phase 2 (design §8.1, §8.2, sections 1-5 below): pull the server's
+Phase 2 (design §8.1, §8.2, sections 1-6 below): pull the server's
 `rendered/` bundle into a local mirror with `akg sync`, then point
 claude-hooks' `keyword-docs` provider at that mirror. claude-hooks itself is
 **not modified** — the provider already supports a `params.index` override
 (D1), so switching to akg is a 4-line `context.json` edit.
 
-Phase 3 (design §8.1, section 6 below): push changes back to the hub with
+Phase 3 (design §8.1, section 7 below): push changes back to the hub with
 `akg propose` and `akg catalog-push` — the CLI's write side.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
@@ -58,11 +58,46 @@ This writes:
   msg-format/ { index.json, docs/*.md }
 ```
 
-`domain-skill/` is only installed with `--skills` (SKILL.md installation is
-opt-in — most sessions only need the injectable docs). After the first sync,
+`domain-skill/` is only mirrored with `--skills` (skill installation is opt-in
+— most sessions only need the injectable docs). After the first sync,
 `--server` can be omitted on later runs — it's remembered in `meta.json`.
 
-## 3. Switch claude-hooks to read the mirror
+## 3. Skills: `--skills` installs them where agents look
+
+The mirror is not a place any agent reads, so `--skills` goes one step further
+and installs each skill into `~/.claude/skills/<name>/`:
+
+```sh
+akg sync --skills --server https://your-akg-server.internal
+```
+
+**That one directory covers Claude Code and opencode both.** Claude Code
+discovers personal skills there, and it is also one of opencode's global skill
+paths (alongside `~/.config/opencode/skills/` and `~/.agents/skills/`), so
+there is nothing to install twice and no per-agent configuration. Use
+`--skills-dir <dir>` (or `AKG_SKILLS_DIR`) to install somewhere else.
+
+Skills already present at the current rev are left alone, so a sync on a timer
+is quiet; a skill you deleted by hand comes back on the next sync.
+
+**akg only touches skills it installed.** `<skills-dir>/.akg-installed.json`
+records them. If a skill directory exists that akg did not put there — one you
+wrote yourself with the same name — it is neither overwritten nor removed, and
+the sync says so on stderr:
+
+```text
+akg: skill "fdc-explain-sensor" 설치 건너뜀 — not installed by akg — left untouched
+```
+
+Rename one of the two to resolve it. Conversely, when a document leaves the
+corpus (archived, or switched to `inactive`), the next `--skills` sync
+uninstalls that skill — and only that skill.
+
+Note that a plain `akg sync` **never uninstalls anything**: without `--skills`
+the mirror has no `domain-skill/` at all, which is not the same statement as
+"the corpus has no skills."
+
+## 4. Switch claude-hooks to read the mirror
 
 Edit `~/.claude/context.json` (design §4 D1):
 
@@ -88,7 +123,7 @@ matches one of the migrated documents' keywords in a fresh CC session and
 check the prompt got the injected context (or use claude-hooks' own
 diagnostics for the `keyword-docs` provider, if available).
 
-## 4. Keeping the mirror fresh
+## 5. Keeping the mirror fresh
 
 `akg sync` is a normal CLI command — trigger it however fits:
 
@@ -125,7 +160,7 @@ session or removes previously-synced docs. The only exit codes that mean
 wrong or revoked, or the server has `AKG_ANON_READ=0` and you sent none) or a
 config error (no server URL resolvable).
 
-## 5. Manual rehearsal procedure
+## 6. Manual rehearsal procedure
 
 To verify the full loop end-to-end against a real server before rolling this
 out broadly:
@@ -147,7 +182,7 @@ out broadly:
    Confirm it prints `synced rev <rev> (N docs)` and that
    `/tmp/akg-mirror-check/db-schema/index.json` (and `docs/*.md`) exist.
 
-3. Point a scratch `context.json` at that mirror (§3 above, using the
+3. Point a scratch `context.json` at that mirror (§4 above, using the
    `--mirror` path) and start a CC session with `AKG_MIRROR` / a `--mirror`
    override wired into `context.json`'s `params.index` accordingly, then ask
    a question matching one of the rehearsal server's seeded documents'
@@ -157,7 +192,7 @@ out broadly:
    **without deleting or corrupting the mirror** — the docs from step 2/3
    must still be readable.
 
-## 6. Producing: `akg propose` and `akg catalog-push`
+## 7. Producing: `akg propose` and `akg catalog-push`
 
 Unlike `sync`, these are explicit writes a caller asked for — they **fail
 closed**: any failure (network, auth, validation, a 404) prints the reason to
@@ -217,7 +252,7 @@ Prints `catalog pushed: db-schema/t.sensor (rev <rev>)`. The target doc must
 already exist — this route never creates one; a 404 means propose (or the
 dashboard) needs to create it first.
 
-## 7. Bulk intake: `POST .../batch` and `PUT .../facts`
+## 8. Bulk intake: `POST .../batch` and `PUT .../facts`
 
 These are HTTP routes, not CLI subcommands yet — the importer that will call
 them (akg-collector) drives them directly.
