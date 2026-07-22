@@ -1224,7 +1224,7 @@ async function renderDocScreen(type, id) {
   function renderInner() {
     if (type === "domain-skill") {
       section.replaceChildren(
-        renderSkillView(doc, rev, md, canEdit, canApprove),
+        renderSkillView(doc, rev, md, canEdit, reload),
       );
       return;
     }
@@ -1534,123 +1534,330 @@ async function renderDocScreen(type, id) {
 }
 
 // domain-skill: editorial reading view (prototype .skwrap), read-only in v1
-function renderSkillView(doc, rev, md, canEdit, canApprove) {
+function renderSkillView(doc, rev, md, canEdit, reload) {
   const s = doc.body;
+  const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
+  // Only one inline editor open at a time — opening another reverts the first,
+  // so a half-typed edit can't be silently abandoned (mirrors db-schema's guard).
+  let active = null;
+
+  // Every field edit is one whole-body PUT (spec v2 has no tiered slots — the
+  // body is the unit). mutate() applies the one change onto a clone; on success
+  // the screen reloads so the next edit sees a fresh rev.
+  async function commit(mutate) {
+    const next = structuredClone(s);
+    mutate(next);
+    const r = await api(url, {
+      method: "PUT",
+      headers: { "if-match": rev },
+      body: next,
+    });
+    if (r.ok) {
+      toast("저장했습니다", "");
+      reload();
+      return true;
+    }
+    if (r.status === 409)
+      toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
+    else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
+    else {
+      const d = r.data || {};
+      toast(
+        `저장 실패 (${r.status})` +
+          (d.message ? " — " + d.message : "") +
+          (d.details ? " — " + JSON.stringify(d.details) : ""),
+        "error",
+      );
+    }
+    return false;
+  }
+
+  // A click-to-edit value. opts.kind: text | area | enum | bool. `apply(next,
+  // value)` writes the value into a body clone. Read shows the value (or a
+  // "(빈칸)" affordance); clicking swaps in an input + 저장/취소.
+  function field(value, opts, apply) {
+    const holder = el("span", { class: "fx" });
+    function read() {
+      const shown =
+        opts.kind === "bool"
+          ? value
+            ? "필수"
+            : "선택"
+          : (value ?? "") === ""
+            ? opts.empty || "(빈칸)"
+            : String(value);
+      const empty = opts.kind !== "bool" && (value ?? "") === "";
+      const cls = "fx-val" + (empty ? " empty" : "") + (opts.mono ? " mono" : "");
+      holder.replaceChildren(
+        canEdit
+          ? el("span", { class: cls, title: "클릭해서 편집", onclick: edit, text: shown })
+          : el("span", { class: cls, text: shown }),
+      );
+    }
+    function edit() {
+      if (active && active !== read) active();
+      active = read;
+      let input;
+      let getVal;
+      if (opts.kind === "enum") {
+        input = el("select", { class: "fx-in" });
+        for (const v of opts.values) {
+          const o = el("option", { value: v, text: v });
+          if (v === value) o.selected = true;
+          input.appendChild(o);
+        }
+        getVal = () => input.value;
+      } else if (opts.kind === "bool") {
+        input = el("select", { class: "fx-in" });
+        for (const [v, label] of [
+          ["true", "필수"],
+          ["false", "선택"],
+        ]) {
+          const o = el("option", { value: v, text: label });
+          if ((v === "true") === !!value) o.selected = true;
+          input.appendChild(o);
+        }
+        getVal = () => input.value === "true";
+      } else {
+        input = el(opts.kind === "area" ? "textarea" : "input", {
+          class: "fx-in" + (opts.mono ? " mono" : ""),
+          spellcheck: "false",
+        });
+        if (opts.kind !== "area") input.type = "text";
+        input.value = value ?? "";
+        getVal = () => input.value;
+      }
+      const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        const ok = await commit((next) => apply(next, getVal()));
+        if (!ok) save.disabled = false;
+      });
+      holder.replaceChildren(
+        input,
+        el("span", { class: "fx-btns" }, [
+          save,
+          el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+        ]),
+      );
+      input.focus();
+    }
+    read();
+    return holder;
+  }
+
+  // optional scalar: clearing it removes the key (empty fails the schema's \S).
+  const setOpt = (key) => (n, v) => {
+    if (String(v).trim() === "") delete n[key];
+    else n[key] = v;
+  };
+  // optional scalar nested in an array item: n[arr][i][key].
+  const setOpt2 = (i, arr, key) => (n, v) => {
+    if (String(v).trim() === "") delete n[arr][i][key];
+    else n[arr][i][key] = v;
+  };
+
   const wrap = el("div", { class: "skwrap" }, [
     el("p", { class: "sk-eyebrow", text: "domain-skill · 조회 절차 스킬" }),
     el("h1", { class: "sk-title", text: s.name }),
-    el("p", { class: "sk-sub", text: (s.description || "").split("\n")[0] }),
+    el("p", { class: "sk-sub", text: (s.intro || "").split("\n")[0] }),
     el("div", { class: "sk-chips" }, [
       el("span", { class: "chip", text: doc.status }),
       el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
       ...keywordChips(doc.keywords || []),
     ]),
   ]);
-  // frontmatter spec sheet
-  const fm = el(
-    "table",
-    {},
-    el("tbody", {}, [
-      el("tr", {}, [
-        el("td", { class: "key", text: "name" }),
-        el("td", { class: "mono", text: s.name }),
-      ]),
-      el("tr", {}, [
-        el("td", { class: "key", text: "argument-hint" }),
-        el("td", { class: "mono", text: s.argumentHint }),
-      ]),
-      el("tr", {}, [
-        el("td", { class: "key", text: "description" }),
-        el("td", { text: s.description }),
-      ]),
-      el("tr", {}, [
-        el("td", { class: "key", text: "disable-model-invocation" }),
-        el("td", {}, [el("span", { class: "flag", text: "true" })]),
-      ]),
+  if (canEdit)
+    wrap.appendChild(
+      el("p", { class: "dim sk-hint", text: "값을 클릭하면 그 자리에서 편집합니다. 저장은 즉시 반영됩니다." }),
+    );
+
+  const sec = (title, addBtn) => {
+    const h = el("h2", { class: "sk-h" }, [title]);
+    if (addBtn) h.appendChild(addBtn);
+    wrap.appendChild(h);
+  };
+  const addBtn = (label, onAdd) =>
+    canEdit
+      ? el("button", { type: "button", class: "btn ghost sm add-btn", onclick: () => commit(onAdd), text: label })
+      : null;
+  const delBtn = (canDel, onDel) =>
+    canEdit && canDel
+      ? el("button", { type: "button", class: "btn ghost sm del-btn", title: "삭제", onclick: () => commit(onDel), text: "✕" })
+      : null;
+  const drow = (label, node) =>
+    el("div", { class: "drow" }, [el("span", { class: "dk", text: label }), el("span", { class: "dv" }, node)]);
+
+  // ── 기본 ──────────────────────────────────────────────────────────────
+  sec("기본");
+  wrap.appendChild(
+    el("div", { class: "sk-def" }, [
+      drow("name", field(s.name, { mono: true }, (n, v) => (n.name = v))),
+      drow("argument-hint", field(s.argumentHint, { mono: true }, (n, v) => (n.argumentHint = v))),
+      drow("단위", field(s.scope?.단위, { kind: "enum", values: ["설비", "챔버", "센서"] }, (n, v) => (n.scope.단위 = v))),
+      drow("카디널리티", field(s.scope?.카디널리티, { kind: "enum", values: ["단일"] }, (n, v) => (n.scope.카디널리티 = v))),
+      drow("의도", field(s.scope?.의도, { kind: "enum", values: ["상태", "생성 이력"] }, (n, v) => (n.scope.의도 = v))),
+      drow("focus", field(s.focus, {}, (n, v) => (n.focus = v))),
+      drow("anchor-table", field(s.anchorTable, { mono: true }, setOpt("anchorTable"))),
+      drow("intro", field(s.intro, { kind: "area" }, (n, v) => (n.intro = v))),
+      drow("discipline", field(s.discipline, { kind: "area" }, setOpt("discipline"))),
     ]),
   );
-  wrap.appendChild(el("div", { class: "fm" }, fm));
-  if (s.intro) wrap.appendChild(el("p", { class: "lead", text: s.intro }));
 
-  wrap.appendChild(el("h2", { class: "sk-h", text: "조회 절차" }));
-  const steps = el(
-    "ol",
-    { class: "steps" },
-    (s.steps || []).map((st) => {
-      const li = el("li", {}, [
-        el("div", { class: "st-h" }, [
-          st.title,
-          st.lead ? el("span", { class: "n", text: st.lead }) : null,
+  // ── 입력 파라미터 ─────────────────────────────────────────────────────
+  sec(
+    "입력 파라미터",
+    addBtn("+ 입력 추가", (n) => n.inputs.push({ name: "새_입력", required: true, description: "설명" })),
+  );
+  const inputsWrap = el("div", {});
+  (s.inputs || []).forEach((inp, i) => {
+    inputsWrap.appendChild(
+      el("div", { class: "sk-item" }, [
+        el("div", { class: "sk-item-h" }, [
+          el("span", { class: "sk-item-n", text: `입력 ${i + 1}` }),
+          el("span", { class: "mla" }),
+          delBtn((s.inputs || []).length > 1, (n) => n.inputs.splice(i, 1)),
         ]),
-      ]);
-      li.appendChild(
-        el(
-          "div",
-          { class: "tbl-wrap" },
-          el("pre", { class: "step-sql", text: st.sql }),
-        ),
+        el("div", { class: "sk-def" }, [
+          drow("name", field(inp.name, { mono: true }, (n, v) => (n.inputs[i].name = v))),
+          drow("required", field(inp.required, { kind: "bool" }, (n, v) => (n.inputs[i].required = v))),
+          drow("description", field(inp.description, { kind: "area" }, (n, v) => (n.inputs[i].description = v))),
+        ]),
+      ]),
+    );
+  });
+  wrap.appendChild(inputsWrap);
+
+  // ── 의존성 ────────────────────────────────────────────────────────────
+  sec(
+    "의존성",
+    addBtn("+ 의존성 추가", (n) => n.dependencies.push({ mcp: "mcp-이름" })),
+  );
+  const depsWrap = el("div", {});
+  (s.dependencies || []).forEach((dep, i) => {
+    const tools = el("span", { class: "chiprow" });
+    (dep.tools || []).forEach((t, j) => {
+      tools.appendChild(
+        el("span", { class: "toolchip" }, [
+          field(t, { mono: true }, (n, v) => (n.dependencies[i].tools[j] = v)),
+          delBtn(true, (n) => {
+            n.dependencies[i].tools.splice(j, 1);
+            if (n.dependencies[i].tools.length === 0) delete n.dependencies[i].tools;
+          }),
+        ]),
       );
-      if (st.notes)
-        li.appendChild(
-          el("div", { class: "step-notes" }, [
-            el("b", { text: "분기" }),
-            " " + st.notes,
-          ]),
-        );
-      return li;
-    }),
-  );
-  wrap.appendChild(steps);
+    });
+    const addTool = addBtn("+ tool", (n) => {
+      if (!n.dependencies[i].tools) n.dependencies[i].tools = [];
+      n.dependencies[i].tools.push("tool");
+    });
+    if (addTool) tools.appendChild(addTool);
+    depsWrap.appendChild(
+      el("div", { class: "sk-item" }, [
+        el("div", { class: "sk-item-h" }, [
+          el("span", { class: "sk-item-n", text: `의존성 ${i + 1}` }),
+          el("span", { class: "mla" }),
+          delBtn((s.dependencies || []).length > 1, (n) => n.dependencies.splice(i, 1)),
+        ]),
+        el("div", { class: "sk-def" }, [
+          drow("mcp", field(dep.mcp, { mono: true }, (n, v) => (n.dependencies[i].mcp = v))),
+          drow("tools", tools),
+          drow("why", field(dep.why, { kind: "area" }, setOpt2(i, "dependencies", "why"))),
+        ]),
+      ]),
+    );
+  });
+  wrap.appendChild(depsWrap);
 
-  wrap.appendChild(el("h2", { class: "sk-h", text: "값 해석 규칙" }));
+  // ── 조회 절차 ─────────────────────────────────────────────────────────
+  sec(
+    "조회 절차",
+    addBtn("+ 단계 추가", (n) => n.steps.push({ title: "새 단계", sql: "SELECT 1" })),
+  );
+  const stepsWrap = el("div", {});
+  (s.steps || []).forEach((st, i) => {
+    const branches = el("div", { class: "sk-branches" });
+    (st.branches || []).forEach((br, j) => {
+      branches.appendChild(
+        el("div", { class: "sk-branch" }, [
+          el("span", { class: "dk", text: "when" }),
+          field(br.when, {}, (n, v) => (n.steps[i].branches[j].when = v)),
+          el("span", { class: "dk", text: "then" }),
+          field(br.then, { kind: "area" }, (n, v) => (n.steps[i].branches[j].then = v)),
+          delBtn(true, (n) => {
+            n.steps[i].branches.splice(j, 1);
+            if (n.steps[i].branches.length === 0) delete n.steps[i].branches;
+          }),
+        ]),
+      );
+    });
+    const addBranch = addBtn("+ 분기", (n) => {
+      if (!n.steps[i].branches) n.steps[i].branches = [];
+      n.steps[i].branches.push({ when: "조건", then: "동작" });
+    });
+    if (addBranch) branches.appendChild(addBranch);
+    stepsWrap.appendChild(
+      el("div", { class: "sk-item" }, [
+        el("div", { class: "sk-item-h" }, [
+          el("span", { class: "sk-item-n", text: `단계 ${i + 1}` }),
+          el("span", { class: "mla" }),
+          delBtn((s.steps || []).length > 1, (n) => n.steps.splice(i, 1)),
+        ]),
+        el("div", { class: "sk-def" }, [
+          drow("title", field(st.title, {}, (n, v) => (n.steps[i].title = v))),
+          drow("produces", field(st.produces, {}, setOpt2(i, "steps", "produces"))),
+          drow("lead", field(st.lead, {}, setOpt2(i, "steps", "lead"))),
+          drow("sql", field(st.sql, { kind: "area", mono: true }, (n, v) => (n.steps[i].sql = v))),
+          drow("branches", branches),
+          drow("notes", field(st.notes, { kind: "area" }, setOpt2(i, "steps", "notes"))),
+        ]),
+      ]),
+    );
+  });
+  wrap.appendChild(stepsWrap);
+
+  // ── 출력 ──────────────────────────────────────────────────────────────
+  sec("출력");
   wrap.appendChild(
-    el(
-      "div",
-      { class: "md tbl-wrap" },
-      el("table", {}, [
-        el(
-          "thead",
-          {},
-          el("tr", {}, [
-            el("th", { scope: "col", text: "대상" }),
-            el("th", { scope: "col", text: "규칙" }),
-            el("th", { scope: "col", text: "근거" }),
-          ]),
-        ),
-        el(
-          "tbody",
-          {},
-          (s.valueRules || []).map((r) =>
-            el("tr", {}, [
-              el("td", { text: r.target }),
-              el("td", { text: r.rule }),
-              el("td", { class: "dim", text: r.basis }),
-            ]),
-          ),
-        ),
-      ]),
-    ),
+    el("h3", { class: "sk-h3" }, [
+      "하지 말 것 (avoid)",
+      addBtn("+ 추가", (n) => n.output.avoid.push("끌리는 오추론 예시 — 그걸 금하는 데이터 사실")),
+    ]),
   );
-
-  wrap.appendChild(el("h2", { class: "sk-h", text: "출력" }));
-  const outCard = el("div", { class: "out-card" }, [
-    el("div", { class: "out-tmpl", text: s.output.template }),
-  ]);
-  if (s.output.lead)
-    outCard.insertBefore(
-      el("div", { class: "out-hint", text: s.output.lead }),
-      outCard.firstChild,
-    );
-  if (s.output.example)
-    outCard.appendChild(
-      el("div", { class: "out-ex" }, [
-        s.output.exampleLabel
-          ? el("span", { class: "lbl", text: s.output.exampleLabel })
-          : null,
-        s.output.example,
+  const avoidWrap = el("div", { class: "sk-list" });
+  (s.output?.avoid || []).forEach((a, i) => {
+    avoidWrap.appendChild(
+      el("div", { class: "sk-li" }, [
+        field(a, {}, (n, v) => (n.output.avoid[i] = v)),
+        delBtn((s.output?.avoid || []).length > 3, (n) => n.output.avoid.splice(i, 1)),
       ]),
     );
-  wrap.appendChild(outCard);
+  });
+  wrap.appendChild(avoidWrap);
+
+  wrap.appendChild(
+    el("h3", { class: "sk-h3" }, [
+      "예시 (examples)",
+      addBtn("+ 예시 추가", (n) => n.output.examples.push({ ask: "질문 예시", answer: "답변 예시" })),
+    ]),
+  );
+  const exWrap = el("div", {});
+  (s.output?.examples || []).forEach((ex, i) => {
+    exWrap.appendChild(
+      el("div", { class: "sk-item" }, [
+        el("div", { class: "sk-item-h" }, [
+          el("span", { class: "sk-item-n", text: `예시 ${i + 1}` }),
+          el("span", { class: "mla" }),
+          delBtn((s.output?.examples || []).length > 2, (n) => n.output.examples.splice(i, 1)),
+        ]),
+        el("div", { class: "sk-def" }, [
+          drow("ask", field(ex.ask, {}, (n, v) => (n.output.examples[i].ask = v))),
+          drow("answer", field(ex.answer, { kind: "area" }, (n, v) => (n.output.examples[i].answer = v))),
+        ]),
+      ]),
+    );
+  });
+  wrap.appendChild(exWrap);
 
   // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
   // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
@@ -1702,28 +1909,6 @@ function renderSkillView(doc, rev, md, canEdit, canApprove) {
     );
   }
 
-  const skbar = el("div", { class: "skbar" }, [
-    el("span", { class: "b b-inf", text: "추정" }),
-    el("span", {
-      class: "dim",
-      text: "v1은 슬롯 단위가 아니라 문서 전체 검토 — basis 인라인",
-    }),
-    el("span", { class: "mla" }),
-  ]);
-  if (canApprove)
-    skbar.appendChild(
-      el("button", {
-        type: "button",
-        class: "btn promote sm",
-        onclick: () =>
-          toast(
-            "domain-skill 승격은 문서 단위 — 서버 promote는 슬롯 기반이라 v1 미연결.",
-            "",
-          ),
-        text: "확정",
-      }),
-    );
-  wrap.appendChild(skbar);
   return wrap;
 }
 
