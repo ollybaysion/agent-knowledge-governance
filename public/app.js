@@ -581,11 +581,48 @@ function statusBadge(status) {
     text: STATUS_LABEL[status] ?? status,
     title:
       status === "inactive"
-        ? "조회는 되지만 미러로 나가지 않아 세션에 주입되지 않습니다."
+        ? "주입이 꺼진 문서입니다 — 대시보드에서 열람·편집만 됩니다."
         : status === "active"
-          ? "미러로 배포되어 세션 프롬프트에 주입됩니다."
-          : "더 이상 싣지 않는 문서입니다.",
+          ? "LLM 세션에 주입되는 문서입니다. 문서 단위 전역 스위치 — 모든 사용자에게 동일합니다."
+          : "폐기된 문서입니다 — 기록으로만 남습니다.",
   });
+}
+
+// 단어 단위 LCS diff — 저장 전 미리보기(④)에서 무엇이 바뀌는지 보여준다.
+// db-schema 슬롯과 domain-skill 필드 편집이 공유한다.
+function wordDiff(oldStr, newStr) {
+  const a = oldStr.trim() ? oldStr.trim().split(/\s+/) : [];
+  const b = newStr.trim() ? newStr.trim().split(/\s+/) : [];
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] =
+        a[i] === b[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ t: "eq", w: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ t: "del", w: a[i] });
+      i++;
+    } else {
+      out.push({ t: "add", w: b[j] });
+      j++;
+    }
+  }
+  while (i < n) out.push({ t: "del", w: a[i++] });
+  while (j < m) out.push({ t: "add", w: b[j++] });
+  return out;
 }
 
 // ================= 문서 (단일 문서 뷰) =================
@@ -793,42 +830,6 @@ async function renderDocScreen(type, id) {
       ...common,
     });
   }
-  // 단어 단위 LCS diff — 저장 전 미리보기(④)에서 무엇이 바뀌는지 보여준다.
-  function wordDiff(oldStr, newStr) {
-    const a = oldStr.trim() ? oldStr.trim().split(/\s+/) : [];
-    const b = newStr.trim() ? newStr.trim().split(/\s+/) : [];
-    const n = a.length;
-    const m = b.length;
-    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-    for (let i = n - 1; i >= 0; i--) {
-      for (let j = m - 1; j >= 0; j--) {
-        dp[i][j] =
-          a[i] === b[j]
-            ? dp[i + 1][j + 1] + 1
-            : Math.max(dp[i + 1][j], dp[i][j + 1]);
-      }
-    }
-    const out = [];
-    let i = 0;
-    let j = 0;
-    while (i < n && j < m) {
-      if (a[i] === b[j]) {
-        out.push({ t: "eq", w: a[i] });
-        i++;
-        j++;
-      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-        out.push({ t: "del", w: a[i] });
-        i++;
-      } else {
-        out.push({ t: "add", w: b[j] });
-        j++;
-      }
-    }
-    while (i < n) out.push({ t: "del", w: a[i++] });
-    while (j < m) out.push({ t: "add", w: b[j++] });
-    return out;
-  }
-
   // 저장하면 티어가 어디로 가는지 — 서버 applyEdit 규칙의 클라이언트 미러.
   function nextTier(slot, text, textChanged) {
     if (!text.trim()) return "scaffold";
@@ -1223,16 +1224,49 @@ async function renderDocScreen(type, id) {
 
   function renderInner() {
     if (type === "domain-skill") {
+      const skill = renderSkillView(
+        doc,
+        rev,
+        md,
+        canEdit,
+        reload,
+        // 상태는 칩 하나가 겸한다(라벨 = 도착 상태의 반대편이 아니라 현재
+        // 상태): approver가 클릭하면 active ↔ inactive 토글.
+        canApprove && doc.status !== "archived"
+          ? () => statusAction(doc.status === "active" ? "inactive" : "active")
+          : null,
+        // 원본 JSON 좌우 분할(승인자 전용) — db-schema 뷰와 같은 affordance.
+        canApprove
+          ? () => {
+              jsonOpen = !jsonOpen;
+              renderInner();
+            }
+          : null,
+        jsonOpen,
+      );
       section.replaceChildren(
-        renderSkillView(doc, rev, md, canEdit, reload),
+        jsonOpen
+          ? el("div", { class: "doc-split open" }, [
+              skill,
+              jsonPane(`${type}/${id}.json`, doc, () => {
+                jsonOpen = false;
+                renderInner();
+              }),
+            ])
+          : skill,
       );
       return;
     }
     const b = doc.body;
     const mdChildren = [];
     if (type === "db-schema") {
+      // owner is a plain attribute — the title is the bare table name and the
+      // id/filename follow it (lower(table)); owner shows as a chip beside it.
       mdChildren.push(
-        el("h1", { text: b.owner ? `${b.owner}.${b.table}` : b.table }),
+        el("h1", {}, [
+          b.table,
+          b.owner ? el("span", { class: "chip owner-chip", text: b.owner }) : null,
+        ]),
       );
       mdChildren.push(psRow(slotByAddr("purpose")));
       const colRows = (b.catalog.columns || []).map((col) =>
@@ -1534,12 +1568,13 @@ async function renderDocScreen(type, id) {
 }
 
 // domain-skill: editorial reading view (prototype .skwrap), read-only in v1
-function renderSkillView(doc, rev, md, canEdit, reload) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
-  // Only one inline editor open at a time — opening another reverts the first,
-  // so a half-typed edit can't be silently abandoned (mirrors db-schema's guard).
-  let active = null;
+  // Only one inline editor open at a time. A dirty editor blocks opening
+  // another (flash + toast) — the same guard db-schema slots use; a clean
+  // one is reverted silently.
+  let active = null; // { revert, dirty, flash } of the open editor
 
   // Every field edit is one whole-body PUT (spec v2 has no tiered slots — the
   // body is the unit). mutate() applies the one change onto a clone; on success
@@ -1574,10 +1609,12 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
 
   // A click-to-edit value. opts.kind: text | area | enum | bool. `apply(next,
   // value)` writes the value into a body clone. Read shows the value (or a
-  // "(빈칸)" affordance); clicking swaps in an input + 저장/취소.
+  // "(빈칸)" affordance); clicking swaps in the same slot-edit card db-schema
+  // slots use — one edit design language across doc types.
   function field(value, opts, apply) {
     const holder = el("span", { class: "fx" });
     function read() {
+      if (active && active.revert === read) active = null;
       const shown =
         opts.kind === "bool"
           ? value
@@ -1587,7 +1624,12 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
             ? opts.empty || "(빈칸)"
             : String(value);
       const empty = opts.kind !== "bool" && (value ?? "") === "";
-      const cls = "fx-val" + (empty ? " empty" : "") + (opts.mono ? " mono" : "");
+      const cls =
+        "fx-val" +
+        (empty ? " empty" : "") +
+        (opts.mono ? " mono" : "") +
+        (opts.block ? " block" : "") +
+        (canEdit ? " editable" : "");
       holder.replaceChildren(
         canEdit
           ? el("span", { class: cls, title: "클릭해서 편집", onclick: edit, text: shown })
@@ -1595,20 +1637,58 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
       );
     }
     function edit() {
-      if (active && active !== read) active();
-      active = read;
+      // Dirty guard — same rule as db-schema slots: a half-typed edit is never
+      // dropped because another value was clicked; flash the open card instead.
+      if (active && active.revert !== read) {
+        if (active.dirty()) {
+          active.flash();
+          toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
+          return;
+        }
+        active.revert();
+      }
+      // enum: no card — the closed list unfolds in place as segment buttons
+      // and picking one commits immediately (esc/취소 to back out).
+      if (opts.kind === "enum") {
+        const seg = el(
+          "span",
+          { class: "segedit" },
+          opts.values.map((v) => {
+            const b = el("button", {
+              type: "button",
+              class: v === value ? "on" : "",
+              text: v,
+            });
+            b.addEventListener("click", async () => {
+              if (v === value) return read();
+              b.disabled = true;
+              const ok = await commit((next) => apply(next, v));
+              if (!ok) read();
+            });
+            return b;
+          }),
+        );
+        const pick = el("span", { class: "segwrap" }, [
+          seg,
+          el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: read }),
+        ]);
+        pick.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            read();
+          }
+        });
+        active = { revert: read, dirty: () => false, flash: () => {} };
+        holder.replaceChildren(pick);
+        seg.querySelector("button")?.focus();
+        return;
+      }
       let input;
       let getVal;
-      if (opts.kind === "enum") {
-        input = el("select", { class: "fx-in" });
-        for (const v of opts.values) {
-          const o = el("option", { value: v, text: v });
-          if (v === value) o.selected = true;
-          input.appendChild(o);
-        }
-        getVal = () => input.value;
-      } else if (opts.kind === "bool") {
-        input = el("select", { class: "fx-in" });
+      const oldShown =
+        opts.kind === "bool" ? (value ? "필수" : "선택") : String(value ?? "");
+      if (opts.kind === "bool") {
+        input = el("select", { class: "fld" });
         for (const [v, label] of [
           ["true", "필수"],
           ["false", "선택"],
@@ -1620,31 +1700,277 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
         getVal = () => input.value === "true";
       } else {
         input = el(opts.kind === "area" ? "textarea" : "input", {
-          class: "fx-in" + (opts.mono ? " mono" : ""),
+          class: "fld" + (opts.mono ? " mono" : ""),
           spellcheck: "false",
         });
         if (opts.kind !== "area") input.type = "text";
         input.value = value ?? "";
         getVal = () => input.value;
       }
+      const newShown = () =>
+        opts.kind === "bool" ? (getVal() ? "필수" : "선택") : String(getVal());
+      const dirty = () => newShown() !== oldShown;
       const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
       save.addEventListener("click", async () => {
         save.disabled = true;
         const ok = await commit((next) => apply(next, getVal()));
         if (!ok) save.disabled = false;
       });
-      holder.replaceChildren(
+      // 저장 전 미리보기 — db-schema 와 같은 단어 diff.
+      const diffBody = el("div", { class: "diffbody" });
+      const refresh = () => {
+        const changed = dirty();
+        save.disabled = !changed;
+        save.title = changed ? "" : "변경 없음";
+        diffBody.replaceChildren();
+        if (!changed) {
+          diffBody.appendChild(el("span", { class: "dim", text: "아직 변경 없음" }));
+          return;
+        }
+        const wd = el("span", { class: "wd" });
+        for (const p of wordDiff(oldShown, newShown())) {
+          if (p.t === "eq") wd.appendChild(document.createTextNode(`${p.w} `));
+          else wd.appendChild(el("span", { class: p.t, text: `${p.w} ` }));
+        }
+        diffBody.appendChild(wd);
+      };
+      const grow = () => {
+        if (opts.kind !== "area") return;
+        input.style.height = "auto";
+        input.style.height = `${input.scrollHeight}px`;
+      };
+      input.addEventListener("input", () => {
+        grow();
+        refresh();
+      });
+      input.addEventListener("change", refresh);
+      const card = el("div", { class: "slot-edit" }, [
         input,
-        el("span", { class: "fx-btns" }, [
+        el("div", { class: "editacts" }, [
           save,
           el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+          el("span", { class: "kbd" }, [
+            el("b", { text: "esc" }),
+            " 취소 · ",
+            el("b", { text: opts.kind === "area" ? "⌘/Ctrl+↵" : "↵" }),
+            " 저장",
+          ]),
         ]),
-      );
+        el("details", { class: "diffbox" }, [
+          el("summary", { text: "무엇이 바뀌나" }),
+          diffBody,
+        ]),
+      ]);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          read();
+        } else if (
+          e.key === "Enter" &&
+          (e.metaKey || e.ctrlKey || opts.kind !== "area")
+        ) {
+          e.preventDefault();
+          if (!save.disabled) save.click();
+        }
+      });
+      active = {
+        revert: read,
+        dirty,
+        flash: () => {
+          card.classList.remove("dirtyflash");
+          void card.offsetWidth;
+          card.classList.add("dirtyflash");
+        },
+      };
+      holder.replaceChildren(card);
+      refresh();
+      grow();
       input.focus();
+      // cursor at end, like the db-schema editor (text kinds only)
+      if (opts.kind === "area" || opts.kind === undefined)
+        input.setSelectionRange(input.value.length, input.value.length);
     }
     read();
     return holder;
   }
+
+  // argument-hint is composed from inputs (the spec calls inputs "인자 계약의
+  // 진실원") — {name} for required, [name] for optional. Every inputs mutation
+  // recomputes it so the two can never drift.
+  const composeHint = (inputs) =>
+    (inputs || [])
+      .map((p) => (p.required ? `{${p.name}}` : `[${p.name}]`))
+      .join(" ");
+
+  // The argument-hint row IS the inputs editor: one chip per parameter
+  // ({name}/[name], tooltip = description), click a chip to edit it in place,
+  // `+` to add — no separate section, the whole contract lives on one line.
+  const paramsField = () => {
+    const holder = el("span", { class: "fx" });
+    function readRow() {
+      if (active && active.revert === readRow) active = null;
+      const row = el("span", { class: "chiprow" });
+      (s.inputs || []).forEach((inp, i) => {
+        const label = inp.required ? `{${inp.name}}` : `[${inp.name}]`;
+        row.appendChild(
+          canEdit
+            ? el("button", {
+                type: "button",
+                class: "pchip",
+                title: `${inp.description || ""} — 클릭해서 편집`,
+                text: label,
+                onclick: () => openEditor(i),
+              })
+            : el("span", { class: "pchip", title: inp.description || "", text: label }),
+        );
+      });
+      if (!(s.inputs || []).length)
+        row.appendChild(el("span", { class: "fx-val empty", text: "(입력 없음)" }));
+      if (canEdit)
+        row.appendChild(
+          el("button", {
+            type: "button",
+            class: "btn ghost sm add-btn",
+            title: "입력 파라미터 추가",
+            text: "+",
+            onclick: () => openEditor(-1),
+          }),
+        );
+      holder.replaceChildren(row);
+    }
+    // i >= 0 edits that parameter, i === -1 adds a new one. Same card either
+    // way: 이름/필수/설명 + 저장(확인)/취소(/삭제), committed as one body PUT.
+    function openEditor(i) {
+      if (active && active.revert !== readRow) {
+        if (active.dirty()) {
+          active.flash();
+          toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
+          return;
+        }
+        active.revert();
+      }
+      const cur = i >= 0 ? s.inputs[i] : null;
+      const name = el("input", {
+        class: "fld mono",
+        type: "text",
+        spellcheck: "false",
+        placeholder: "파라미터 이름 (예: snsr_id)",
+      });
+      if (cur) name.value = cur.name;
+      const req = el("select", { class: "fld" }, [
+        el("option", { value: "true", text: "필수" }),
+        el("option", { value: "false", text: "선택" }),
+      ]);
+      if (cur && !cur.required) req.value = "false";
+      const desc = el("textarea", {
+        class: "fld",
+        spellcheck: "false",
+        placeholder: "설명 (예: 조회 키)",
+      });
+      if (cur) desc.value = cur.description || "";
+      const growDesc = () => {
+        desc.style.height = "auto";
+        desc.style.height = `${desc.scrollHeight}px`;
+      };
+      desc.addEventListener("input", growDesc);
+      const save = el("button", {
+        type: "button",
+        class: "btn primary sm",
+        text: cur ? "저장" : "확인",
+      });
+      save.addEventListener("click", async () => {
+        const nm = name.value.trim();
+        if (!nm) {
+          toast("파라미터 이름을 입력하세요.", "error");
+          name.focus();
+          return;
+        }
+        if (!desc.value.trim()) {
+          toast("설명을 입력하세요.", "error");
+          desc.focus();
+          return;
+        }
+        save.disabled = true;
+        const entry = {
+          name: nm,
+          required: req.value === "true",
+          description: desc.value.trim(),
+        };
+        const done = await commit((n) => {
+          if (!n.inputs) n.inputs = [];
+          if (i >= 0) n.inputs[i] = entry;
+          else n.inputs.push(entry);
+          n.argumentHint = composeHint(n.inputs);
+        });
+        if (!done) save.disabled = false;
+      });
+      const acts = [
+        save,
+        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: readRow }),
+      ];
+      if (cur) {
+        const last = (s.inputs || []).length <= 1;
+        const del = el("button", {
+          type: "button",
+          class: "btn danger sm",
+          text: "삭제",
+          title: last ? "마지막 입력은 삭제할 수 없습니다" : "",
+          onclick: () =>
+            commit((n) => {
+              n.inputs.splice(i, 1);
+              n.argumentHint = composeHint(n.inputs);
+            }),
+        });
+        if (last) del.disabled = true;
+        acts.push(del);
+      }
+      acts.push(
+        el("span", { class: "kbd" }, [
+          el("b", { text: "esc" }),
+          " 취소 · ",
+          el("b", { text: "⌘/Ctrl+↵" }),
+          ` ${cur ? "저장" : "확인"}`,
+        ]),
+      );
+      const card = el("div", { class: "slot-edit" }, [
+        el("div", { class: "fieldlab", text: "이름 (name)" }),
+        name,
+        el("div", { class: "fieldlab", text: "필수 여부 (required)" }),
+        req,
+        el("div", { class: "fieldlab", text: "설명 (description)" }),
+        desc,
+        el("div", { class: "editacts" }, acts),
+      ]);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          readRow();
+        } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault();
+          if (!save.disabled) save.click();
+        }
+      });
+      active = {
+        revert: readRow,
+        dirty: () =>
+          cur
+            ? name.value.trim() !== cur.name ||
+              (req.value === "true") !== !!cur.required ||
+              desc.value.trim() !== (cur.description || "")
+            : name.value.trim() !== "" || desc.value.trim() !== "",
+        flash: () => {
+          card.classList.remove("dirtyflash");
+          void card.offsetWidth;
+          card.classList.add("dirtyflash");
+        },
+      };
+      holder.replaceChildren(card);
+      growDesc();
+      name.focus();
+    }
+    readRow();
+    return holder;
+  };
 
   // optional scalar: clearing it removes the key (empty fails the schema's \S).
   const setOpt = (key) => (n, v) => {
@@ -1662,16 +1988,61 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
     el("h1", { class: "sk-title", text: s.name }),
     el("p", { class: "sk-sub", text: (s.intro || "").split("\n")[0] }),
     el("div", { class: "sk-chips" }, [
-      el("span", { class: "chip", text: doc.status }),
+      statusChip(),
       el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
       ...keywordChips(doc.keywords || []),
+      onToggleJson
+        ? el(
+            "button",
+            {
+              type: "button",
+              class: `btn ghost sm json-view${jsonOpen ? " on" : ""}`,
+              "aria-pressed": jsonOpen ? "true" : "false",
+              title: "문서를 좌우로 갈라 원본 store JSON 을 함께 봅니다(승인자 전용).",
+              onclick: onToggleJson,
+            },
+            "JSON",
+          )
+        : null,
     ]),
+    // db-schema 뷰와 같은 배너 — 비활성이 실제로 무엇을 의미하는지 본문 자리에서 설명.
+    doc.status === "inactive"
+      ? el("div", { class: "offbar" }, [
+          el("b", { text: "비활성 문서입니다. " }),
+          el("span", {
+            text: "여기서는 그대로 읽을 수 있지만 미러로 나가지 않아 세션에 주입되지 않습니다. 주입 예산은 한 턴에 문서 2개뿐이므로, 상시 주입할 가치가 있을 때만 활성으로 바꾸세요.",
+          }),
+        ])
+      : null,
   ]);
-  if (canEdit)
-    wrap.appendChild(
-      el("p", { class: "dim sk-hint", text: "값을 클릭하면 그 자리에서 편집합니다. 저장은 즉시 반영됩니다." }),
-    );
 
+  // One chip does both jobs: shows the status (raw enum, uppercase) and — for
+  // an approver — toggles it on click. The tooltip carries what the state
+  // means AND what clicking will do, so no second button is needed.
+  function statusChip() {
+    const meaning =
+      {
+        active: "LLM 세션에 주입되는 문서입니다. 문서 단위 전역 스위치 — 모든 사용자에게 동일합니다.",
+        inactive: "주입이 꺼진 문서입니다 — 대시보드에서 열람·편집만 됩니다.",
+        archived: "폐기된 문서입니다 — 기록으로만 남습니다.",
+      }[doc.status] ?? "";
+    const nextHint =
+      doc.status === "active"
+        ? " 클릭하면 주입을 끕니다(INACTIVE)."
+        : doc.status === "inactive"
+          ? " 클릭하면 주입을 켭니다(ACTIVE)."
+          : "";
+    const label = (doc.status || "").toUpperCase();
+    if (!onToggleStatus)
+      return el("span", { class: `chip st-${doc.status}`, text: label, title: meaning });
+    return el("button", {
+      type: "button",
+      class: `chip st-${doc.status} st-toggle`,
+      text: label,
+      title: meaning + nextHint,
+      onclick: onToggleStatus,
+    });
+  }
   const sec = (title, addBtn) => {
     const h = el("h2", { class: "sk-h" }, [title]);
     if (addBtn) h.appendChild(addBtn);
@@ -1685,105 +2056,91 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
     canEdit && canDel
       ? el("button", { type: "button", class: "btn ghost sm del-btn", title: "삭제", onclick: () => commit(onDel), text: "✕" })
       : null;
-  const drow = (label, node) =>
-    el("div", { class: "drow" }, [el("span", { class: "dk", text: label }), el("span", { class: "dv" }, node)]);
+  // help: 라벨 호버 시 이 필드가 무엇인지(스펙 §4.4의 정의) 설명한다.
+  const drow = (label, node, help) =>
+    el("div", { class: "drow" }, [
+      el(
+        "span",
+        help
+          ? { class: "dk has-help", text: label, title: help }
+          : { class: "dk", text: label },
+      ),
+      el("span", { class: "dv" }, node),
+    ]);
 
   // ── 기본 ──────────────────────────────────────────────────────────────
   sec("기본");
   wrap.appendChild(
     el("div", { class: "sk-def" }, [
-      drow("name", field(s.name, { mono: true }, (n, v) => (n.name = v))),
-      drow("argument-hint", field(s.argumentHint, { mono: true }, (n, v) => (n.argumentHint = v))),
-      drow("단위", field(s.scope?.단위, { kind: "enum", values: ["설비", "챔버", "센서"] }, (n, v) => (n.scope.단위 = v))),
-      drow("카디널리티", field(s.scope?.카디널리티, { kind: "enum", values: ["단일"] }, (n, v) => (n.scope.카디널리티 = v))),
-      drow("의도", field(s.scope?.의도, { kind: "enum", values: ["상태", "생성 이력"] }, (n, v) => (n.scope.의도 = v))),
-      drow("focus", field(s.focus, {}, (n, v) => (n.focus = v))),
-      drow("anchor-table", field(s.anchorTable, { mono: true }, setOpt("anchorTable"))),
-      drow("intro", field(s.intro, { kind: "area" }, (n, v) => (n.intro = v))),
-      drow("discipline", field(s.discipline, { kind: "area" }, setOpt("discipline"))),
+      drow(
+        "name",
+        field(s.name, { mono: true }, (n, v) => (n.name = v)),
+        "스킬 이름(kebab-case). 문서 id·SKILL.md 제목이 됩니다.",
+      ),
+      drow(
+        "argument-hint",
+        paramsField(),
+        "스킬 호출 시 표시되는 인자 목록. {이름}=필수, [이름]=선택 — 칩을 클릭해 수정하고, +로 추가합니다.",
+      ),
+      drow(
+        "단위",
+        field(s.scope?.단위, { kind: "enum", values: ["설비", "챔버", "센서"] }, (n, v) => (n.scope.단위 = v)),
+        "스킬이 다루는 대상의 단위. description 골격과 추적 방향을 정합니다.",
+      ),
+      drow(
+        "카디널리티",
+        field(s.scope?.카디널리티, { kind: "enum", values: ["단일"] }, (n, v) => (n.scope.카디널리티 = v)),
+        "한 번에 다루는 대상 수 — 현재는 단일 조회만 지원합니다.",
+      ),
+      drow(
+        "의도",
+        field(s.scope?.의도, { kind: "enum", values: ["상태", "생성 이력"] }, (n, v) => (n.scope.의도 = v)),
+        "질문의 성격 — 상태(지금 어떤가) / 생성 이력(어떻게 만들어졌나).",
+      ),
+      drow(
+        "focus",
+        field(s.focus, {}, (n, v) => (n.focus = v)),
+        "이 스킬의 도메인 요약 한 줄. 라우팅용 description의 빈칸을 채웁니다 — 답이 나열할 목록이 아닙니다(그건 각 단계의 produces).",
+      ),
+      drow(
+        "anchor-table",
+        field(s.anchorTable, { mono: true }, setOpt("anchorTable")),
+        "앵커 테이블(선택). 프롬프트에 이 테이블명이 등장하면 곧바로 이 스킬로 라우팅됩니다.",
+      ),
+      drow(
+        "intro",
+        field(s.intro, { kind: "area" }, (n, v) => (n.intro = v)),
+        "도메인 주의사항 도입부. 실행 프레이밍 문장은 렌더러가 고정으로 붙이므로 도메인 이야기만 씁니다. 첫 줄이 화면 상단 부제로 노출됩니다.",
+      ),
+      drow(
+        "discipline",
+        field(s.discipline, { kind: "area" }, setOpt("discipline")),
+        "실행 규율(선택). 비워 두면 렌더러의 고정 규율 블록이 들어갑니다.",
+      ),
     ]),
   );
 
-  // ── 입력 파라미터 ─────────────────────────────────────────────────────
-  sec(
-    "입력 파라미터",
-    addBtn("+ 입력 추가", (n) => n.inputs.push({ name: "새_입력", required: true, description: "설명" })),
-  );
-  const inputsWrap = el("div", {});
-  (s.inputs || []).forEach((inp, i) => {
-    inputsWrap.appendChild(
-      el("div", { class: "sk-item" }, [
-        el("div", { class: "sk-item-h" }, [
-          el("span", { class: "sk-item-n", text: `입력 ${i + 1}` }),
-          el("span", { class: "mla" }),
-          delBtn((s.inputs || []).length > 1, (n) => n.inputs.splice(i, 1)),
-        ]),
-        el("div", { class: "sk-def" }, [
-          drow("name", field(inp.name, { mono: true }, (n, v) => (n.inputs[i].name = v))),
-          drow("required", field(inp.required, { kind: "bool" }, (n, v) => (n.inputs[i].required = v))),
-          drow("description", field(inp.description, { kind: "area" }, (n, v) => (n.inputs[i].description = v))),
-        ]),
-      ]),
-    );
-  });
-  wrap.appendChild(inputsWrap);
-
-  // ── 의존성 ────────────────────────────────────────────────────────────
-  sec(
-    "의존성",
-    addBtn("+ 의존성 추가", (n) => n.dependencies.push({ mcp: "mcp-이름" })),
-  );
-  const depsWrap = el("div", {});
-  (s.dependencies || []).forEach((dep, i) => {
-    const tools = el("span", { class: "chiprow" });
-    (dep.tools || []).forEach((t, j) => {
-      tools.appendChild(
-        el("span", { class: "toolchip" }, [
-          field(t, { mono: true }, (n, v) => (n.dependencies[i].tools[j] = v)),
-          delBtn(true, (n) => {
-            n.dependencies[i].tools.splice(j, 1);
-            if (n.dependencies[i].tools.length === 0) delete n.dependencies[i].tools;
-          }),
-        ]),
-      );
-    });
-    const addTool = addBtn("+ tool", (n) => {
-      if (!n.dependencies[i].tools) n.dependencies[i].tools = [];
-      n.dependencies[i].tools.push("tool");
-    });
-    if (addTool) tools.appendChild(addTool);
-    depsWrap.appendChild(
-      el("div", { class: "sk-item" }, [
-        el("div", { class: "sk-item-h" }, [
-          el("span", { class: "sk-item-n", text: `의존성 ${i + 1}` }),
-          el("span", { class: "mla" }),
-          delBtn((s.dependencies || []).length > 1, (n) => n.dependencies.splice(i, 1)),
-        ]),
-        el("div", { class: "sk-def" }, [
-          drow("mcp", field(dep.mcp, { mono: true }, (n, v) => (n.dependencies[i].mcp = v))),
-          drow("tools", tools),
-          drow("why", field(dep.why, { kind: "area" }, setOpt2(i, "dependencies", "why"))),
-        ]),
-      ]),
-    );
-  });
-  wrap.appendChild(depsWrap);
-
   // ── 조회 절차 ─────────────────────────────────────────────────────────
+  // A procedure is a numbered flow, not a key:value dump — the layout says
+  // so: rail number + title/→produces header, SQL as a code block, branches
+  // as when → then rows, lead/notes as secondary lines.
   sec(
     "조회 절차",
     addBtn("+ 단계 추가", (n) => n.steps.push({ title: "새 단계", sql: "SELECT 1" })),
   );
-  const stepsWrap = el("div", {});
+  const stepsWrap = el("div", { class: "sk-steps" });
   (s.steps || []).forEach((st, i) => {
     const branches = el("div", { class: "sk-branches" });
     (st.branches || []).forEach((br, j) => {
       branches.appendChild(
         el("div", { class: "sk-branch" }, [
-          el("span", { class: "dk", text: "when" }),
-          field(br.when, {}, (n, v) => (n.steps[i].branches[j].when = v)),
-          el("span", { class: "dk", text: "then" }),
-          field(br.then, { kind: "area" }, (n, v) => (n.steps[i].branches[j].then = v)),
+          el("span", { class: "br-when" }, [
+            field(br.when, { mono: true }, (n, v) => (n.steps[i].branches[j].when = v)),
+          ]),
+          el("span", { class: "br-arrow", text: "→" }),
+          el("span", { class: "br-then" }, [
+            field(br.then, { kind: "area" }, (n, v) => (n.steps[i].branches[j].then = v)),
+          ]),
           delBtn(true, (n) => {
             n.steps[i].branches.splice(j, 1);
             if (n.steps[i].branches.length === 0) delete n.steps[i].branches;
@@ -1796,20 +2153,38 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
       n.steps[i].branches.push({ when: "조건", then: "동작" });
     });
     if (addBranch) branches.appendChild(addBranch);
+    const showBranches = (st.branches || []).length > 0 || canEdit;
     stepsWrap.appendChild(
-      el("div", { class: "sk-item" }, [
-        el("div", { class: "sk-item-h" }, [
-          el("span", { class: "sk-item-n", text: `단계 ${i + 1}` }),
-          el("span", { class: "mla" }),
-          delBtn((s.steps || []).length > 1, (n) => n.steps.splice(i, 1)),
+      el("div", { class: "sk-step" }, [
+        el("div", { class: "sk-step-rail" }, [
+          el("span", { class: "sk-step-num", text: String(i + 1) }),
         ]),
-        el("div", { class: "sk-def" }, [
-          drow("title", field(st.title, {}, (n, v) => (n.steps[i].title = v))),
-          drow("produces", field(st.produces, {}, setOpt2(i, "steps", "produces"))),
-          drow("lead", field(st.lead, {}, setOpt2(i, "steps", "lead"))),
-          drow("sql", field(st.sql, { kind: "area", mono: true }, (n, v) => (n.steps[i].sql = v))),
-          drow("branches", branches),
-          drow("notes", field(st.notes, { kind: "area" }, setOpt2(i, "steps", "notes"))),
+        el("div", { class: "sk-step-body" }, [
+          el("div", { class: "sk-step-h" }, [
+            el("span", { class: "sk-step-title" }, [
+              field(st.title, {}, (n, v) => (n.steps[i].title = v)),
+            ]),
+            el("span", { class: "sk-produces" }, [
+              el("span", { class: "sk-produces-arrow", text: "→ " }),
+              field(st.produces, { empty: "(produces)" }, setOpt2(i, "steps", "produces")),
+            ]),
+            el("span", { class: "mla" }),
+            delBtn((s.steps || []).length > 1, (n) => n.steps.splice(i, 1)),
+          ]),
+          st.lead || canEdit
+            ? el("div", { class: "sk-lead" }, [
+                field(st.lead, { empty: "(lead — 실행 전 안내 한 줄)" }, setOpt2(i, "steps", "lead")),
+              ])
+            : null,
+          el("div", { class: "sqlblock" }, [
+            field(st.sql, { kind: "area", mono: true, block: true }, (n, v) => (n.steps[i].sql = v)),
+          ]),
+          showBranches ? branches : null,
+          st.notes || canEdit
+            ? el("div", { class: "sk-notes" }, [
+                field(st.notes, { kind: "area", empty: "(notes)" }, setOpt2(i, "steps", "notes")),
+              ])
+            : null,
         ]),
       ]),
     );
@@ -1858,6 +2233,33 @@ function renderSkillView(doc, rev, md, canEdit, reload) {
     );
   });
   wrap.appendChild(exWrap);
+
+  // ── 의존성 ────────────────────────────────────────────────────────────
+  // Read-only by design (사용자 결정 2026-07-22): the JSON keeps carrying
+  // dependencies, but they change when the procedure changes — hand-editing
+  // them here would only let the two drift apart. Placed last: metadata for
+  // the machine, not something a reader of the procedure needs first.
+  sec("의존성");
+  const depsWrap = el("div", { class: "dep-list" });
+  (s.dependencies || []).forEach((dep) => {
+    depsWrap.appendChild(
+      el("div", { class: "dep-card" }, [
+        el("div", { class: "dep-mcp" }, [
+          el("span", { class: "dep-kind", text: "MCP" }),
+          dep.mcp,
+        ]),
+        (dep.tools || []).length
+          ? el(
+              "div",
+              { class: "dep-tools" },
+              (dep.tools || []).map((t) => el("span", { class: "toolchip", text: t })),
+            )
+          : null,
+        dep.why ? el("div", { class: "dep-why", text: dep.why }) : null,
+      ]),
+    );
+  });
+  wrap.appendChild(depsWrap);
 
   // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
   // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).

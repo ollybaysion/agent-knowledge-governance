@@ -195,7 +195,9 @@ nav button:focus-visible {
   display: flex;
   align-items: flex-start;
 }
-aside {
+/* 사이드바 전용 — 맨 `aside` 로 두면 .json-pane(role상 aside)까지 232px 에
+ * 갇힌다. 레이아웃 직속 자식으로 스코프. */
+.layout > aside {
   width: 232px;
   flex: none;
   position: sticky;
@@ -206,7 +208,7 @@ aside {
   background: var(--surface-soft);
   padding: 6px 8px 20px;
 }
-.layout.hide-side aside {
+.layout.hide-side > aside {
   display: none;
 }
 main {
@@ -914,6 +916,24 @@ svg.sd {
 .chip.rev {
   color: var(--teal-ink);
 }
+/* 상태 칩 겸 토글 버튼 (skill 뷰) — 클릭 = active ↔ inactive, 설명은 title */
+button.chip.st-toggle {
+  font: inherit;
+  font-size: 11px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+button.chip.st-toggle:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+/* db-schema h1 옆 owner 속성 칩 — 제목은 테이블명만 */
+h1 .chip.owner-chip {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted);
+  vertical-align: 3px;
+}
 .chip.st-inactive {
   color: var(--muted);
 }
@@ -1397,10 +1417,6 @@ ol.steps > li p {
 }
 
 /* 스킬 구조화 편집 (클릭-투-편집) */
-.sk-hint {
-  margin: -4px 0 4px;
-  font-size: 12px;
-}
 .sk-h3 {
   display: flex;
   align-items: center;
@@ -1427,6 +1443,13 @@ ol.steps > li p {
   font-size: 12px;
   padding-top: 3px;
 }
+/* 라벨에 필드 정의 툴팁이 달린 행 — 점선 밑줄 + help 커서로 호버를 유도 */
+.drow .dk.has-help {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--muted-soft);
+  text-underline-offset: 3px;
+}
 .drow .dv {
   flex: 1 1 auto;
   min-width: 0;
@@ -1449,36 +1472,30 @@ ol.steps > li p {
   color: var(--muted);
   font-style: italic;
 }
-[title="클릭해서 편집"].fx-val {
-  cursor: text;
-  border-bottom: 1px dashed var(--hairline);
-}
-[title="클릭해서 편집"].fx-val:hover {
-  background: var(--surface-card);
-}
-.fx-in {
+/* 편집 카드 안 한 줄 입력·select — db-schema 슬롯 textarea 와 같은 만듦새 */
+.slot-edit input.fld,
+.slot-edit select.fld {
   width: 100%;
-  padding: 6px 8px;
-  background: var(--surface-card);
-  border: 1px solid var(--primary);
-  border-radius: 6px;
-  color: var(--body-strong);
   font: inherit;
   font-size: 13px;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 7px 9px;
 }
-textarea.fx-in {
-  min-height: 60px;
-  line-height: 1.5;
-  resize: vertical;
+.slot-edit input.fld:focus,
+.slot-edit select.fld:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
 }
-.fx-in.mono {
+.slot-edit select.fld {
+  cursor: pointer;
+}
+.slot-edit .fld.mono {
   font-family: var(--mono);
   font-size: 12.5px;
-}
-.fx-btns {
-  display: inline-flex;
-  gap: 6px;
-  margin-top: 6px;
 }
 /* array item card */
 .sk-item {
@@ -1527,17 +1544,231 @@ textarea.fx-in {
 .toolchip .fx {
   width: auto;
 }
+/* 의존성 — 읽기 전용 카드: MCP 이름이 주인공, 툴은 칩, why는 보조 문장 */
+.dep-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.dep-card {
+  flex: 0 1 auto;
+  min-width: 220px;
+  max-width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 9px 12px 10px;
+}
+.dep-mcp {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.dep-kind {
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.dep-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.dep-why {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+/* enum 값 편집 — 닫힌 목록이 그 자리에서 세그먼트로 펼쳐진다 (선택 = 즉시 저장) */
+.segwrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.segedit {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.segedit button {
+  font: inherit;
+  font-size: 12px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.segedit button:hover {
+  color: var(--body-strong);
+  background: var(--surface-card);
+}
+.segedit button.on {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+/* argument-hint 행의 입력 파라미터 칩 — {필수} [선택], 클릭 = 그 자리 편집 */
+.pchip {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--body-strong);
+}
+button.pchip {
+  cursor: pointer;
+}
+button.pchip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+/* ── 조회 절차: 번호 레일 + 실행 흐름 레이아웃 ──
+ * 절차는 key:value 나열이 아니라 순서 있는 흐름 — 레일 번호·연결선이 순서를,
+ * 코드 블록이 SQL을, when → then 행이 분기를 각각 제 모양으로 보여준다. */
+.sk-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 2px;
+}
+.sk-step {
+  display: flex;
+  gap: 12px;
+}
+.sk-step-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  width: 24px;
+}
+.sk-step-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.sk-step-rail::after {
+  content: "";
+  flex: 1;
+  width: 2px;
+  background: var(--hairline);
+  margin: 4px 0;
+}
+.sk-step:last-child .sk-step-rail::after {
+  display: none;
+}
+.sk-step-body {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 18px;
+}
+.sk-step:last-child .sk-step-body {
+  padding-bottom: 4px;
+}
+.sk-step-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sk-step-title {
+  flex: 2 1 200px;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.sk-produces {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--teal-ink);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.sk-produces .fx {
+  width: auto;
+  flex: 1;
+}
+.sk-produces-arrow {
+  flex: none;
+}
+.sk-lead {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 2px 0 4px;
+}
+.sqlblock {
+  margin: 6px 0;
+}
+.fx-val.block {
+  display: block;
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.sk-notes {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
 .sk-branches {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  margin-top: 4px;
 }
 .sk-branch {
-  display: grid;
-  grid-template-columns: auto 1fr auto 2fr auto;
-  align-items: start;
-  gap: 6px;
-  padding: 4px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.br-when {
+  flex: none;
+  min-width: 110px;
+  max-width: 40%;
+}
+.br-when .fx-val {
+  color: var(--warning-ink);
+}
+.br-arrow {
+  flex: none;
+  color: var(--muted-soft);
+}
+.br-then {
+  flex: 1;
+  min-width: 0;
 }
 .sk-list {
   display: flex;
@@ -2318,7 +2549,8 @@ textarea.fx-in {
 /* 닫혀 있으면 docwrap 이 한 폭(기존과 동일) · 열리면 문서(좌) | JSON(우) 2단. */
 .doc-split.open {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* JSON 쪽을 더 넓게 — pretty-print 된 긴 행이 과하게 줄바꿈되지 않도록 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
   gap: 14px;
   align-items: start;
 }
