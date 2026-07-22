@@ -2148,3 +2148,68 @@ ol.steps > li p {
     animation: none;
   }
 }
+
+/* ---------- JSON 좌우 분할 보기 (승인자 전용, app.js jsonPane) ---------- */
+.dochead .json-view {
+  margin-left: 4px;
+}
+.dochead .json-view.on {
+  color: var(--on-primary);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+/* 닫혀 있으면 docwrap 이 한 폭(기존과 동일) · 열리면 문서(좌) | JSON(우) 2단. */
+.doc-split.open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.json-pane {
+  position: sticky;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+.json-pane .jm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-soft);
+}
+.json-pane .jm-title {
+  margin-right: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  word-break: break-all;
+}
+.json-pane .jm-body {
+  flex: 1;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--body);
+  white-space: pre;
+  tab-size: 2;
+}
+@media (max-width: 900px) {
+  .doc-split.open {
+    grid-template-columns: 1fr;
+  }
+  .json-pane {
+    position: static;
+    max-height: 70vh;
+  }
+}
