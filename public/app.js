@@ -379,6 +379,7 @@ $("side-toggle").addEventListener("click", () => {
 });
 
 async function renderDocTree() {
+  renderTreeActions();
   const tree = $("doc-tree");
   tree.replaceChildren();
   let pendingTotal = 0;
@@ -2022,6 +2023,835 @@ function auditMessage(msg) {
     el("span", { class: `act ${cls}`, text: verb }),
     " " + msg.slice(verb.length + 1),
   ]);
+}
+
+// ================= 새 문서 추가 (#33) =================
+// 대시보드에서 문서를 새로 시작하는 유일한 UI 진입점. 서버는 이미
+// POST /api/docs/:type (roles:["editor"]) 로 생성을 지원하지만 FE 가 없었다.
+// 세 종류 모두 구조화 폼으로 받아 유효 body 를 만들고, id 는 body 에서 파생
+// (서버 deriveId 와 동일 규칙 — 미리보기로 노출), keywords 는 최소 1개(비우면
+// id 로 자동), status 는 설계 원칙대로 inactive 로 착지한다(#7 — 무엇이 주입될지는
+// 관리자 결정). tiered 슬롯은 비우면 scaffold, 텍스트를 채우면 evidence 최소
+// 1개(서버 applyEdit 이 inferred 로 승격). 컬럼/필드 설명 슬롯은 scaffold 로
+// seeding 해 문서 뷰에 자리를 만들고 생성 후 기존 편집 UI 로 채운다.
+// CSP(script-src 'self'): 인라인 없이 el/addEventListener 로만.
+
+// 생성 = editor·approver 만 (POST /api/docs 의 roles). viewer·anon·agent 는 버튼 미노출.
+function canCreate() {
+  return (
+    !!currentUser &&
+    (currentUser.role === "editor" || currentUser.role === "approver")
+  );
+}
+
+// 사이드바 가장 하단의 "+ 새 문서" 버튼 (사용자 요청 위치). renderDocTree 가
+// 매 렌더마다 호출하므로 로그인/로그아웃으로 역할이 바뀌면 노출도 따라간다.
+function renderTreeActions() {
+  const host = $("tree-actions");
+  if (!host) return;
+  host.replaceChildren();
+  if (!canCreate()) return;
+  host.appendChild(
+    el(
+      "button",
+      { type: "button", id: "new-doc-btn", class: "btn primary", onclick: openCreateModal },
+      "+ 새 문서",
+    ),
+  );
+}
+
+// ---- 폼 위젯 (모달 전용) ----
+function fInput(attrs) {
+  return el("input", { class: "finput", type: "text", ...attrs });
+}
+function fArea(attrs) {
+  return el("textarea", { class: "farea", rows: 2, ...attrs });
+}
+function fSelect(options, attrs) {
+  const sel = el("select", { class: "fselect", ...attrs });
+  for (const o of options)
+    sel.appendChild(el("option", { value: o.value }, o.label));
+  return sel;
+}
+// checkbox as a labelled control; `.get()` reads the checked state.
+function fCheck(labelText, checked) {
+  const input = el("input", { type: "checkbox" });
+  input.checked = !!checked;
+  const wrap = el("label", { class: "fcheck" }, [
+    input,
+    el("span", { text: labelText }),
+  ]);
+  wrap.get = () => input.checked;
+  return wrap;
+}
+function fLabel(text, control, hint) {
+  return el("div", { class: "fld" }, [
+    el("label", { class: "fieldlab", text }),
+    control,
+    hint ? el("p", { class: "fhint", text: hint }) : null,
+  ]);
+}
+
+// 반복 행: makeRow(index) => { node, value() }. collect() 로 값 배열을 얻는다.
+// 최소 개수 min 아래로는 삭제를 막는다(스키마 minItems 와 맞춤).
+function repeatable({ makeRow, min = 1, addLabel }) {
+  const list = el("div", { class: "rep-list" });
+  const entries = [];
+  function add() {
+    const row = makeRow(entries.length);
+    const wrap = el("div", { class: "rep-row" });
+    const rm = el("button", {
+      type: "button",
+      class: "rep-rm",
+      "aria-label": "행 삭제",
+      text: "✕",
+      onclick: () => {
+        if (entries.length <= min) {
+          toast(`최소 ${min}개가 필요합니다.`, "error");
+          return;
+        }
+        const i = entries.findIndex((e) => e.wrap === wrap);
+        if (i >= 0) {
+          entries.splice(i, 1);
+          wrap.remove();
+        }
+      },
+    });
+    wrap.append(row.node, rm);
+    entries.push({ wrap, value: row.value });
+    list.appendChild(wrap);
+    return row;
+  }
+  for (let i = 0; i < min; i++) add();
+  return {
+    node: el("div", { class: "rep" }, [
+      list,
+      el("button", {
+        type: "button",
+        class: "btn ghost sm rep-add",
+        text: addLabel,
+        onclick: add,
+      }),
+    ]),
+    collect: () => entries.map((e) => e.value()),
+  };
+}
+
+// 근거 칩 필드: Enter 로 추가, ✕ 로 삭제. value() 는 문자열 배열.
+function evidenceField() {
+  const chips = [];
+  const box = el("div", { class: "chipfield" });
+  const input = el("input", {
+    type: "text",
+    placeholder: "근거 (file:line 또는 출처) — Enter 로 추가",
+  });
+  function redraw(focus) {
+    box.replaceChildren(
+      ...chips.map((c, i) =>
+        el("span", { class: "evchip" }, [
+          c,
+          el("button", {
+            type: "button",
+            "aria-label": "근거 삭제",
+            text: "✕",
+            onclick: () => {
+              chips.splice(i, 1);
+              redraw(true);
+            },
+          }),
+        ]),
+      ),
+      input,
+    );
+    if (focus) input.focus();
+  }
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const v = input.value.trim();
+      if (v) {
+        chips.push(v);
+        input.value = "";
+        redraw(true);
+      }
+    }
+  });
+  redraw(false);
+  return { node: box, value: () => chips.slice() };
+}
+
+// tiered-value 슬롯 입력(purpose 등): 비우면 scaffold, 채우면 evidence 필수.
+// value() => { ok:true, slot } | { ok:false, msg, focus }.
+function tieredField(labelText, hint) {
+  const area = fArea({
+    placeholder: "비워두면 빈칸(scaffold)으로 시작 — 나중에 문서에서 채웁니다",
+  });
+  const ev = evidenceField();
+  const evWrap = el("div", { class: "ev-wrap", hidden: true }, [
+    el("label", {
+      class: "fieldlab",
+      text: "근거 (텍스트를 채우면 최소 1개 필요)",
+    }),
+    ev.node,
+  ]);
+  area.addEventListener("input", () => {
+    evWrap.hidden = area.value.trim() === "";
+  });
+  return {
+    node: el("div", { class: "fld" }, [
+      el("label", { class: "fieldlab", text: labelText }),
+      area,
+      hint ? el("p", { class: "fhint", text: hint }) : null,
+      evWrap,
+    ]),
+    value() {
+      const t = area.value.trim();
+      if (!t) return { ok: true, slot: { text: null, tier: "scaffold" } };
+      const evs = ev.value();
+      if (evs.length === 0)
+        return {
+          ok: false,
+          msg: `"${labelText}"에 근거를 최소 1개 넣거나, 텍스트를 비워 빈칸으로 두세요.`,
+          focus: area,
+        };
+      return { ok: true, slot: { text: t, evidence: evs } };
+    },
+  };
+}
+
+// 키워드 필드: 행마다 kw + 주입(전문/포인터). 비우면 문서 id 를 자동 시드.
+function keywordsField(idSourceFn) {
+  const rep = repeatable({
+    min: 1,
+    addLabel: "+ 키워드",
+    makeRow: () => {
+      const kw = fInput({ class: "finput mono", placeholder: "예: testuser.fdc_sensor" });
+      const inj = fSelect(
+        [
+          { value: "full", label: "전문" },
+          { value: "pointer", label: "포인터" },
+        ],
+        {},
+      );
+      return {
+        node: el("div", { class: "kw-row" }, [kw, inj]),
+        value: () => ({ kw: kw.value.trim().toLowerCase(), inject: inj.value }),
+      };
+    },
+  });
+  return {
+    node: rep.node,
+    value() {
+      let list = rep.collect().filter((k) => k.kw !== "");
+      if (list.length === 0) {
+        const seed = (idSourceFn() || "").toLowerCase();
+        if (seed) list = [{ kw: seed, inject: "full" }];
+      }
+      if (list.length === 0)
+        return {
+          ok: false,
+          msg: "키워드가 최소 1개 필요합니다 (문서 id 를 채우면 자동으로 쓸 수 있습니다).",
+        };
+      for (const k of list)
+        if (!/^[a-z0-9_. -]+$/.test(k.kw))
+          return {
+            ok: false,
+            msg: `키워드 "${k.kw}" 는 소문자·숫자·_ . - ·공백만 쓸 수 있습니다.`,
+          };
+      return { ok: true, keywords: list };
+    },
+  };
+}
+
+// 한 줄 제약(focus/produces/ask): 개행 없음 + 블록 마커로 시작 금지.
+function singleLineOk(s) {
+  return !!s && !s.includes("\n") && !/^[#\-*>|]/.test(s);
+}
+
+// ---- 타입별 폼: { node, derivedId(), collect() => {ok, body} | {ok:false, msg, focus} } ----
+function dbSchemaForm() {
+  const owner = fInput({ class: "finput mono", placeholder: "OWNER (선택, 예: TESTUSER)" });
+  const table = fInput({ class: "finput mono", placeholder: "TABLE (예: FDC_SENSOR)" });
+  const cols = repeatable({
+    min: 1,
+    addLabel: "+ 컬럼",
+    makeRow: () => {
+      const name = fInput({ class: "finput mono", placeholder: "컬럼명 (예: SENSOR_ID)" });
+      const ctype = fInput({ class: "finput mono", placeholder: "타입 (예: NUMBER)" });
+      const nullable = fCheck("NULL", false);
+      const pk = fCheck("PK", false);
+      return {
+        node: el("div", { class: "col-row" }, [name, ctype, nullable, pk]),
+        value: () => ({
+          name: name.value.trim(),
+          type: ctype.value.trim(),
+          nullable: nullable.get(),
+          pk: pk.get(),
+        }),
+      };
+    },
+  });
+  const purpose = tieredField(
+    "용도 (purpose)",
+    "이 테이블이 무엇을 담는지. 비우면 빈칸으로 시작합니다.",
+  );
+  const derivedId = () => {
+    const t = table.value.trim().toUpperCase();
+    if (!t) return "";
+    const o = owner.value.trim().toUpperCase();
+    return (o ? `${o}.${t}` : t).toLowerCase();
+  };
+  return {
+    node: el("div", {}, [
+      el("div", { class: "frow2" }, [fLabel("owner (선택)", owner), fLabel("table", table)]),
+      fLabel(
+        "컬럼 (최소 1개)",
+        cols.node,
+        "이름·타입·NULL·PK 는 팩트입니다 — 이후 catalog-push 로 갱신됩니다.",
+      ),
+      purpose.node,
+    ]),
+    derivedId,
+    collect() {
+      const t = table.value.trim().toUpperCase();
+      table.value = t;
+      if (!t) return { ok: false, msg: "table 이름을 입력하세요.", focus: table };
+      if (!/^[A-Z][A-Z0-9_]*$/.test(t))
+        return { ok: false, msg: "table 은 대문자로 시작하는 대문자·숫자·_ 여야 합니다.", focus: table };
+      const o = owner.value.trim().toUpperCase();
+      owner.value = o;
+      if (o && !/^[A-Z][A-Z0-9_]*$/.test(o))
+        return { ok: false, msg: "owner 형식이 올바르지 않습니다.", focus: owner };
+      const rawCols = cols.collect();
+      const seen = new Set();
+      const columns = [];
+      const primaryKey = [];
+      for (const c of rawCols) {
+        if (!c.name || !c.type)
+          return { ok: false, msg: "모든 컬럼에 이름과 타입을 입력하세요." };
+        if (seen.has(c.name))
+          return { ok: false, msg: `컬럼명 "${c.name}" 이 중복됩니다.` };
+        seen.add(c.name);
+        columns.push({ name: c.name, type: c.type, nullable: c.nullable });
+        if (c.pk) primaryKey.push(c.name);
+      }
+      if (columns.length === 0)
+        return { ok: false, msg: "컬럼이 최소 1개 필요합니다." };
+      const p = purpose.value();
+      if (!p.ok) return p;
+      const columnDescs = {};
+      for (const c of columns) columnDescs[c.name] = { text: null, tier: "scaffold" };
+      return {
+        ok: true,
+        body: {
+          ...(o ? { owner: o } : {}),
+          table: t,
+          catalog: {
+            columns,
+            primaryKey,
+            fetchedAt: new Date().toISOString(),
+          },
+          purpose: p.slot,
+          columnDescs,
+        },
+      };
+    },
+  };
+}
+
+function msgFormatForm() {
+  const command = fInput({ class: "finput mono", placeholder: "COMMAND (예: CMD_START_LOT)" });
+  const direction = fSelect(
+    [
+      { value: "host->equipment", label: "host → equipment" },
+      { value: "equipment->host", label: "equipment → host" },
+    ],
+    {},
+  );
+  const fields = repeatable({
+    min: 1,
+    addLabel: "+ 필드",
+    makeRow: (i) => {
+      const name = fInput({ class: "finput mono", placeholder: "필드명" });
+      const ftype = fInput({ class: "finput mono", placeholder: "타입" });
+      const required = fCheck("필수", false);
+      return {
+        node: el("div", { class: "fld-row" }, [
+          el("span", { class: "seq", text: `#${i + 1}` }),
+          name,
+          ftype,
+          required,
+        ]),
+        value: () => ({
+          name: name.value.trim(),
+          type: ftype.value.trim(),
+          required: required.get(),
+        }),
+      };
+    },
+  });
+  const purpose = tieredField(
+    "용도 (purpose)",
+    "이 커맨드가 무엇을 지시하는지. 비우면 빈칸.",
+  );
+  const derivedId = () => {
+    const c = command.value.trim().toUpperCase();
+    return c ? c.toLowerCase().replace(/_/g, "-") : "";
+  };
+  return {
+    node: el("div", {}, [
+      el("div", { class: "frow2" }, [
+        fLabel("command", command),
+        fLabel("direction", direction),
+      ]),
+      fLabel(
+        "필드 (최소 1개)",
+        fields.node,
+        "seq 는 순서대로 자동 부여됩니다. 필드 설명은 생성 후 문서에서 채웁니다.",
+      ),
+      purpose.node,
+    ]),
+    derivedId,
+    collect() {
+      const c = command.value.trim().toUpperCase();
+      command.value = c;
+      if (!c) return { ok: false, msg: "command 를 입력하세요.", focus: command };
+      if (!/^[A-Z][A-Z0-9_]*$/.test(c))
+        return { ok: false, msg: "command 는 대문자로 시작하는 대문자·숫자·_ 여야 합니다.", focus: command };
+      const rows = fields.collect();
+      const seen = new Set();
+      for (const f of rows) {
+        if (!f.name || !f.type)
+          return { ok: false, msg: "모든 필드에 이름과 타입을 입력하세요." };
+        if (seen.has(f.name))
+          return { ok: false, msg: `필드명 "${f.name}" 이 중복됩니다.` };
+        seen.add(f.name);
+      }
+      if (rows.length === 0)
+        return { ok: false, msg: "필드가 최소 1개 필요합니다." };
+      const p = purpose.value();
+      if (!p.ok) return p;
+      return {
+        ok: true,
+        body: {
+          command: c,
+          direction: direction.value,
+          purpose: p.slot,
+          fields: rows.map((f, i) => ({
+            seq: i + 1,
+            name: f.name,
+            type: f.type,
+            required: f.required,
+            desc: { text: null, tier: "scaffold" },
+          })),
+        },
+      };
+    },
+  };
+}
+
+function domainSkillForm() {
+  const name = fInput({ class: "finput mono", placeholder: "kebab-case (예: fdc-explain-sensor)" });
+  const argHint = fInput({ placeholder: "예: <센서 ID>" });
+  const unit = fSelect(
+    ["설비", "챔버", "센서"].map((v) => ({ value: v, label: v })),
+    {},
+  );
+  const card = fSelect([{ value: "단일", label: "단일" }], {});
+  const intent = fSelect(
+    ["상태", "생성 이력"].map((v) => ({ value: v, label: v })),
+    {},
+  );
+  const focus = fInput({
+    placeholder: "한 줄 — 이 스킬의 초점 (예: 센서 하나의 현재 상태와 최근 이상)",
+  });
+  const anchorTable = fInput({ class: "finput mono", placeholder: "(선택) 기준 테이블" });
+  const intro = fArea({ placeholder: "실행 도입부 — 이 스킬이 무엇을 하는지", rows: 2 });
+  const inputs = repeatable({
+    min: 1,
+    addLabel: "+ 입력",
+    makeRow: () => {
+      const nm = fInput({ class: "finput mono", placeholder: "입력명" });
+      const req = fCheck("필수", true);
+      const desc = fInput({ placeholder: "설명" });
+      return {
+        node: el("div", { class: "in-row" }, [nm, req, desc]),
+        value: () => ({
+          name: nm.value.trim(),
+          required: req.get(),
+          description: desc.value.trim(),
+        }),
+      };
+    },
+  });
+  const deps = repeatable({
+    min: 1,
+    addLabel: "+ 의존성",
+    makeRow: () => {
+      const mcp = fInput({ class: "finput mono", placeholder: "mcp (예: agent-db)" });
+      const tools = fInput({ class: "finput mono", placeholder: "tools (쉼표 구분, 선택)" });
+      const why = fInput({ placeholder: "why (선택)" });
+      return {
+        node: el("div", { class: "dep-row" }, [mcp, tools, why]),
+        value: () => ({
+          mcp: mcp.value.trim(),
+          tools: tools.value.trim(),
+          why: why.value.trim(),
+        }),
+      };
+    },
+  });
+  const steps = repeatable({
+    min: 1,
+    addLabel: "+ 단계",
+    makeRow: (i) => {
+      const title = fInput({ placeholder: `단계 ${i + 1} 제목` });
+      const produces = fInput({
+        placeholder: "produces — 이 단계가 무엇을 만드는지 (한 줄, 최소 한 단계 필수)",
+      });
+      const lead = fInput({ placeholder: "lead (선택)" });
+      const sql = fArea({ class: "farea mono", placeholder: "SQL", rows: 2 });
+      const notes = fInput({ placeholder: "notes / 분기 (선택)" });
+      return {
+        node: el("div", { class: "step-row" }, [title, produces, lead, sql, notes]),
+        value: () => ({
+          title: title.value.trim(),
+          produces: produces.value.trim(),
+          lead: lead.value.trim(),
+          sql: sql.value.trim(),
+          notes: notes.value.trim(),
+        }),
+      };
+    },
+  });
+  const avoid = repeatable({
+    min: 3,
+    addLabel: "+ 오추론 방지",
+    makeRow: () => {
+      const left = fInput({ placeholder: "끌리는 오추론 (6자 이상)" });
+      const right = fInput({ placeholder: "그걸 금하는 데이터 사실 (6자 이상)" });
+      return {
+        node: el("div", { class: "avoid-row" }, [
+          left,
+          el("span", { class: "dash", text: "—" }),
+          right,
+        ]),
+        value: () => ({ left: left.value.trim(), right: right.value.trim() }),
+      };
+    },
+  });
+  const examples = repeatable({
+    min: 2,
+    addLabel: "+ 예시",
+    makeRow: () => {
+      const ask = fInput({ placeholder: "질문 (한 줄)" });
+      const answer = fArea({ placeholder: "답변", rows: 2 });
+      return {
+        node: el("div", { class: "ex-row" }, [ask, answer]),
+        value: () => ({ ask: ask.value.trim(), answer: answer.value.trim() }),
+      };
+    },
+  });
+  const discipline = fArea({ placeholder: "(선택) 공통 규율", rows: 2 });
+  const derivedId = () => name.value.trim().toLowerCase();
+  return {
+    node: el("div", {}, [
+      el("div", { class: "frow2" }, [fLabel("name", name), fLabel("argument-hint", argHint)]),
+      el("div", { class: "frow3" }, [
+        fLabel("scope · 단위", unit),
+        fLabel("카디널리티", card),
+        fLabel("의도", intent),
+      ]),
+      fLabel("focus (한 줄)", focus),
+      fLabel("anchor-table (선택)", anchorTable),
+      fLabel("intro", intro),
+      fLabel("inputs (최소 1)", inputs.node),
+      fLabel("dependencies (최소 1)", deps.node, "mcp 는 필수, tools·why 는 선택."),
+      fLabel(
+        "조회 절차 steps (최소 1)",
+        steps.node,
+        "최소 한 단계에 produces 를 채워야 합니다 (답의 완결성 바닥).",
+      ),
+      fLabel(
+        "출력 · 피해야 할 오추론 (최소 3)",
+        avoid.node,
+        "「끌리는 오추론」 — 「금하는 데이터 사실」, 양쪽 각 6자 이상.",
+      ),
+      fLabel("출력 · 예시 (최소 2)", examples.node),
+      fLabel("discipline (선택)", discipline),
+    ]),
+    derivedId,
+    collect() {
+      const nm = name.value.trim().toLowerCase();
+      name.value = nm;
+      if (!nm) return { ok: false, msg: "name 을 입력하세요.", focus: name };
+      if (!/^[a-z][a-z0-9-]*$/.test(nm))
+        return { ok: false, msg: "name 은 소문자로 시작하는 kebab-case 여야 합니다.", focus: name };
+      if (!argHint.value.trim())
+        return { ok: false, msg: "argument-hint 를 입력하세요.", focus: argHint };
+      const foc = focus.value.trim();
+      if (!singleLineOk(foc))
+        return { ok: false, msg: "focus 는 한 줄이어야 하고 # - * > | 로 시작할 수 없습니다.", focus: focus };
+      if (!intro.value.trim())
+        return { ok: false, msg: "intro 를 입력하세요.", focus: intro };
+      const inRows = inputs.collect();
+      for (const r of inRows)
+        if (!r.name || !r.description)
+          return { ok: false, msg: "모든 입력에 이름과 설명을 채우세요." };
+      if (inRows.length === 0)
+        return { ok: false, msg: "입력이 최소 1개 필요합니다." };
+      const depRows = deps.collect();
+      for (const r of depRows)
+        if (!r.mcp) return { ok: false, msg: "모든 의존성에 mcp 를 채우세요." };
+      if (depRows.length === 0)
+        return { ok: false, msg: "의존성이 최소 1개 필요합니다." };
+      const dependencies = depRows.map((r) => {
+        const d = { mcp: r.mcp };
+        const tools = r.tools
+          ? r.tools.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
+        if (tools.length) d.tools = tools;
+        if (r.why) d.why = r.why;
+        return d;
+      });
+      const stepRows = steps.collect();
+      for (const r of stepRows) {
+        if (!r.title || !r.sql)
+          return { ok: false, msg: "모든 단계에 제목과 SQL 을 채우세요." };
+        if (r.produces && !singleLineOk(r.produces))
+          return { ok: false, msg: "produces 는 한 줄이어야 하고 # - * > | 로 시작할 수 없습니다." };
+      }
+      if (!stepRows.some((r) => r.produces))
+        return { ok: false, msg: "최소 한 단계에 produces 를 채워야 합니다 (답의 완결성 바닥)." };
+      const stepsBody = stepRows.map((r) => {
+        const st = { title: r.title, sql: r.sql };
+        if (r.produces) st.produces = r.produces;
+        if (r.lead) st.lead = r.lead;
+        if (r.notes) st.notes = r.notes;
+        return st;
+      });
+      const avRows = avoid.collect();
+      const avoidBody = [];
+      for (const r of avRows) {
+        if (r.left.length < 6 || r.right.length < 6)
+          return { ok: false, msg: "오추론 방지 항목은 양쪽 각각 6자 이상이어야 합니다." };
+        const line = `${r.left} — ${r.right}`;
+        if (!singleLineOk(line))
+          return { ok: false, msg: "오추론 방지 항목이 한 줄이 아니거나 금지 문자로 시작합니다." };
+        avoidBody.push(line);
+      }
+      if (avoidBody.length < 3)
+        return { ok: false, msg: "오추론 방지 항목이 최소 3개 필요합니다." };
+      const exRows = examples.collect();
+      const examplesBody = [];
+      for (const r of exRows) {
+        if (!singleLineOk(r.ask))
+          return { ok: false, msg: "예시 질문(ask)은 한 줄이어야 하고 금지 문자로 시작할 수 없습니다." };
+        if (!r.answer)
+          return { ok: false, msg: "모든 예시에 답변을 채우세요." };
+        examplesBody.push({ ask: r.ask, answer: r.answer });
+      }
+      if (examplesBody.length < 2)
+        return { ok: false, msg: "예시가 최소 2개 필요합니다." };
+      return {
+        ok: true,
+        body: {
+          name: nm,
+          argumentHint: argHint.value.trim(),
+          scope: { 단위: unit.value, 카디널리티: card.value, 의도: intent.value },
+          focus: foc,
+          ...(anchorTable.value.trim() ? { anchorTable: anchorTable.value.trim() } : {}),
+          intro: intro.value.trim(),
+          inputs: inRows.map((r) => ({
+            name: r.name,
+            required: r.required,
+            description: r.description,
+          })),
+          dependencies,
+          steps: stepsBody,
+          output: { avoid: avoidBody, examples: examplesBody },
+          ...(discipline.value.trim() ? { discipline: discipline.value.trim() } : {}),
+        },
+      };
+    },
+  };
+}
+
+const CREATE_FORMS = {
+  "db-schema": dbSchemaForm,
+  "msg-format": msgFormatForm,
+  "domain-skill": domainSkillForm,
+};
+
+let createModalEl = null;
+function closeCreateModal() {
+  if (!createModalEl) return;
+  createModalEl.remove();
+  createModalEl = null;
+  document.removeEventListener("keydown", createEscHandler);
+}
+function createEscHandler(e) {
+  if (e.key === "Escape") closeCreateModal();
+}
+
+function openCreateModal() {
+  if (!canCreate()) return;
+  closeCreateModal();
+  let currentType = "db-schema";
+  let form = null;
+
+  const errBox = el("p", { class: "cm-error", role: "alert" });
+  const idPrev = el("span", { class: "cm-id mono", text: "—" });
+  const formHost = el("div", { class: "cm-form" });
+
+  const kwField = keywordsField(() => (form ? form.derivedId() : ""));
+  const kwHost = el("div", { class: "fld" }, [
+    el("label", { class: "fieldlab", text: "키워드 (최소 1 — 비우면 문서 id 사용)" }),
+    kwField.node,
+  ]);
+
+  function refreshId() {
+    idPrev.textContent = (form && form.derivedId()) || "—";
+  }
+  formHost.addEventListener("input", refreshId);
+
+  function mountForm(type) {
+    currentType = type;
+    form = CREATE_FORMS[type]();
+    formHost.replaceChildren(form.node);
+    refreshId();
+  }
+
+  const typeSel = el(
+    "div",
+    { class: "cm-types", role: "tablist", "aria-label": "문서 종류" },
+    DOC_TYPES.map((t) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: t === currentType ? "cm-type on" : "cm-type",
+          "data-t": t,
+          onclick: () => {
+            for (const b of typeSel.querySelectorAll(".cm-type"))
+              b.classList.toggle("on", b.dataset.t === t);
+            errBox.textContent = "";
+            mountForm(t);
+          },
+        },
+        TYPE_LABEL[t] || t,
+      ),
+    ),
+  );
+
+  const submitBtn = el("button", {
+    type: "button",
+    class: "btn primary",
+    text: "만들기 (비활성)",
+    onclick: async () => {
+      errBox.textContent = "";
+      if (!form) return;
+      const built = form.collect();
+      if (!built.ok) {
+        errBox.textContent = built.msg;
+        built.focus?.focus?.();
+        return;
+      }
+      const kw = kwField.value();
+      if (!kw.ok) {
+        errBox.textContent = kw.msg;
+        return;
+      }
+      const id = form.derivedId();
+      if (!id) {
+        errBox.textContent = "id 를 만들 수 없습니다 — 필수 항목을 확인하세요.";
+        return;
+      }
+      const doc = {
+        schema: `${currentType}/v1`,
+        id,
+        keywords: kw.keywords,
+        status: "inactive",
+        body: built.body,
+      };
+      submitBtn.disabled = true;
+      const r = await api(`/api/docs/${currentType}`, { method: "POST", body: doc });
+      submitBtn.disabled = false;
+      if (r.status === 201) {
+        closeCreateModal();
+        toast("문서를 만들었습니다 — 비활성 상태입니다. 검토 후 활성화하세요.");
+        await renderDocTree();
+        location.hash = `#/doc/${currentType}/${encodeURIComponent(id)}`;
+        return;
+      }
+      if (r.status === 409) {
+        errBox.textContent = `이미 같은 id(${id})의 문서가 있습니다.`;
+        return;
+      }
+      if (r.status === 400) {
+        const d = r.data || {};
+        if (d.error === "validation_failed")
+          errBox.textContent = "검증 실패: " + (d.details || []).join(" · ");
+        else if (d.error === "edit_rejected")
+          errBox.textContent = d.message || "입력이 거부되었습니다.";
+        else if (d.error === "schema_mismatch") errBox.textContent = "스키마 불일치.";
+        else errBox.textContent = `생성 실패 (400): ${d.error || ""}`;
+        return;
+      }
+      if (r.status === 403) {
+        errBox.textContent = "생성 권한이 없습니다 (editor 이상 필요).";
+        return;
+      }
+      errBox.textContent = `생성 실패 (${r.status || "네트워크"})`;
+    },
+  });
+
+  const card = el(
+    "div",
+    { class: "cm-card", role: "dialog", "aria-modal": "true", "aria-label": "새 문서 추가" },
+    [
+      el("div", { class: "cm-head" }, [
+        el("h2", { class: "cm-title", text: "새 문서 추가" }),
+        el("button", {
+          type: "button",
+          class: "btn ghost sm",
+          "aria-label": "닫기",
+          text: "✕",
+          onclick: closeCreateModal,
+        }),
+      ]),
+      el("p", {
+        class: "cm-lead",
+        text: "만든 문서는 비활성으로 시작합니다 — 검토 후 관리자가 활성화하면 주입됩니다.",
+      }),
+      typeSel,
+      el("div", { class: "cm-idrow" }, [
+        el("span", { class: "fieldlab", text: "생성될 id" }),
+        idPrev,
+      ]),
+      formHost,
+      kwHost,
+      errBox,
+      el("div", { class: "cm-foot" }, [
+        el("button", { type: "button", class: "btn ghost", text: "취소", onclick: closeCreateModal }),
+        submitBtn,
+      ]),
+    ],
+  );
+  const overlay = el(
+    "div",
+    {
+      class: "cm-overlay",
+      onclick: (e) => {
+        if (e.target === overlay) closeCreateModal();
+      },
+    },
+    [card],
+  );
+  createModalEl = overlay;
+  document.body.appendChild(overlay);
+  document.addEventListener("keydown", createEscHandler);
+  mountForm(currentType);
 }
 
 // ---------- boot ----------

@@ -205,9 +205,31 @@ aside {
   border-right: 1px solid var(--hairline);
   background: var(--surface-soft);
   padding: 6px 8px 20px;
+  display: flex;
+  flex-direction: column;
 }
 .layout.hide-side aside {
   display: none;
+}
+/* 문서 트리는 위를, "새 문서" 액션은 사이드바 가장 하단을 차지 (사용자 요청).
+   트리가 짧으면 margin-top:auto 가 버튼을 뷰포트 바닥으로 밀고, 길면 목록
+   아래에 이어 붙어 함께 스크롤된다. */
+#doc-tree {
+  flex: 0 0 auto;
+}
+#tree-actions {
+  margin-top: auto;
+  padding-top: 10px;
+}
+#tree-actions:not(:empty) {
+  border-top: 1px solid var(--hairline);
+}
+#new-doc-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 7px 10px;
+  font-size: 12.5px;
 }
 main {
   flex: 1;
@@ -2211,5 +2233,281 @@ ol.steps > li p {
   .json-pane {
     position: static;
     max-height: 70vh;
+  }
+}
+
+/* ==========================================================================
+ * 새 문서 추가 모달 (#33) — 세 종류 구조화 폼. CSP(script-src 'self') 아래라
+ * 마크업은 전부 app.js 의 el/addEventListener 로 만든다. 여기선 형태만.
+ * ========================================================================== */
+.cm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  background: rgba(17, 17, 32, 0.55);
+}
+.cm-card {
+  width: 100%;
+  max-width: 660px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 18px 20px 20px;
+  box-shadow: 0 18px 48px rgba(17, 17, 32, 0.4);
+}
+.cm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cm-title {
+  font-size: 17px;
+  margin: 0;
+  color: var(--ink);
+}
+.cm-lead {
+  margin: 6px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.cm-types {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.cm-type {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-card);
+  color: var(--body);
+  cursor: pointer;
+}
+.cm-type:hover {
+  background: var(--surface-strong);
+}
+.cm-type.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+.cm-type:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.cm-idrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+.cm-id {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.cm-form {
+  margin-top: 4px;
+}
+.cm-error {
+  color: var(--error-ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 10px 0 0;
+  min-height: 1em;
+}
+.cm-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+.cm-foot .btn {
+  padding: 6px 16px;
+  font-size: 13px;
+}
+
+/* ---- form controls (모달 전용) ---- */
+.fld {
+  margin: 10px 0;
+}
+.finput,
+.farea,
+.fselect {
+  font: inherit;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--body-strong);
+}
+.finput.mono,
+.farea.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.farea {
+  resize: vertical;
+  min-height: 38px;
+  line-height: 1.5;
+}
+.finput:focus,
+.farea:focus,
+.fselect:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+.finput::placeholder,
+.farea::placeholder {
+  color: var(--muted-soft);
+}
+.fhint {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.frow2,
+.frow3 {
+  display: grid;
+  gap: 10px;
+}
+.frow2 {
+  grid-template-columns: 1fr 1fr;
+}
+.frow3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.frow2 > .fld,
+.frow3 > .fld {
+  margin: 10px 0 0;
+}
+.fcheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fcheck input {
+  margin: 0;
+}
+
+/* ---- 반복 행 (컬럼·필드·입력·의존성·단계·오추론·예시·키워드) ---- */
+.rep {
+  display: block;
+}
+.rep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rep-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.rep-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.rep-rm {
+  flex: none;
+  width: 26px;
+  height: 30px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-card);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.rep-rm:hover {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}
+.rep-add {
+  margin-top: 7px;
+}
+
+/* row internals: 각 반복 행 안의 입력들을 가로로 */
+.col-row,
+.fld-row,
+.in-row,
+.dep-row,
+.avoid-row,
+.kw-row,
+.ex-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.col-row .finput,
+.fld-row .finput,
+.in-row .finput,
+.dep-row .finput,
+.avoid-row .finput,
+.ex-row .finput,
+.ex-row .farea,
+.kw-row .finput {
+  flex: 1 1 120px;
+  width: auto;
+}
+.step-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.avoid-row .dash {
+  color: var(--muted);
+  flex: none;
+}
+.fld-row .seq {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+  width: 26px;
+}
+.kw-row .fselect {
+  flex: none;
+  width: 96px;
+}
+.ev-wrap {
+  margin-top: 8px;
+}
+
+@media (max-width: 620px) {
+  .frow2,
+  .frow3 {
+    grid-template-columns: 1fr;
   }
 }
