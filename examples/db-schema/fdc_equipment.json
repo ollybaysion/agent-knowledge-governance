@@ -1,13 +1,9 @@
 {
   "schema": "db-schema/v1",
-  "id": "testuser.fdc_equipment",
+  "id": "fdc_equipment",
   "keywords": [
     {
       "kw": "fdc_equipment",
-      "inject": "full"
-    },
-    {
-      "kw": "testuser.fdc_equipment",
       "inject": "full"
     }
   ],
@@ -60,12 +56,16 @@
           "comment": null
         }
       ],
-      "primaryKey": ["EQP_ID"],
+      "primaryKey": [
+        "EQP_ID"
+      ],
       "indexes": [
         {
           "name": "SYS_C008830",
           "unique": true,
-          "columns": ["EQP_ID"]
+          "columns": [
+            "EQP_ID"
+          ]
         }
       ],
       "fetchedAt": "2026-07-17T05:10:00Z"
@@ -111,12 +111,16 @@
       "INSTALL_DT": {
         "text": "설비 상세 values[]로 노출되는 값 컬럼(2번째) — 컬럼명 관례상 설치일",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:50"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:50"
+        ]
       },
       "USE_YN": {
         "text": "values[]로 노출되는 값 컬럼(3번째) — 컬럼명 관례상 사용 여부 Y/N, 코드에 값 해석 없음",
         "tier": "inferred",
-        "evidence": ["fixtures/fdc-app/src/schema-map.ts:50"]
+        "evidence": [
+          "fixtures/fdc-app/src/schema-map.ts:50"
+        ]
       }
     },
     "queries": [
@@ -125,7 +129,9 @@
         "note": {
           "text": "동종 설비(peers) 조회",
           "tier": "inferred",
-          "evidence": ["fixtures/fdc-app/src/equipment-repo.ts:55-64"]
+          "evidence": [
+            "fixtures/fdc-app/src/equipment-repo.ts:55-64"
+          ]
         }
       }
     ]

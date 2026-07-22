@@ -125,10 +125,11 @@ test("buildDocument: a body with no derivable id names the missing field", () =>
   );
 });
 
-test("buildDocument: id derivation per type (db-schema qualified/unqualified, msg-format)", () => {
+test("buildDocument: id derivation per type (db-schema with/without owner, msg-format)", () => {
+  // owner is a plain body attribute — it never qualifies the id
   assert.equal(
     buildDocument("db-schema", { owner: "T", table: "SENSOR" }).doc.id,
-    "t.sensor",
+    "sensor",
   );
   assert.equal(
     buildDocument("db-schema", { table: "SENSOR" }).doc.id,

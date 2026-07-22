@@ -54,8 +54,8 @@ async function seedSensorDoc(app) {
     headers: { authorization: "Bearer ed-tok" },
     payload: {
       schema: "db-schema/v1",
-      id: "t.sensor",
-      keywords: [{ kw: "t.sensor", inject: "full" }],
+      id: "sensor",
+      keywords: [{ kw: "sensor", inject: "full" }],
       status: "active",
       body: {
         owner: "T",
@@ -98,7 +98,7 @@ test("catalog-push: success replaces catalog, preserves a non-scaffold columnDes
     const result = await catalogPush({
       serverUrl: "http://x",
       token: "agent-tok",
-      id: "t.sensor",
+      id: "sensor",
       catalog: newCatalog,
       fetchImpl: fetchImplFromApp(app),
     });
@@ -106,7 +106,7 @@ test("catalog-push: success replaces catalog, preserves a non-scaffold columnDes
 
     const got = await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.sensor",
+      url: "/api/docs/db-schema/sensor",
       headers: { authorization: "Bearer ed-tok" },
     });
     const doc = got.json().json;
@@ -140,7 +140,7 @@ test("catalog-push: vanished column with a non-scaffold slot is deprecated, not 
     const result = await catalogPush({
       serverUrl: "http://x",
       token: "agent-tok",
-      id: "t.sensor",
+      id: "sensor",
       catalog: {
         columns: [{ name: "B", type: "VARCHAR2(10)", nullable: true }],
         primaryKey: [],
@@ -152,7 +152,7 @@ test("catalog-push: vanished column with a non-scaffold slot is deprecated, not 
 
     const got = await app.inject({
       method: "GET",
-      url: "/api/docs/db-schema/t.sensor",
+      url: "/api/docs/db-schema/sensor",
       headers: { authorization: "Bearer ed-tok" },
     });
     const doc = got.json().json;
@@ -174,7 +174,7 @@ test("catalog-push: doc does not exist -> AkgApiError(404)", async () => {
       catalogPush({
         serverUrl: "http://x",
         token: "agent-tok",
-        id: "t.nosuchtable",
+        id: "nosuchtable",
         catalog: {
           columns: [{ name: "A", type: "NUMBER", nullable: false }],
           primaryKey: ["A"],
@@ -201,7 +201,7 @@ test("catalog-push: invalid catalog (empty columns) -> AkgApiError(400)", async 
       catalogPush({
         serverUrl: "http://x",
         token: "agent-tok",
-        id: "t.sensor",
+        id: "sensor",
         catalog: {
           columns: [],
           primaryKey: [],

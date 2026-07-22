@@ -42,13 +42,14 @@ async function setupServer() {
 }
 
 function dbSchemaDoc(table, owner = "T") {
-  const id = `${owner}.${table}`.toLowerCase();
+  const id = table.toLowerCase(); // id = lower(table); owner never qualifies it
+  const alias = id.replace(/^t_/, ""); // 짧은 별칭 — 포인터 주입 번들용 키워드
   return {
     schema: "db-schema/v1",
     id,
     keywords: [
       { kw: id, inject: "full" },
-      { kw: table.toLowerCase(), inject: "pointer" },
+      { kw: alias, inject: "pointer" },
     ],
     status: "active",
     body: {
@@ -191,11 +192,11 @@ test("1. first sync (no local rev) produces a mirror matching §5.1's provider c
   );
   assert.ok(Array.isArray(index));
   // full bundle (precision omitted) + pointer bundle (precision 0.5), §5.1.
-  const full = index.find((e) => e.keywords.includes("t.t_sensor"));
-  const pointer = index.find((e) => e.keywords.includes("t_sensor"));
-  assert.equal(full.path, "docs/t.t_sensor.md");
+  const full = index.find((e) => e.keywords.includes("t_sensor"));
+  const pointer = index.find((e) => e.keywords.includes("sensor"));
+  assert.equal(full.path, "docs/t_sensor.md");
   assert.equal(full.precision, undefined);
-  assert.equal(pointer.path, "docs/t.t_sensor.md");
+  assert.equal(pointer.path, "docs/t_sensor.md");
   assert.equal(pointer.precision, 0.5);
 
   // §4 D1 self-containment: path resolves relative to the index's own folder.
@@ -221,7 +222,7 @@ test("2. re-sync at the same rev is a 304 no-op (mirror untouched)", async () =>
     fetchImpl,
   });
 
-  const docPath = join(mirrorDir, "db-schema", "docs", "t.t_sensor.md");
+  const docPath = join(mirrorDir, "db-schema", "docs", "t_sensor.md");
   const mtimeBefore = statSync(docPath).mtimeMs;
 
   const second = await syncMirror({
@@ -300,9 +301,9 @@ test("4. a new doc on the server is picked up by the next sync", async () => {
   const index = JSON.parse(
     readFileSync(join(mirrorDir, "db-schema", "index.json"), "utf8"),
   );
-  assert.ok(index.some((e) => e.path === "docs/t.t_equipment.md"));
+  assert.ok(index.some((e) => e.path === "docs/t_equipment.md"));
   assert.ok(
-    existsSync(join(mirrorDir, "db-schema", "docs", "t.t_equipment.md")),
+    existsSync(join(mirrorDir, "db-schema", "docs", "t_equipment.md")),
   );
 
   await cleanup();

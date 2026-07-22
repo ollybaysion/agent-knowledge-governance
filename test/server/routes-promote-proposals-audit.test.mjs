@@ -34,7 +34,7 @@ function auth(token) {
 function newDbSchemaDoc() {
   return {
     schema: "db-schema/v1",
-    id: "t.x",
+    id: "x",
     keywords: [{ kw: "x", inject: "full" }],
     status: "active",
     body: {
@@ -69,7 +69,7 @@ test("promote: an agent token gets 403 (D6 — agents never promote)", async () 
   const rev = await createDoc(app, "edtok");
   const res = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/promote",
+    url: "/api/docs/db-schema/x/promote",
     headers: { ...auth("agtok"), "if-match": rev },
     payload: {},
   });
@@ -84,7 +84,7 @@ test("promote: editor also gets 403 — only approver may promote", async () => 
   const rev = await createDoc(app, "edtok");
   const res = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/promote",
+    url: "/api/docs/db-schema/x/promote",
     headers: { ...auth("edtok"), "if-match": rev },
     payload: {},
   });
@@ -100,7 +100,7 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
   const rev0 = await createDoc(app, "edtok");
   const editRes = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: (() => {
       const b = newDbSchemaDoc().body;
@@ -118,7 +118,7 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
   // Reviewer looked at rev1, but someone edits columnDescs.A again before the promote lands.
   const secondEdit = await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev1 },
     payload: (() => {
       const b = editRes.json().json.body;
@@ -135,7 +135,7 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
   // Approver's promote request still carries the STALE rev1 and targets the slot that just changed.
   const conflictPromote = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/promote",
+    url: "/api/docs/db-schema/x/promote",
     headers: { ...auth("aptok"), "if-match": rev1 },
     payload: { slots: ["columnDescs.A"] },
   });
@@ -145,7 +145,7 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
   // Promoting the UNTOUCHED slot (purpose) against the same stale rev1 must still succeed (S6 fused into S4).
   const okPromote = await app.inject({
     method: "POST",
-    url: "/api/docs/db-schema/t.x/promote",
+    url: "/api/docs/db-schema/x/promote",
     headers: { ...auth("aptok"), "if-match": rev1 },
     payload: { slots: ["purpose"] },
   });
@@ -170,7 +170,7 @@ test("proposals: submit -> list pending -> adopt lands the slot as inferred and 
     headers: auth("agtok"),
     payload: {
       type: "db-schema",
-      id: "t.x",
+      id: "x",
       slots: { purpose: { text: "제안된 목적", evidence: ["code.ts:1"] } },
     },
   });
@@ -234,7 +234,7 @@ test("proposals: identical resubmission from an agent dedups to the existing pen
   ]);
   const payload = {
     type: "db-schema",
-    id: "t.x",
+    id: "x",
     slots: { purpose: { text: "동일", evidence: ["e:1"] } },
   };
   const first = await app.inject({
@@ -263,7 +263,7 @@ test("audit: GET /api/audit reflects the exact commit trail (author, message) fo
   const rev0 = await createDoc(app, "edtok");
   await app.inject({
     method: "PUT",
-    url: "/api/docs/db-schema/t.x",
+    url: "/api/docs/db-schema/x",
     headers: { ...auth("edtok"), "if-match": rev0 },
     payload: (() => {
       const b = newDbSchemaDoc().body;
@@ -274,14 +274,14 @@ test("audit: GET /api/audit reflects the exact commit trail (author, message) fo
 
   const audit = await app.inject({
     method: "GET",
-    url: "/api/audit?doc=db-schema/t.x",
+    url: "/api/audit?doc=db-schema/x",
     headers: auth("edtok"),
   });
   assert.equal(audit.statusCode, 200);
   const entries = audit.json().entries;
   assert.equal(entries.length, 2); // create + edit
   assert.ok(entries.every((e) => e.author === "renoir"));
-  assert.match(entries[0].message, /edit db-schema\/t\.x/); // git log is newest-first
-  assert.match(entries[1].message, /create db-schema\/t\.x/);
+  assert.match(entries[0].message, /edit db-schema\/x/); // git log is newest-first
+  assert.match(entries[1].message, /create db-schema\/x/);
   await cleanup();
 });

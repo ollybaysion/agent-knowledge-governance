@@ -37,7 +37,7 @@ const auth = (token) => ({ authorization: `Bearer ${token}` });
 function newDbSchemaDoc() {
   return {
     schema: "db-schema/v1",
-    id: "t.x",
+    id: "x",
     keywords: [{ kw: "x", inject: "full" }],
     status: "active",
     body: {
@@ -64,7 +64,7 @@ async function createDoc(app) {
   return res.json().rev;
 }
 
-const submit = (app, slots, id = "t.x") =>
+const submit = (app, slots, id = "x") =>
   app.inject({
     method: "POST",
     url: "/api/proposals",
@@ -150,11 +150,11 @@ test("submit: proposing against a doc that does not exist yet is still allowed �
   const ok = await submit(
     app,
     { purpose: { text: "미리 제안", evidence: ["code.ts:1"] } },
-    "t.later",
+    "later",
   );
   assert.equal(ok.statusCode, 201);
 
-  const bad = await submit(app, { purpose: { text: "근거 없음" } }, "t.later");
+  const bad = await submit(app, { purpose: { text: "근거 없음" } }, "later");
   assert.equal(bad.statusCode, 400);
   assert.equal(bad.json().error, "invalid_slot_value");
 

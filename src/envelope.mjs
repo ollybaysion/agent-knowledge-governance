@@ -74,12 +74,11 @@ export function deriveId(schema, body) {
   if (!body || typeof body !== "object") return null;
   switch (schema) {
     case "db-schema/v1": {
-      // A schema-qualified table is `owner.table`, an unqualified one is just
-      // `table` — `owner` is optional and the id follows whichever the
-      // document actually names.
+      // The id is the bare table name — `owner` is a plain attribute of the
+      // body and never qualifies the id or the store filename (user decision
+      // 2026-07-22; one DB, table names are unique enough).
       if (!body.table) return null;
-      const qualified = body.owner ? `${body.owner}.${body.table}` : body.table;
-      return qualified.toLowerCase();
+      return body.table.toLowerCase();
     }
     case "msg-format/v1":
       return body.command
@@ -94,8 +93,7 @@ export function deriveId(schema, body) {
 
 /** How deriveId got its answer, for error messages that name the source field. */
 const ID_SOURCE = {
-  "db-schema/v1": (body) =>
-    body?.owner ? "lower(owner.table)" : "lower(table)",
+  "db-schema/v1": () => "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
 };

@@ -19,7 +19,7 @@ const USAGE = `usage:
   akg sync [--skills] [--server <url>] [--mirror <dir>]
   akg push <type> <doc.json> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
-  akg catalog-push <owner.table|table> <describe.json> [--server <url>] [--mirror <dir>]
+  akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
 
   push takes a bare body (a foundry spec.json is a domain-skill body) or a
   full envelope; it creates the document, or updates it if it already exists.
@@ -294,11 +294,14 @@ async function runPropose(positional, token, serverUrl) {
 }
 
 async function runCatalogPush(positional, token, serverUrl) {
-  const [id, describePath] = positional;
-  if (!id || !describePath) {
+  const [rawId, describePath] = positional;
+  if (!rawId || !describePath) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
+  // id = lower(table). A qualified owner.table is still accepted — the owner
+  // part is dropped here so existing collector invocations keep working.
+  const id = rawId.split(".").pop().toLowerCase();
   const catalog = readJsonFile(describePath, "describe_table file");
 
   try {

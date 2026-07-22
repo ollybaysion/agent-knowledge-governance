@@ -56,6 +56,28 @@ export function resolveConflict(
   actor,
   now,
 ) {
+  // A type with no tiered-value slots (domain-skill under spec v2) can't be
+  // merged at slot granularity — the whole body is the unit. Slot-level rebase
+  // would find zero changed units and silently keep currentBody, dropping the
+  // client's whole-body edit. So fall back to strict optimistic locking: a
+  // stale base rev whose content the client actually changed is a 409, never a
+  // silent no-op.
+  const slotless =
+    listSlotAddresses(typeSchema, baseBody).length === 0 &&
+    listSlotAddresses(typeSchema, currentBody).length === 0 &&
+    listSlotAddresses(typeSchema, clientBody).length === 0;
+  if (slotless) {
+    // base === current (fresh rev, or nobody wrote since): let the route's
+    // applyEdit take the full client body verbatim.
+    if (JSON.stringify(baseBody) === JSON.stringify(currentBody))
+      return { conflict: false, rebased: false, mergedBody: null };
+    // Someone moved the doc off the client's base. If the client's body already
+    // equals current it's a harmless no-op; otherwise it's a real conflict.
+    if (JSON.stringify(clientBody) === JSON.stringify(currentBody))
+      return { conflict: false, rebased: false, mergedBody: null };
+    return { conflict: true, overlap: ["(문서 전체)"] };
+  }
+
   const clientUnits = changedUnits(typeSchema, baseBody, clientBody);
   if (JSON.stringify(baseBody) === JSON.stringify(currentBody)) {
     // No-rebase fast path: nobody else wrote since the client's base rev.
