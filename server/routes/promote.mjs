@@ -1,6 +1,6 @@
 // §6 POST .../promote (approver) and .../deprecate (editor) — both slot-unit,
 // both require If-Match (S4), neither ever creates confirmed except promote.
-import { validateDocument } from "../../src/envelope.mjs";
+import { validateForStore } from "../../src/envelope.mjs";
 import { readJson, revOfPath, readJsonAtRev } from "../store.mjs";
 import { persistDoc } from "../render-store.mjs";
 import { listSlotAddresses, getSlot, setSlot, diffSlots } from "../slots.mjs";
@@ -107,7 +107,7 @@ export function registerPromoteRoutes(app) {
             };
 
           const newDoc = { ...currentDoc, body: newBody };
-          const errors = validateDocument(newDoc, refs);
+          const errors = validateForStore(newDoc, refs);
           if (errors.length)
             return {
               status: 400,
@@ -190,7 +190,7 @@ export function registerPromoteRoutes(app) {
             };
 
           const newDoc = { ...currentDoc, body: newBody };
-          const errors = validateDocument(newDoc, refs);
+          const errors = validateForStore(newDoc, refs);
           if (errors.length)
             return {
               status: 400,

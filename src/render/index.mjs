@@ -31,6 +31,15 @@ export function renderDocMd(type, doc) {
   return rendererFor(type, doc)?.(doc) ?? null;
 }
 
+/**
+ * Whether this type renders to md at all (false only for unclassified, whose
+ * truth is already md). Answered WITHOUT touching the body, so it is safe on an
+ * incomplete draft that renderDocMd itself would throw on.
+ */
+export function rendersToMd(type, doc) {
+  return rendererFor(type, doc) !== null;
+}
+
 /** Where a rendered doc lands under rendered/ — the skill tree, or docs/<id>.md. */
 export function docMdPath(type, doc) {
   if (type === "domain-skill")

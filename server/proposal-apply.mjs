@@ -16,7 +16,7 @@
 // document can change between submit and adopt — a column disappears, someone
 // else's edit lands — so a proposal that rehearsed cleanly can still fail for
 // real later. Submit's job is only to keep already-doomed proposals out.
-import { validateDocument } from "../src/envelope.mjs";
+import { validateForStore } from "../src/envelope.mjs";
 import { setSlot } from "./slots.mjs";
 
 /**
@@ -70,7 +70,7 @@ export function applySlots(currentDoc, slots, refs, { by, at }) {
   }
 
   const doc = { ...currentDoc, body: newBody };
-  const errors = validateDocument(doc, refs);
+  const errors = validateForStore(doc, refs);
   if (errors.length)
     return {
       ok: false,

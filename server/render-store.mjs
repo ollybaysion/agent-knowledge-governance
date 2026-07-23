@@ -2,7 +2,7 @@
 // given a fully-resolved doc, write store/<type>/<id>.json + the derived
 // rendered/ artifacts in one commit (json-spec §1.1 — truth and derivative
 // always move together).
-import { docMdPath, renderDocMd } from "../src/render/index.mjs";
+import { docMdPath, renderDocMd, rendersToMd } from "../src/render/index.mjs";
 import { commitFiles, listIds, readJson } from "./store.mjs";
 
 const INDEXED_TYPES = new Set(["db-schema", "msg-format"]);
@@ -56,15 +56,16 @@ export function docWrites(storeDir, type, doc) {
   ];
   const removes = [];
 
-  // Null md = a type with no renderer (unclassified), which has nothing to
-  // write or remove. Rendering an inactive doc only to drop the result is
-  // wasted work, but rendering is pure and cheap, and one code path for
-  // "does this type render at all" beats a second predicate that could
-  // disagree with the renderer about it.
-  const md = renderDocMd(type, doc);
-  if (md !== null) {
+  // Only an active doc gets a rendered md; inactive (a draft being built up, or
+  // #7 bulk-loaded) or archived has its md REMOVED instead — a stale file left
+  // in rendered/ would ship to every mirror via /api/bundle. A draft body can
+  // be incomplete and unrenderable, so a non-active doc is NEVER rendered: we
+  // only drop the file its id/name would map to. `rendersToMd` answers "does
+  // this type render at all" (false for unclassified) without touching the body,
+  // which renderDocMd would throw on.
+  if (rendersToMd(type, doc)) {
     if (doc.status === "active") {
-      writes.push({ relpath: docMdPath(type, doc), content: md });
+      writes.push({ relpath: docMdPath(type, doc), content: renderDocMd(type, doc) });
     } else {
       removes.push(docMdPath(type, doc));
     }
