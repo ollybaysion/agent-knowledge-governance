@@ -2814,6 +2814,25 @@ aside.sidebar {
   flex: 1;
   min-width: 0;
 }
+/* 칸별 실시간 가이드 — 입력 밑에 문제·고치는 법(빨강) 또는 파생 id 프리뷰(회색).
+   df-title(큰 제목) 밑에 붙어도 본문 크기로 고정. */
+.df-guide {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--sans, inherit);
+  line-height: 1.55;
+  margin-top: 4px;
+}
+.df-guide.bad {
+  color: var(--error-ink);
+}
+.df-guide.ok {
+  color: var(--muted);
+}
+.df-guide .g-line {
+  display: block;
+}
 /* 클릭해서 편집하는 값 */
 .df-click {
   display: inline-block;

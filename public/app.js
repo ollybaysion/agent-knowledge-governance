@@ -2908,6 +2908,80 @@ function startDraft(type) {
   location.hash = `#/draft/${type}/${localId}`;
 }
 
+// ---- 칸별 실시간 가이드 (사용자 요청 — "서버 400 검증 문구로는 어디를
+// 고쳐야 할지 감이 안 잡힌다"). 서버 규칙의 클라이언트 거울:
+// 테이블·커맨드 ^[A-Z][A-Z0-9_]*$ · 스킬명 ^[a-z][a-z0-9-]*$ (스키마 파일),
+// 파생 id ^[a-z0-9._-]+$ · kw ^[a-z0-9_. -]+$ (envelope). 문제를 문자 단위로
+// 짚고 고치는 방법을 같이 말한다 — 통과하면 파생될 id·키워드를 미리 보여준다.
+const HANGUL_RE = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+function idSourceGuide(type) {
+  const kebab = type === "domain-skill";
+  const ex = kebab
+    ? "fdc-explain-sensor"
+    : type === "db-schema"
+      ? "FDC_SENSOR"
+      : "CMD_START_LOT";
+  return (raw) => {
+    const v = raw.trim();
+    if (!v) return null; // 빈 칸은 placeholder + 저장 버튼 비활성이 이미 안내
+    // 커밋 시 자동 변환(대/소문자)을 먼저 적용한 형태로 판정 — 케이스는
+    // 알아서 고쳐 주므로 케이스 지적은 하지 않는다.
+    const c = kebab ? v.toLowerCase() : v.toUpperCase();
+    const msgs = [];
+    if (HANGUL_RE.test(c)) msgs.push("한글은 쓸 수 없습니다 — 영문명으로 적어주세요.");
+    if (/\s/.test(c))
+      msgs.push(
+        kebab
+          ? `공백은 쓸 수 없습니다 — '-' 로 이어주세요 (예: ${ex}).`
+          : `공백은 쓸 수 없습니다 — '_' 로 이어주세요 (예: ${ex}).`,
+      );
+    if (!kebab && /-/.test(c))
+      msgs.push("'-' 는 쓸 수 없습니다 — 테이블·커맨드명은 '_' 를 씁니다.");
+    if (kebab && /_/.test(c))
+      msgs.push("'_' 는 쓸 수 없습니다 — 스킬명은 '-' 를 씁니다.");
+    if (/\./.test(c))
+      msgs.push(
+        type === "db-schema"
+          ? "'.' 은 쓸 수 없습니다 — 스키마는 owner 칸에 따로, 여기는 테이블명만."
+          : "'.' 은 쓸 수 없습니다.",
+      );
+    const allowed = kebab ? /[a-z0-9-]/ : /[A-Z0-9_]/;
+    const others = [
+      ...new Set(
+        [...c].filter(
+          (ch) =>
+            !allowed.test(ch) &&
+            !/\s/.test(ch) &&
+            !HANGUL_RE.test(ch) &&
+            !"-_.".includes(ch),
+        ),
+      ),
+    ];
+    if (others.length)
+      msgs.push(`쓸 수 없는 문자입니다: ${others.join(" ")}`);
+    if (!msgs.length && !/^[A-Za-z]/.test(c))
+      msgs.push("첫 글자는 영문이어야 합니다.");
+    if (msgs.length) return { ok: false, msgs };
+    const id = deriveDraftId(
+      type,
+      kebab ? { name: c } : { table: c, command: c },
+    );
+    return { ok: true, msgs: [`저장하면 문서 id·키워드 = ${id}`] };
+  };
+}
+// owner (db-schema, 선택) — ^[A-Z][A-Z0-9_]*$. 비우면 통과.
+function ownerGuide(raw) {
+  const v = raw.trim();
+  if (!v) return null;
+  const c = v.toUpperCase();
+  const msgs = [];
+  if (HANGUL_RE.test(c)) msgs.push("한글은 쓸 수 없습니다 — 영문 스키마명으로.");
+  if (/[^A-Z0-9_]/.test(c))
+    msgs.push("영문·숫자·'_' 만 쓸 수 있습니다 (예: TESTUSER).");
+  else if (!/^[A-Z]/.test(c)) msgs.push("첫 글자는 영문이어야 합니다.");
+  return msgs.length ? { ok: false, msgs } : null;
+}
+
 // 헤더 제목 = id 소스(테이블/커맨드/스킬명) 클릭-투-편집. "이름"이 곧 문서 제목.
 function idSourceField(type, body, onIdChange) {
   if (type === "db-schema")
@@ -2917,6 +2991,7 @@ function idSourceField(type, body, onIdChange) {
       title: true,
       placeholder: "테이블명 클릭해서 입력 (예: FDC_SENSOR)",
       onChange: onIdChange,
+      check: idSourceGuide(type),
     });
   if (type === "msg-format")
     return eField(() => body.command, (v) => (body.command = v), {
@@ -2925,12 +3000,14 @@ function idSourceField(type, body, onIdChange) {
       title: true,
       placeholder: "커맨드명 클릭해서 입력 (예: CMD_START_LOT)",
       onChange: onIdChange,
+      check: idSourceGuide(type),
     });
   return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
     mono: true,
     title: true,
     placeholder: "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
+    check: idSourceGuide(type),
   });
 }
 
@@ -3008,8 +3085,24 @@ function renderDraftScreen(type, localId) {
 }
 
 // 클릭-투-편집 텍스트 (제자리 스왑, 전체 재렌더 없음). onChange 는 커밋 후 호출.
+// opts.check(v) → null | { ok, msgs } — 칸 밑에 실시간 가이드(타이핑마다 갱신,
+// 커밋 후에도 읽기 뷰에 유지). 서버 400 을 맞고서야 아는 대신 치는 동안 알린다.
 function eField(get, set, opts = {}) {
   const wrap = el("span", { class: "df-v" });
+  const guide = opts.check ? el("span", { class: "df-guide" }) : null;
+  function renderGuide(raw) {
+    if (!guide) return;
+    const res = opts.check(String(raw ?? ""));
+    if (!res) {
+      guide.className = "df-guide";
+      guide.replaceChildren();
+      return;
+    }
+    guide.className = `df-guide ${res.ok ? "ok" : "bad"}`;
+    guide.replaceChildren(
+      ...res.msgs.map((m) => el("span", { class: "g-line", text: m })),
+    );
+  }
   function showRead() {
     const val = get();
     const has = val != null && String(val) !== "";
@@ -3019,7 +3112,8 @@ function eField(get, set, opts = {}) {
       text: has ? String(val) : opts.placeholder || "클릭해서 입력",
       onclick: showEdit,
     });
-    wrap.replaceChildren(btn);
+    wrap.replaceChildren(...[btn, guide].filter(Boolean));
+    renderGuide(has ? String(val) : "");
   }
   function showEdit() {
     const val = get();
@@ -3037,6 +3131,7 @@ function eField(get, set, opts = {}) {
       opts.onChange?.();
       showRead();
     };
+    inp.addEventListener("input", () => renderGuide(inp.value));
     inp.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !opts.area) {
         e.preventDefault();
@@ -3046,7 +3141,8 @@ function eField(get, set, opts = {}) {
       }
     });
     inp.addEventListener("blur", commit);
-    wrap.replaceChildren(inp);
+    wrap.replaceChildren(...[inp, guide].filter(Boolean));
+    renderGuide(inp.value);
     inp.focus();
   }
   showRead();
@@ -3091,6 +3187,7 @@ function draftDbSchema(body, onIdChange, persist, rerender) {
         upper: true,
         placeholder: "선택 (예: TESTUSER)",
         onChange: persist,
+        check: ownerGuide,
       }),
     ),
   );
