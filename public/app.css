@@ -1367,9 +1367,22 @@ ol.steps > li p {
   font-size: 13px;
 }
 
-/* 설치 카드 */
+/* 설치 카드 — 본문 오른쪽 빈 공간의 sticky 패널(#39). .sk-layout 이 본문(좌,
+   기존 820px 컬럼) | 설치(우)를 가르고, 패널이 없으면 el() 이 null 을 걸러
+   본문이 그대로 한 폭을 쓴다. */
+.sk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 820px) 300px;
+  gap: 18px;
+  justify-content: center;
+  align-items: start;
+}
+.sk-aside {
+  position: sticky;
+  top: 14px;
+  margin-top: 46px; /* 본문 eyebrow~제목 높이만큼 내려 시선 나란히 */
+}
 .sk-install {
-  margin-top: 22px;
   padding: 14px 16px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
@@ -1383,8 +1396,31 @@ ol.steps > li p {
 .sk-install-top .sk-h {
   margin: 0;
 }
-.sk-install .dl-btn {
-  margin-left: auto;
+.install-note {
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+.install-note code {
+  font-family: var(--mono);
+}
+/* 승인자 JSON 분할이 열리면 3열이 되므로 1열로 접는다 — 패널이 본문 아래로
+   흐른다(숨기지 않음). */
+.doc-split.open .sk-layout {
+  grid-template-columns: minmax(0, 820px);
+}
+.doc-split.open .sk-aside {
+  position: static;
+  margin-top: 0;
+}
+/* 좁은 화면도 세로 스택 — .doc-split 과 같은 브레이크포인트. */
+@media (max-width: 900px) {
+  .sk-layout {
+    grid-template-columns: minmax(0, 820px);
+  }
+  .sk-aside {
+    position: static;
+    margin-top: 0;
+  }
 }
 .install-lead {
   font-size: 13px;
@@ -1414,6 +1450,14 @@ ol.steps > li p {
   position: absolute;
   top: 8px;
   right: 8px;
+  /* 명령 텍스트 위에 뜨는 버튼 — ghost 그대로면 글자가 비쳐 겹쳐 보인다 */
+  background: var(--surface-card);
+}
+/* 좁은 패널에서는 가로 스크롤 대신 줄바꿈 — 복사 버튼과의 겹침도 없앤다.
+   시각적 소프트랩일 뿐 복사되는 문자열은 그대로다. */
+.sk-aside .install-cmd {
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* 스킬 구조화 편집 (클릭-투-편집) */

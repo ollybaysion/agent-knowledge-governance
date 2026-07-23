@@ -49,22 +49,6 @@ function el(tag, attrs, children) {
 }
 const $ = (id) => document.getElementById(id);
 
-// Save an in-memory string as a client-side download. No server round-trip: it
-// reuses text api() already fetched with the viewer's token, so it works the
-// same whether or not the deploy allows anonymous reads (AKG_ANON_READ) — a
-// bare <a href> to the md endpoint would 401 under AKG_ANON_READ=0 since anchors
-// carry no Authorization header. CSP-safe: a `download` anchor is not a fetch
-// the `default-src 'self'` policy governs.
-function downloadTextFile(filename, text, mime) {
-  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = el("a", { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 // ---------- toast (prototype pattern — reused for notices/errors) ----------
 let toastTimer = null;
 function toast(message, klass) {
@@ -2261,31 +2245,30 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   });
   wrap.appendChild(depsWrap);
 
-  // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
-  // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
-  // 다운로드는 클라이언트 blob(downloadTextFile) — 이미 로드된 md를 재사용한다.
+  // 설치 — curl 원커맨드 하나만 안내한다(#39). 구 방식(브라우저 다운로드 후
+  // mv ~/Downloads/…)은 다운로드 폴더가 사람마다 달라(브라우저 설정, 한글 로케일
+  // XDG = ~/다운로드, "매번 묻기") mv 가 추측이 됐다. curl 은 서버의 raw md
+  // 엔드포인트(?format=md)를 직접 받으므로 출발지 추측이 없다. 목적지는
+  // ~/.claude/skills 고정 안내(CC·opencode 공통 탐색 경로, install-skills.mjs 와
+  // 동일) — 다른 경로를 쓰는 사람은 명령의 경로만 바꾼다(분기 없음).
+  // AKG_ANON_READ=0 배포에서는 Authorization 헤더가 필요하므로 힌트 한 줄을
+  // 함께 보인다 — 실토큰은 절대 카피 텍스트에 넣지 않는다($AKG_TOKEN 참조만).
+  let installAside = null;
   if (md) {
+    const dest = `~/.claude/skills/${s.name}`;
     const installCmd =
-      `mkdir -p ~/.claude/skills/${s.name}\n` +
-      `mv ~/Downloads/SKILL.md ~/.claude/skills/${s.name}/SKILL.md`;
-    wrap.appendChild(
+      `mkdir -p ${dest}\n` +
+      `curl -fsS "${location.origin}/api/docs/domain-skill/${encodeURIComponent(doc.id)}?format=md" \\\n` +
+      `  -o ${dest}/SKILL.md`;
+    installAside = el("aside", { class: "sk-aside" }, [
       el("div", { class: "sk-install" }, [
         el("div", { class: "sk-install-top" }, [
           el("h2", { class: "sk-h", text: "설치" }),
-          el("button", {
-            type: "button",
-            class: "btn primary sm dl-btn",
-            onclick: () => {
-              downloadTextFile("SKILL.md", md, "text/markdown;charset=utf-8");
-              toast("SKILL.md 다운로드 — 아래 위치에 넣으세요", "");
-            },
-            text: "↓ SKILL.md 다운로드",
-          }),
         ]),
         el("p", { class: "dim install-lead" }, [
-          "받은 ",
-          el("code", { text: "SKILL.md" }),
-          " 를 아래 위치에 넣으면 끝 — Claude Code·opencode 모두 이 경로를 읽습니다.",
+          "아래 명령 하나로 설치합니다 — Claude Code·opencode 모두 ",
+          el("code", { text: "~/.claude/skills" }),
+          " 를 읽습니다. 다른 경로를 쓰면 그 부분만 바꾸세요.",
         ]),
         el("div", { class: "install-cmd-wrap" }, [
           el("pre", { class: "install-cmd", text: installCmd }),
@@ -2303,15 +2286,22 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
             text: "복사",
           }),
         ]),
+        el("p", { class: "dim install-note" }, [
+          "토큰이 필요한 서버면 curl 에 ",
+          el("code", { text: '-H "Authorization: Bearer $AKG_TOKEN"' }),
+          " 을 추가하세요.",
+        ]),
         el("p", {
           class: "dim",
           text: "설치 후 새 세션(또는 스킬 새로고침)부터 이 스킬을 쓸 수 있습니다.",
         }),
       ]),
-    );
+    ]);
   }
 
-  return wrap;
+  // 본문(좌) + 설치 패널(우) — 스크롤 끝이 아니라 본문 오른쪽 빈 공간에 상시
+  // 보인다(#39). 패널이 없으면(el 이 null 을 걸러) 본문이 그대로 한 폭을 쓴다.
+  return el("div", { class: "sk-layout" }, [wrap, installAside]);
 }
 
 // ================= 검토 대기열 =================
