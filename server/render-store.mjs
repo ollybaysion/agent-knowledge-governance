@@ -106,3 +106,28 @@ export function archiveDoc(storeDir, type, doc, { author, message }) {
     { author, message },
   );
 }
+
+/**
+ * Purge (2단계 삭제의 2단, 사용자 결정 2026-07-24): archived 문서를 store
+ * 트리에서 제거하는 커밋. HEAD 에서 파일이 사라져 목록·API 에서 완전히
+ * 없어지고, git 이력에는 감사 기록으로만 남는다 — 이력 소거(history rewrite)는
+ * 감사 설계(모든 변이 = git 커밋)와 충돌하므로 API 로 열지 않는다.
+ * rendered md 는 archive 시점에 이미 제거됐지만 removes 는 "ensure absent"
+ * 계약이므로 같이 실어 어떤 경로로 왔든 잔재가 없음을 보장한다.
+ */
+export function purgeDoc(storeDir, type, doc, { author, message }) {
+  const removes = [`${type}/${doc.id}.json`];
+  if (rendersToMd(type, doc)) removes.push(docMdPath(type, doc));
+  const writes = [];
+  if (INDEXED_TYPES.has(type)) {
+    const rest = listIds(storeDir, type)
+      .filter((id) => id !== doc.id)
+      .map((id) => readJson(storeDir, `${type}/${id}.json`))
+      .filter(Boolean);
+    writes.push({
+      relpath: `rendered/${type}/index.json`,
+      content: stableJson(compileIndex(rest)),
+    });
+  }
+  return commitFiles(storeDir, { author, message, writes, removes });
+}

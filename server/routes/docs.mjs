@@ -13,6 +13,7 @@ import {
 import {
   persistDoc,
   archiveDoc,
+  purgeDoc,
   renderDocMd,
   docWrites,
 } from "../render-store.mjs";
@@ -587,6 +588,10 @@ export function registerDocsRoutes(app) {
     { config: { roles: ["approver"] } },
     async (request, reply) => {
       const { type, id } = request.params;
+      // S11: 파라미터가 그대로 경로가 된다 — Fastify 는 %2F 를 디코드하므로
+      // (proposals pid 순회, §13-1 과 같은 부류) 경로 조립 전에 형식을 거부.
+      if (!isValidId(type) || !isValidId(id))
+        return reply.code(404).send({ error: "not_found" });
       const result = await queue.enqueue(
         async () => {
           const relpath = `${type}/${id}.json`;
@@ -595,6 +600,38 @@ export function registerDocsRoutes(app) {
           const rev = archiveDoc(storeDir, type, doc, {
             author: request.user.id,
             message: `archive ${type}/${id}`,
+          });
+          return { status: 200, body: { rev } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // 2단계 삭제의 2단(사용자 결정 2026-07-24): archived 문서를 store 트리에서
+  // 제거한다. HEAD 에서 파일이 사라져 목록·API 에서 완전히 없어지고, git
+  // 이력에는 감사 기록으로만 남는다(이력 소거는 API 로 열지 않는다 — 감사
+  // 설계와 충돌). archived 에서만 허용: 1단(보관)이 실수 방지 게이트다.
+  app.post(
+    "/api/docs/:type/:id/purge",
+    { config: { roles: ["approver"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      // 신설 표면이라 더 엄격히: 대시보드가 다루는 타입 화이트리스트 + id 형식
+      // 검증을 경로 조립 전에 (S11, §13-1 부류 차단).
+      if (!DOC_TYPES.includes(type) || !isValidId(id))
+        return reply.code(404).send({ error: "not_found" });
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          if (doc.status !== "archived")
+            return { status: 409, body: { error: "not_archived" } };
+          const rev = purgeDoc(storeDir, type, doc, {
+            author: request.user.id,
+            message: `purge ${type}/${id}`,
           });
           return { status: 200, body: { rev } };
         },

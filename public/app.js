@@ -168,7 +168,7 @@ async function archiveDocAction(type, id) {
     title: `${id} 문서를 삭제할까요?`,
     lines: [
       "목록·검색·세션 주입에서 빠집니다.",
-      "store 파일과 git 이력에는 archived 상태로 남습니다 — 복구는 관리자 작업입니다.",
+      "store 에는 보관(archived) 상태로 남습니다 — 완전 삭제는 보관 문서 화면의 [삭제 완료]가 합니다.",
     ],
     confirmLabel: "삭제",
     confirmClass: "danger",
@@ -183,6 +183,33 @@ async function archiveDocAction(type, id) {
     location.hash = "#/corpus";
   } else if (r.status === 403) toast("approver 권한이 필요합니다.", "error");
   else toast(`삭제 실패 (${r.status})`, "error");
+}
+
+// 2단계 삭제의 2단 — archived 문서를 store 트리에서 완전 제거(approver 전용,
+// POST .../purge). HEAD 에서 파일이 사라져 목록·API 에서 완전히 없어지고,
+// git 이력에만 감사 기록으로 남는다(이력 소거는 API 로 열지 않는 설계).
+async function purgeDocAction(type, id) {
+  const sure = await confirmModal({
+    title: `${id} 문서를 완전 삭제할까요?`,
+    lines: [
+      "store 에서 파일이 제거되고 목록·API 에서 완전히 사라집니다.",
+      "git 이력에만 감사 기록으로 남습니다 — 화면에서는 되돌릴 수 없습니다.",
+    ],
+    confirmLabel: "삭제 완료",
+    confirmClass: "danger",
+  });
+  if (!sure) return;
+  const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}/purge`, {
+    method: "POST",
+  });
+  if (r.ok) {
+    toast("문서를 완전히 삭제했습니다.");
+    await renderDocTree();
+    location.hash = "#/corpus";
+  } else if (r.status === 409)
+    toast("보관(archived) 상태의 문서만 완전 삭제할 수 있습니다.", "error");
+  else if (r.status === 403) toast("approver 권한이 필요합니다.", "error");
+  else toast(`완전 삭제 실패 (${r.status})`, "error");
 }
 
 // md 복사 아이콘 버튼 — 모든 포맷 문서 공통(사용자 결정). 렌더된 md 원문을
@@ -525,10 +552,12 @@ async function renderDocTree() {
   for (const type of DOC_TYPES) {
     const res = await api(`/api/docs?type=${type}`);
     // Inactive documents belong in the tree: they are readable by design and
-    // invisible ones cannot be reviewed, let alone activated. Archived stays
-    // hidden — that one is a decision to stop carrying the document.
+    // invisible ones cannot be reviewed, let alone activated. Archived is
+    // hidden from everyone EXCEPT approver — 2단계 삭제(보관 → 삭제 완료)의
+    // 2단을 밟으려면 approver 는 보관 문서에 접근할 수 있어야 한다.
+    const canPurge = currentUser?.role === "approver";
     const docs = (res.ok ? res.data.docs : []).filter(
-      (d) => d.status !== "archived",
+      (d) => d.status !== "archived" || canPurge,
     );
     // Local drafts (started but not saved) show in the tree immediately —
     // titled "(빈 문서)", "(빈 문서2)"… as they pile up — so every just-added
@@ -570,7 +599,12 @@ async function renderDocTree() {
           "button",
           {
             type: "button",
-            class: d.status === "inactive" ? "doc-item off" : "doc-item",
+            class:
+              d.status === "archived"
+                ? "doc-item off archived"
+                : d.status === "inactive"
+                  ? "doc-item off"
+                  : "doc-item",
             "data-type": type,
             "data-id": d.id,
             onclick: () =>
@@ -579,6 +613,9 @@ async function renderDocTree() {
           [
             el("span", { class: "nm", text: d.id }),
             el("span", { class: "mini" }, [
+              d.status === "archived"
+                ? el("span", { class: "mini-off", text: "보관" })
+                : null,
               d.status === "inactive"
                 ? el("span", { class: "mini-off", text: "비활성" })
                 : null,
@@ -1440,6 +1477,10 @@ async function renderDocScreen(type, id) {
         canApprove && doc.status !== "archived"
           ? () => archiveDocAction(type, id)
           : null,
+        // 2단계 삭제의 2단 — 보관 문서에서만(완전 제거).
+        canApprove && doc.status === "archived"
+          ? () => purgeDocAction(type, id)
+          : null,
       );
       section.replaceChildren(
         jsonOpen
@@ -1625,6 +1666,20 @@ async function renderDocScreen(type, id) {
               "삭제",
             )
           : null,
+        // 2단계 삭제의 2단 — 보관 문서에서만. store 트리에서 완전 제거.
+        canApprove && doc.status === "archived"
+          ? el(
+              "button",
+              {
+                type: "button",
+                class: "btn danger sm",
+                title:
+                  "store 에서 파일을 제거합니다 — 목록·API 에서 완전히 사라지고 git 이력에만 남습니다.",
+                onclick: () => purgeDocAction(type, id),
+              },
+              "삭제 완료",
+            )
+          : null,
       ]),
       // Say it on the document itself. Someone reading an inactive doc is
       // deciding whether to turn it on; the badge alone does not tell them
@@ -1783,7 +1838,7 @@ async function renderDocScreen(type, id) {
 }
 
 // domain-skill: editorial reading view (prototype .skwrap), read-only in v1
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, onArchive) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, onArchive, onPurge) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
   // Only one inline editor open at a time. A dirty editor blocks opening
@@ -2230,6 +2285,19 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
               onclick: onArchive,
             },
             "삭제",
+          )
+        : null,
+      onPurge
+        ? el(
+            "button",
+            {
+              type: "button",
+              class: "btn danger sm",
+              title:
+                "store 에서 파일을 제거합니다 — 목록·API 에서 완전히 사라지고 git 이력에만 남습니다.",
+              onclick: onPurge,
+            },
+            "삭제 완료",
           )
         : null,
     ]),
