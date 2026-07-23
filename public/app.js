@@ -361,6 +361,11 @@ function route() {
     renderDocScreen(parts[1], decodeURIComponent(parts[2]));
     return;
   }
+  if (parts[0] === "draft" && parts[1] && parts[2]) {
+    go("draft");
+    renderDraftScreen(parts[1], parts[2]);
+    return;
+  }
   const screen = ["corpus", "queue", "audit"].includes(parts[0])
     ? parts[0]
     : "corpus";
@@ -379,6 +384,7 @@ $("side-toggle").addEventListener("click", () => {
 });
 
 async function renderDocTree() {
+  renderTreeActions();
   const tree = $("doc-tree");
   tree.replaceChildren();
   let pendingTotal = 0;
@@ -390,9 +396,40 @@ async function renderDocTree() {
     const docs = (res.ok ? res.data.docs : []).filter(
       (d) => d.status !== "archived",
     );
+    // Local drafts (started but not saved) show in the tree immediately —
+    // titled "(빈 문서)", "(빈 문서2)"… as they pile up — so every just-added
+    // document is visible before it ever reaches the server. Named ones show
+    // their name; the "(빈 문서N)" numbering counts only the still-unnamed ones.
+    let unnamed = 0;
+    const draftItems = draftsOfType(type).map((d) => {
+      const did = deriveDraftId(type, d.body);
+      let label;
+      if (did) {
+        label = did;
+      } else {
+        unnamed += 1;
+        label = unnamed === 1 ? "(빈 문서)" : `(빈 문서${unnamed})`;
+      }
+      return el(
+        "button",
+        {
+          type: "button",
+          class: "doc-item draft-item",
+          "data-draft-id": d.localId,
+          onclick: () => (location.hash = `#/draft/${type}/${d.localId}`),
+        },
+        [
+          el("span", { class: `nm${did ? "" : " untitled"}`, text: label }),
+          el("span", { class: "mini" }, [
+            el("span", { class: "mini-draft", text: "드래프트" }),
+          ]),
+        ],
+      );
+    });
     const items = el(
       "div",
       { class: "grp-items" },
+      draftItems.concat(
       docs.map((d) => {
         pendingTotal += d.tiers.inferred || 0;
         return el(
@@ -427,6 +464,7 @@ async function renderDocTree() {
           ],
         );
       }),
+      ),
     );
     const grp = el("div", { class: "grp" }, [
       el(
@@ -451,7 +489,15 @@ async function renderDocTree() {
   return pendingTotal;
 }
 function highlightTree() {
+  const draftHash = location.hash.match(/^#\/draft\/[\w-]+\/([\w-]+)/);
   for (const b of $("doc-tree").querySelectorAll(".doc-item")) {
+    if (b.classList.contains("draft-item")) {
+      b.classList.toggle(
+        "on",
+        !!draftHash && b.dataset.draftId === draftHash[1],
+      );
+      continue;
+    }
     b.classList.toggle(
       "on",
       lastDoc && b.dataset.type === lastDoc.type && b.dataset.id === lastDoc.id,
@@ -2609,6 +2655,576 @@ function auditMessage(msg) {
     el("span", { class: `act ${cls}`, text: verb }),
     " " + msg.slice(verb.length + 1),
   ]);
+}
+
+// ================= 새 문서 만들기 (#33) =================
+// 흐름: 사이드바 하단 "+ 새 문서" → 오른쪽 포맷 플라이아웃 → 포맷 클릭 → 로컬
+// 드래프트(서버 미저장) → 이름 포함 모든 필드를 클릭-투-편집으로 채움 → "저장"
+// 이 inactive 문서로 커밋(이름 없으면 저장 불가). 미완이어도 저장되고(서버 완화
+// 검증), 활성화는 완성돼야만 된다. CSP: 인라인 없이 el/addEventListener.
+function canCreate() {
+  return (
+    !!currentUser &&
+    (currentUser.role === "editor" || currentUser.role === "approver")
+  );
+}
+const nowIso = () => new Date().toISOString();
+
+// ---- 로컬 드래프트 저장소 (localStorage) — 여러 개 동시 보관 ----
+// akg_drafts = { <localId>: { type, body } }. 저장 전이라 서버엔 없고, 트리에
+// "(빈 문서)"·"(빈 문서2)"… 로 늘어난다. localId 는 단조 증가 카운터(d1, d2 …).
+const DRAFTS_KEY = "akg_drafts";
+function loadDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+function saveDrafts(all) {
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify(all));
+}
+function nextDraftId() {
+  const n = Number(localStorage.getItem("akg_draft_seq") || "0") + 1;
+  localStorage.setItem("akg_draft_seq", String(n));
+  return `d${n}`;
+}
+function createDraft(type) {
+  const all = loadDrafts();
+  const localId = nextDraftId();
+  all[localId] = { type, body: {} };
+  saveDrafts(all);
+  return localId;
+}
+function getDraftBody(localId) {
+  return loadDrafts()[localId]?.body ?? null;
+}
+function saveDraftBody(localId, body) {
+  const all = loadDrafts();
+  if (!all[localId]) return;
+  all[localId].body = body;
+  saveDrafts(all);
+}
+function deleteDraft(localId) {
+  const all = loadDrafts();
+  delete all[localId];
+  saveDrafts(all);
+}
+// 한 타입의 드래프트 목록(생성 순서 = localId 숫자 순서)
+function draftsOfType(type) {
+  return Object.entries(loadDrafts())
+    .filter(([, v]) => v.type === type)
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([localId, v]) => ({ localId, body: v.body }));
+}
+
+// id 는 서버 deriveId 와 동일 규칙으로 미리보기 (db-schema=lower(table),
+// msg-format=kebab(command), domain-skill=name). owner 는 id 에 안 들어간다.
+function deriveDraftId(type, body) {
+  if (type === "db-schema")
+    return body.table ? String(body.table).toLowerCase() : "";
+  if (type === "msg-format")
+    return body.command
+      ? String(body.command).toLowerCase().replace(/_/g, "-")
+      : "";
+  if (type === "domain-skill")
+    return body.name ? String(body.name).toLowerCase() : "";
+  return "";
+}
+
+// ---- 사이드바 하단 버튼 + 오른쪽 포맷 플라이아웃 ----
+function renderTreeActions() {
+  const host = $("tree-actions");
+  if (!host) return;
+  host.replaceChildren();
+  if (!canCreate()) return;
+  const btn = el(
+    "button",
+    { type: "button", id: "new-doc-btn", class: "btn primary" },
+    "+ 새 문서",
+  );
+  btn.addEventListener("click", () => toggleFlyout(host, btn));
+  host.appendChild(btn);
+}
+function closeFlyout() {
+  document.querySelector(".nd-flyout")?.remove();
+  document.removeEventListener("click", onDocClickForFlyout, true);
+}
+function onDocClickForFlyout(e) {
+  const fly = document.querySelector(".nd-flyout");
+  if (!fly) return;
+  if (!fly.contains(e.target) && e.target.id !== "new-doc-btn") closeFlyout();
+}
+const NEW_DOC_OPTS = [
+  { type: "db-schema", desc: "테이블 · 컬럼" },
+  { type: "msg-format", desc: "설비 커맨드" },
+  { type: "domain-skill", desc: "조회 절차 스킬" },
+];
+function toggleFlyout(host, btn) {
+  if (document.querySelector(".nd-flyout")) {
+    closeFlyout();
+    return;
+  }
+  const fly = el("div", { class: "nd-flyout", role: "menu" }, [
+    el("div", { class: "nd-h", text: "새 문서 종류" }),
+    ...NEW_DOC_OPTS.map((o) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: "nd-opt",
+          role: "menuitem",
+          onclick: () => {
+            closeFlyout();
+            startDraft(o.type);
+          },
+        },
+        [
+          el("span", { class: "k", text: o.type }),
+          el("span", { class: "d", text: o.desc }),
+        ],
+      ),
+    ),
+  ]);
+  // body 에 fixed 로 붙인다 — 사이드바의 overflow 가 팝오버를 자르지 않게. 위치는
+  // 버튼 rect 로: 버튼 오른쪽, 아래 정렬(.style 프로퍼티는 CSP style-src 무관).
+  document.body.appendChild(fly);
+  const rect = btn.getBoundingClientRect();
+  fly.style.left = `${Math.round(rect.right + 6)}px`;
+  fly.style.bottom = `${Math.round(window.innerHeight - rect.bottom)}px`;
+  // 다음 틱에 바깥 클릭 감지 등록(지금 클릭이 바로 닫지 않게)
+  setTimeout(
+    () => document.addEventListener("click", onDocClickForFlyout, true),
+    0,
+  );
+}
+
+// 포맷을 고를 때마다 새 빈 드래프트를 하나 더 만든다 — 트리에 "(빈 문서)",
+// "(빈 문서2)"… 로 늘어난다.
+function startDraft(type) {
+  const localId = createDraft(type);
+  renderDocTree(); // 왼쪽 트리에 바로 뜨게
+  location.hash = `#/draft/${type}/${localId}`;
+}
+
+// 헤더 제목 = id 소스(테이블/커맨드/스킬명) 클릭-투-편집. "이름"이 곧 문서 제목.
+function idSourceField(type, body, onIdChange) {
+  if (type === "db-schema")
+    return eField(() => body.table, (v) => (body.table = v), {
+      mono: true,
+      upper: true,
+      title: true,
+      placeholder: "테이블명 클릭해서 입력 (예: FDC_SENSOR)",
+      onChange: onIdChange,
+    });
+  if (type === "msg-format")
+    return eField(() => body.command, (v) => (body.command = v), {
+      mono: true,
+      upper: true,
+      title: true,
+      placeholder: "커맨드명 클릭해서 입력 (예: CMD_START_LOT)",
+      onChange: onIdChange,
+    });
+  return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
+    mono: true,
+    title: true,
+    placeholder: "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+    onChange: onIdChange,
+  });
+}
+
+// ---- 드래프트 화면 (인라인 클릭-투-편집) ----
+function renderDraftScreen(type, localId) {
+  const section = $("draft");
+  const body = getDraftBody(localId);
+  // 드래프트가 없어졌으면(저장/취소/잘못된 링크) 개요로.
+  if (!DOC_TYPES.includes(type) || body == null) {
+    location.hash = "#/corpus";
+    return;
+  }
+  const persist = () => saveDraftBody(localId, body);
+  const rerender = () => {
+    persist();
+    renderDraftScreen(type, localId);
+  };
+
+  const saveBtn = el("button", {
+    type: "button",
+    class: "btn primary",
+    text: "저장 (비활성)",
+    onclick: () => saveDraft(type, localId, body),
+  });
+  function updateSave() {
+    const id = deriveDraftId(type, body);
+    saveBtn.disabled = !id;
+    saveBtn.title = id
+      ? "이 드래프트를 비활성 문서로 저장합니다."
+      : "제목(테이블/커맨드/스킬명)을 먼저 입력해야 저장할 수 있습니다.";
+  }
+  const onIdChange = () => {
+    persist();
+    updateSave();
+    renderDocTree(); // 트리 라벨을 "(빈 문서)" → 새 제목으로 갱신
+  };
+
+  // 헤더 제목 = id 소스 클릭-투-편집. 여기에 바로 이름을 친다.
+  const head = el("div", { class: "dfhead" }, [
+    el("span", { class: "df-badge", text: "드래프트 · 저장 안 됨" }),
+    el("span", { class: "dftitle-wrap" }, idSourceField(type, body, onIdChange)),
+    el("span", { class: "chip", text: type }),
+    el("span", { class: "sp" }),
+    el("button", {
+      type: "button",
+      class: "btn ghost",
+      text: "취소",
+      onclick: () => {
+        deleteDraft(localId);
+        toast("드래프트를 버렸습니다.");
+        renderDocTree();
+        location.hash = "#/corpus";
+      },
+    }),
+    saveBtn,
+  ]);
+  const note = el("div", { class: "df-note" }, [
+    el("b", { text: "로컬 드래프트입니다 — 아직 서버에 저장되지 않았습니다." }),
+    " 이름과 팩트를 채우고 ",
+    el("b", { text: "저장" }),
+    " 하면 비활성 문서로 올라갑니다. 설명 등 나머지는 저장 후 문서 화면에서 채우고, ",
+    el("b", { text: "완성되면 활성화" }),
+    " 하세요.",
+  ]);
+
+  const fields =
+    type === "db-schema"
+      ? draftDbSchema(body, onIdChange, persist, rerender)
+      : type === "msg-format"
+        ? draftMsgFormat(body, onIdChange, persist, rerender)
+        : draftDomainSkill(body, onIdChange, persist, rerender);
+
+  section.replaceChildren(head, note, fields);
+  updateSave();
+}
+
+// 클릭-투-편집 텍스트 (제자리 스왑, 전체 재렌더 없음). onChange 는 커밋 후 호출.
+function eField(get, set, opts = {}) {
+  const wrap = el("span", { class: "df-v" });
+  function showRead() {
+    const val = get();
+    const has = val != null && String(val) !== "";
+    const btn = el("button", {
+      type: "button",
+      class: `df-click${opts.mono ? " mono" : ""}${opts.title ? " df-title" : ""}${has ? "" : " empty"}`,
+      text: has ? String(val) : opts.placeholder || "클릭해서 입력",
+      onclick: showEdit,
+    });
+    wrap.replaceChildren(btn);
+  }
+  function showEdit() {
+    const val = get();
+    const has = val != null && String(val) !== "";
+    const inp = el(opts.area ? "textarea" : "input", {
+      class: `df-inp${opts.mono ? " mono" : ""}${opts.title ? " df-title" : ""}`,
+      ...(opts.area ? { rows: 2 } : { type: "text" }),
+      placeholder: opts.placeholder || "",
+    });
+    inp.value = has ? String(val) : "";
+    const commit = () => {
+      let v = inp.value.trim();
+      if (opts.upper) v = v.toUpperCase();
+      set(v);
+      opts.onChange?.();
+      showRead();
+    };
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !opts.area) {
+        e.preventDefault();
+        commit();
+      } else if (e.key === "Escape") {
+        showRead();
+      }
+    });
+    inp.addEventListener("blur", commit);
+    wrap.replaceChildren(inp);
+    inp.focus();
+  }
+  showRead();
+  return wrap;
+}
+function eSelect(get, set, options, onChange) {
+  const sel = el("select", { class: "df-inp" });
+  for (const o of options) sel.appendChild(el("option", { value: o.value }, o.label));
+  sel.value = get() || options[0].value;
+  sel.addEventListener("change", () => {
+    set(sel.value);
+    onChange?.();
+  });
+  return sel;
+}
+function eCheck(get, set) {
+  const inp = el("input", { type: "checkbox" });
+  inp.checked = !!get();
+  inp.addEventListener("change", () => set(inp.checked));
+  return inp;
+}
+function dfRow(label, required, control) {
+  return el("div", { class: "df-row" }, [
+    el("span", { class: "df-k" }, [
+      label,
+      required ? el("span", { class: "req", text: "*" }) : null,
+    ]),
+    control,
+  ]);
+}
+
+// ---- db-schema 드래프트 폼 ----
+function draftDbSchema(body, onIdChange, persist, rerender) {
+  body.columns = body.columns || [];
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "owner",
+      false,
+      eField(() => body.owner, (v) => (body.owner = v || undefined), {
+        mono: true,
+        upper: true,
+        placeholder: "선택 (예: TESTUSER)",
+        onChange: persist,
+      }),
+    ),
+  );
+  wrap.append(el("div", { class: "df-sec", text: "컬럼" }));
+  const table = el("table", { class: "df-tbl" }, [
+    el(
+      "thead",
+      {},
+      el("tr", {}, [
+        el("th", { text: "컬럼명" }),
+        el("th", { text: "타입" }),
+        el("th", { class: "df-cell-check", text: "NULL" }),
+        el("th", { class: "df-cell-check", text: "PK" }),
+        el("th", { text: "" }),
+      ]),
+    ),
+    el(
+      "tbody",
+      {},
+      body.columns.map((c, i) =>
+        el("tr", {}, [
+          el("td", {}, eField(() => c.name, (v) => (c.name = v), { mono: true, upper: true, placeholder: "이름", onChange: persist })),
+          el("td", {}, eField(() => c.type, (v) => (c.type = v), { mono: true, upper: true, placeholder: "타입", onChange: persist })),
+          el("td", { class: "df-cell-check" }, eCheck(() => c.nullable, (v) => { c.nullable = v; persist(); })),
+          el("td", { class: "df-cell-check" }, eCheck(() => c.pk, (v) => { c.pk = v; persist(); })),
+          el("td", {}, el("button", { type: "button", class: "df-rm", text: "✕", title: "행 삭제", onclick: () => { body.columns.splice(i, 1); rerender(); } })),
+        ]),
+      ),
+    ),
+  ]);
+  wrap.append(table);
+  wrap.append(
+    el("button", {
+      type: "button",
+      class: "btn ghost sm df-add",
+      text: "+ 컬럼",
+      onclick: () => {
+        body.columns.push({ name: "", type: "", nullable: false, pk: false });
+        rerender();
+      },
+    }),
+  );
+  wrap.append(
+    el("p", { class: "fhint", text: "타입·NULL·PK 는 팩트입니다. 컬럼 설명·용도(purpose)는 저장 후 문서 화면에서 채웁니다." }),
+  );
+  return wrap;
+}
+
+// ---- msg-format 드래프트 폼 ----
+function draftMsgFormat(body, onIdChange, persist, rerender) {
+  body.fields = body.fields || [];
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "direction",
+      true,
+      eSelect(
+        () => body.direction,
+        (v) => (body.direction = v),
+        [
+          { value: "host->equipment", label: "host → equipment" },
+          { value: "equipment->host", label: "equipment → host" },
+        ],
+        persist,
+      ),
+    ),
+  );
+  wrap.append(el("div", { class: "df-sec", text: "필드" }));
+  const table = el("table", { class: "df-tbl" }, [
+    el(
+      "thead",
+      {},
+      el("tr", {}, [
+        el("th", { text: "#" }),
+        el("th", { text: "필드명" }),
+        el("th", { text: "타입" }),
+        el("th", { class: "df-cell-check", text: "필수" }),
+        el("th", { text: "" }),
+      ]),
+    ),
+    el(
+      "tbody",
+      {},
+      body.fields.map((f, i) =>
+        el("tr", {}, [
+          el("td", { class: "df-cell-check", text: String(i + 1) }),
+          el("td", {}, eField(() => f.name, (v) => (f.name = v), { mono: true, placeholder: "이름", onChange: persist })),
+          el("td", {}, eField(() => f.type, (v) => (f.type = v), { mono: true, placeholder: "타입", onChange: persist })),
+          el("td", { class: "df-cell-check" }, eCheck(() => f.required, (v) => { f.required = v; persist(); })),
+          el("td", {}, el("button", { type: "button", class: "df-rm", text: "✕", onclick: () => { body.fields.splice(i, 1); rerender(); } })),
+        ]),
+      ),
+    ),
+  ]);
+  wrap.append(table);
+  wrap.append(
+    el("button", {
+      type: "button",
+      class: "btn ghost sm df-add",
+      text: "+ 필드",
+      onclick: () => {
+        body.fields.push({ name: "", type: "", required: false });
+        rerender();
+      },
+    }),
+  );
+  wrap.append(
+    el("p", { class: "fhint", text: "필드 설명·용도(purpose)는 저장 후 문서 화면에서 채웁니다." }),
+  );
+  return wrap;
+}
+
+// ---- domain-skill 드래프트 폼 (핵심 필드; 나머지는 저장 후 문서 화면) ----
+function draftDomainSkill(body, onIdChange, persist, rerender) {
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "argument-hint",
+      false,
+      eField(() => body.argumentHint, (v) => (body.argumentHint = v), {
+        placeholder: "예: <센서 ID>",
+        onChange: persist,
+      }),
+    ),
+    dfRow(
+      "focus",
+      false,
+      eField(() => body.focus, (v) => (body.focus = v), {
+        placeholder: "한 줄 — 이 스킬의 초점",
+        onChange: persist,
+      }),
+    ),
+    dfRow(
+      "intro",
+      false,
+      eField(() => body.intro, (v) => (body.intro = v), {
+        area: true,
+        placeholder: "실행 도입부 — 이 스킬이 무엇을 하는지",
+        onChange: persist,
+      }),
+    ),
+  );
+  wrap.append(
+    el("p", { class: "fhint", text: "scope·조회 절차(steps)·출력 등 나머지는 저장 후 문서 화면에서 채웁니다. 활성화하려면 전부 채워야 합니다." }),
+  );
+  return wrap;
+}
+
+// ---- 저장: 드래프트 → inactive 문서 POST ----
+function finalizeDraftBody(type, body) {
+  if (type === "db-schema") {
+    const columns = (body.columns || [])
+      .filter((c) => c.name)
+      .map((c) => ({ name: c.name, type: c.type || "", nullable: !!c.nullable }));
+    const columnDescs = {};
+    for (const c of columns) columnDescs[c.name] = { text: null, tier: "scaffold" };
+    return {
+      ...(body.owner ? { owner: body.owner } : {}),
+      table: body.table,
+      catalog: {
+        columns,
+        primaryKey: (body.columns || []).filter((c) => c.name && c.pk).map((c) => c.name),
+        fetchedAt: nowIso(),
+      },
+      purpose: { text: null, tier: "scaffold" },
+      columnDescs,
+    };
+  }
+  if (type === "msg-format") {
+    const fields = (body.fields || [])
+      .filter((f) => f.name)
+      .map((f, i) => ({
+        seq: i + 1,
+        name: f.name,
+        type: f.type || "",
+        required: !!f.required,
+        desc: { text: null, tier: "scaffold" },
+      }));
+    return {
+      command: body.command,
+      direction: body.direction || "host->equipment",
+      purpose: { text: null, tier: "scaffold" },
+      fields,
+    };
+  }
+  // domain-skill: 채워진 것만 + 문서 화면이 접근하는 컨테이너는 안전한 빈 값으로
+  const b = { name: body.name };
+  if (body.argumentHint) b.argumentHint = body.argumentHint;
+  if (body.focus) b.focus = body.focus;
+  if (body.intro) b.intro = body.intro;
+  b.scope = body.scope || {};
+  b.inputs = [];
+  b.dependencies = [];
+  b.steps = [];
+  b.output = { avoid: [], examples: [] };
+  return b;
+}
+
+async function saveDraft(type, localId, body) {
+  const id = deriveDraftId(type, body);
+  if (!id) {
+    toast("제목(테이블/커맨드/스킬명)을 먼저 입력하세요.", "error");
+    return;
+  }
+  const doc = {
+    schema: `${type}/v1`,
+    id,
+    keywords: [{ kw: id, inject: "full" }],
+    status: "inactive",
+    body: finalizeDraftBody(type, body),
+  };
+  const r = await api(`/api/docs/${type}`, { method: "POST", body: doc });
+  if (r.status === 201) {
+    deleteDraft(localId);
+    toast("저장했습니다 — 비활성 문서입니다. 이어서 채우고 완성되면 활성화하세요.");
+    await renderDocTree();
+    location.hash = `#/doc/${type}/${encodeURIComponent(id)}`;
+    return;
+  }
+  if (r.status === 409) {
+    toast(`이미 같은 이름(${id})의 문서가 있습니다.`, "error");
+    return;
+  }
+  if (r.status === 400) {
+    const d = r.data || {};
+    const msg =
+      d.error === "validation_failed"
+        ? (d.details || []).join(" · ")
+        : d.error === "edit_rejected"
+          ? d.message
+          : d.error || "";
+    toast("저장 실패: " + msg, "error");
+    return;
+  }
+  toast(`저장 실패 (${r.status || "네트워크"})`, "error");
 }
 
 // ---------- boot ----------
