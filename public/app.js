@@ -103,15 +103,68 @@ const COPY_GLYPH =
   "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25v-7.5Z" +
   "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25v-7.5Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25h-7.5Z";
 
+// 확인 모달 — 네이티브 confirm() 은 시스템 창이라 화면 결이 깨진다(사용자
+// 피드백). 앱 디자인 언어의 다이얼로그로: Esc·바깥 클릭·취소 = false,
+// 확인 버튼(라벨 = 도착 상태) = true. CSP-safe(el/addEventListener 만).
+function confirmModal({ title, lines, confirmLabel, confirmClass }) {
+  return new Promise((resolve) => {
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        done(false);
+      }
+    };
+    const cancelBtn = el("button", {
+      type: "button",
+      class: "btn ghost",
+      text: "취소",
+      onclick: () => done(false),
+    });
+    const box = el(
+      "div",
+      { class: "cfm", role: "alertdialog", "aria-modal": "true", "aria-label": title },
+      [
+        el("div", { class: "cfm-title", text: title }),
+        el("div", { class: "cfm-body" }, (lines || []).map((l) => el("p", { text: l }))),
+        el("div", { class: "cfm-actions" }, [
+          cancelBtn,
+          el("button", {
+            type: "button",
+            class: `btn ${confirmClass || "primary"}`,
+            text: confirmLabel || "확인",
+            onclick: () => done(true),
+          }),
+        ]),
+      ],
+    );
+    const overlay = el("div", { class: "cfm-overlay" }, [box]);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    cancelBtn.focus(); // 위험 동작이므로 기본 포커스는 취소
+  });
+}
+
 // 문서 삭제 = 소프트 아카이브(서버 §6 DELETE, approver 전용). 목록·검색·주입
 // 인덱스에서 빠지고 store JSON + git 이력에는 archived 로 남는다. 버튼 이름은
 // 사용자 언어로 "삭제", 실제 의미(보관)는 툴팁·확인창이 말한다.
 async function archiveDocAction(type, id) {
-  const sure = confirm(
-    `"${id}" 문서를 삭제할까요?\n\n` +
-      "목록·검색·세션 주입에서 빠집니다.\n" +
-      "store 파일과 git 이력에는 archived 상태로 남습니다(복구는 관리자 작업).",
-  );
+  const sure = await confirmModal({
+    title: `${id} 문서를 삭제할까요?`,
+    lines: [
+      "목록·검색·세션 주입에서 빠집니다.",
+      "store 파일과 git 이력에는 archived 상태로 남습니다 — 복구는 관리자 작업입니다.",
+    ],
+    confirmLabel: "삭제",
+    confirmClass: "danger",
+  });
   if (!sure) return;
   const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}`, {
     method: "DELETE",
