@@ -2257,10 +2257,11 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   let installAside = null;
   if (md) {
     const dest = `~/.claude/skills/${s.name}`;
+    // 두 줄 평문(연속행 \ 없음) — 좁은 패널은 pre-wrap 소프트랩이라 \ 가
+    // 혼자 남은 줄을 만든다. 붙여넣기도 명령 2개가 그대로 2줄.
     const installCmd =
       `mkdir -p ${dest}\n` +
-      `curl -fsS "${location.origin}/api/docs/domain-skill/${encodeURIComponent(doc.id)}?format=md" \\\n` +
-      `  -o ${dest}/SKILL.md`;
+      `curl -fsS "${location.origin}/api/docs/domain-skill/${encodeURIComponent(doc.id)}?format=md" -o ${dest}/SKILL.md`;
     installAside = el("aside", { class: "sk-aside" }, [
       el("div", { class: "sk-install" }, [
         el("div", { class: "sk-install-top" }, [
