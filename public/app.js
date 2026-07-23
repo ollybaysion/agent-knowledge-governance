@@ -152,6 +152,14 @@ function confirmModal({ title, lines, confirmLabel, confirmClass }) {
   });
 }
 
+// 드래프트에 지운 게 아까울 내용이 있는지 — 빈 드래프트 취소는 묻지 않는다.
+function draftHasContent(v) {
+  if (v == null) return false;
+  if (typeof v === "string") return v.trim() !== "";
+  if (typeof v === "object") return Object.values(v).some(draftHasContent);
+  return true; // number/bool 등 — 사람이 만진 값
+}
+
 // 문서 삭제 = 소프트 아카이브(서버 §6 DELETE, approver 전용). 목록·검색·주입
 // 인덱스에서 빠지고 store JSON + git 이력에는 archived 로 남는다. 버튼 이름은
 // 사용자 언어로 "삭제", 실제 의미(보관)는 툴팁·확인창이 말한다.
@@ -914,7 +922,20 @@ async function renderDocScreen(type, id) {
         el("button", {
           type: "button",
           class: "btn danger sm",
-          onclick: () => slotAction("폐기", slot.address, "deprecate"),
+          // 위험 동작 확인은 confirmModal 로 통일(사용자 결정) — 폐기가
+          // 무엇을 남기고 무엇을 끊는지 그 자리에서 말한다.
+          onclick: async () => {
+            const sure = await confirmModal({
+              title: `${slot.address} 슬롯을 폐기할까요?`,
+              lines: [
+                "내용과 근거는 보존되지만 렌더·세션 주입에서 빠집니다.",
+                "복원하면 추정으로 돌아가 재검토 후에만 다시 확정할 수 있습니다.",
+              ],
+              confirmLabel: "폐기",
+              confirmClass: "danger",
+            });
+            if (sure) slotAction("폐기", slot.address, "deprecate");
+          },
           text: "폐기",
         }),
       );
@@ -2640,7 +2661,15 @@ async function renderQueue() {
         el("button", {
           type: "button",
           class: "btn danger",
-          onclick: () => reject(p),
+          onclick: async () => {
+            const sure = await confirmModal({
+              title: "이 제안을 기각할까요?",
+              lines: ["제안은 대기열에서 사라지고 문서는 바뀌지 않습니다."],
+              confirmLabel: "기각",
+              confirmClass: "danger",
+            });
+            if (sure) reject(p);
+          },
           text: "기각",
         }),
       ]),
@@ -3161,7 +3190,18 @@ function renderDraftScreen(type, localId) {
       type: "button",
       class: "btn ghost",
       text: "취소",
-      onclick: () => {
+      onclick: async () => {
+        // 내용이 있으면 confirmModal 로 확인(위험 동작 통일) — 로컬 전용이라
+        // 버리면 어디에도 안 남는다는 걸 그 자리에서 말한다.
+        if (draftHasContent(body)) {
+          const sure = await confirmModal({
+            title: "드래프트를 버릴까요?",
+            lines: ["입력한 내용은 저장되지 않고 사라집니다."],
+            confirmLabel: "버리기",
+            confirmClass: "danger",
+          });
+          if (!sure) return;
+        }
         deleteDraft(localId);
         toast("드래프트를 버렸습니다.");
         renderDocTree();
