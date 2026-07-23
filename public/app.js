@@ -103,6 +103,27 @@ const COPY_GLYPH =
   "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25v-7.5Z" +
   "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25v-7.5Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25h-7.5Z";
 
+// 문서 삭제 = 소프트 아카이브(서버 §6 DELETE, approver 전용). 목록·검색·주입
+// 인덱스에서 빠지고 store JSON + git 이력에는 archived 로 남는다. 버튼 이름은
+// 사용자 언어로 "삭제", 실제 의미(보관)는 툴팁·확인창이 말한다.
+async function archiveDocAction(type, id) {
+  const sure = confirm(
+    `"${id}" 문서를 삭제할까요?\n\n` +
+      "목록·검색·세션 주입에서 빠집니다.\n" +
+      "store 파일과 git 이력에는 archived 상태로 남습니다(복구는 관리자 작업).",
+  );
+  if (!sure) return;
+  const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (r.ok) {
+    toast("문서를 삭제(보관)했습니다.");
+    await renderDocTree();
+    location.hash = "#/corpus";
+  } else if (r.status === 403) toast("approver 권한이 필요합니다.", "error");
+  else toast(`삭제 실패 (${r.status})`, "error");
+}
+
 // md 복사 아이콘 버튼 — 모든 포맷 문서 공통(사용자 결정). 렌더된 md 원문을
 // 클립보드로. localhost/https 는 바로 되고, http 배포에서 클립보드가 막히면
 // 안내 토스트(기존 복사 버튼들과 동일한 폴백 규율).
@@ -1341,6 +1362,10 @@ async function renderDocScreen(type, id) {
             }
           : null,
         jsonOpen,
+        // 문서 삭제(소프트 아카이브) — db-schema 뷰 dochead 와 같은 버튼.
+        canApprove && doc.status !== "archived"
+          ? () => archiveDocAction(type, id)
+          : null,
       );
       section.replaceChildren(
         jsonOpen
@@ -1511,6 +1536,21 @@ async function renderDocScreen(type, id) {
               "JSON",
             )
           : null,
+        // 문서 삭제(소프트 아카이브) — approver 전용, 서버 DELETE 라우트의
+        // FE 노출(지금까지 버튼이 없어 API 로만 가능했다).
+        canApprove && doc.status !== "archived"
+          ? el(
+              "button",
+              {
+                type: "button",
+                class: "btn danger sm",
+                title:
+                  "문서를 보관(archived)으로 내립니다 — 목록·주입에서 빠지고 store·이력에는 남습니다.",
+                onclick: () => archiveDocAction(type, id),
+              },
+              "삭제",
+            )
+          : null,
       ]),
       // Say it on the document itself. Someone reading an inactive doc is
       // deciding whether to turn it on; the badge alone does not tell them
@@ -1669,7 +1709,7 @@ async function renderDocScreen(type, id) {
 }
 
 // domain-skill: editorial reading view (prototype .skwrap), read-only in v1
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, onArchive) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
   // Only one inline editor open at a time. A dirty editor blocks opening
@@ -2103,6 +2143,19 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
               onclick: onToggleJson,
             },
             "JSON",
+          )
+        : null,
+      onArchive
+        ? el(
+            "button",
+            {
+              type: "button",
+              class: "btn danger sm",
+              title:
+                "문서를 보관(archived)으로 내립니다 — 목록·주입에서 빠지고 store·이력에는 남습니다.",
+              onclick: onArchive,
+            },
+            "삭제",
           )
         : null,
     ]),
