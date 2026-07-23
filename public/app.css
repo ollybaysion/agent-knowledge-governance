@@ -1382,9 +1382,6 @@ ol.steps > li p {
   top: 14px;
   margin-top: 46px; /* 본문 eyebrow~제목 높이만큼 내려 시선 나란히 */
 }
-.install-btn {
-  width: 100%;
-}
 /* 버튼을 눌러야 열리는 명령+안내 패널 */
 .install-pop {
   display: none;

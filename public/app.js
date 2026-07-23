@@ -2291,7 +2291,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       "button",
       {
         type: "button",
-        class: "btn primary install-btn",
+        class: "btn primary sm install-btn",
         "aria-expanded": "false",
         onclick: async () => {
           const opening = !panel.classList.contains("on");
