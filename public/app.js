@@ -2251,8 +2251,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   // 엔드포인트(?format=md)를 직접 받으므로 출발지 추측이 없다. 목적지는
   // ~/.claude/skills 고정 안내(CC·opencode 공통 탐색 경로, install-skills.mjs 와
   // 동일) — 다른 경로를 쓰는 사람은 명령의 경로만 바꾼다(분기 없음).
-  // AKG_ANON_READ=0 배포에서는 Authorization 헤더가 필요하므로 힌트 한 줄을
-  // 함께 보인다 — 실토큰은 절대 카피 텍스트에 넣지 않는다($AKG_TOKEN 참조만).
+  // 카드는 제목+명령+복사뿐, 안내 산문 없음(사용자 결정 — "글은 필요 없고
+  // 명령어만"). AKG_ANON_READ=0 배포는 이 curl 이 401 — 그 배포의 사용자는
+  // -H 'Authorization: Bearer …' 를 스스로 붙인다(실토큰·힌트 모두 UI에 없음).
   let installAside = null;
   if (md) {
     const dest = `~/.claude/skills/${s.name}`;
@@ -2264,11 +2265,6 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       el("div", { class: "sk-install" }, [
         el("div", { class: "sk-install-top" }, [
           el("h2", { class: "sk-h", text: "설치" }),
-        ]),
-        el("p", { class: "dim install-lead" }, [
-          "아래 명령 하나로 설치합니다 — Claude Code·opencode 모두 ",
-          el("code", { text: "~/.claude/skills" }),
-          " 를 읽습니다. 다른 경로를 쓰면 그 부분만 바꾸세요.",
         ]),
         el("div", { class: "install-cmd-wrap" }, [
           el("pre", { class: "install-cmd", text: installCmd }),
@@ -2286,15 +2282,6 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
             text: "복사",
           }),
         ]),
-        el("p", { class: "dim install-note" }, [
-          "토큰이 필요한 서버면 curl 에 ",
-          el("code", { text: '-H "Authorization: Bearer $AKG_TOKEN"' }),
-          " 을 추가하세요.",
-        ]),
-        el("p", {
-          class: "dim",
-          text: "설치 후 새 세션(또는 스킬 새로고침)부터 이 스킬을 쓸 수 있습니다.",
-        }),
       ]),
     ]);
   }

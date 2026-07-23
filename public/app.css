@@ -1396,13 +1396,6 @@ ol.steps > li p {
 .sk-install-top .sk-h {
   margin: 0;
 }
-.install-note {
-  font-size: 12px;
-  margin: 6px 0 0;
-}
-.install-note code {
-  font-family: var(--mono);
-}
 /* 승인자 JSON 분할이 열리면 3열이 되므로 1열로 접는다 — 패널이 본문 아래로
    흐른다(숨기지 않음). */
 .doc-split.open .sk-layout {
@@ -1421,13 +1414,6 @@ ol.steps > li p {
     position: static;
     margin-top: 0;
   }
-}
-.install-lead {
-  font-size: 13px;
-  margin: 6px 0 0;
-}
-.install-lead code {
-  font-family: var(--mono);
 }
 .install-cmd-wrap {
   position: relative;
