@@ -2251,9 +2251,12 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   // 엔드포인트(?format=md)를 직접 받으므로 출발지 추측이 없다. 목적지는
   // ~/.claude/skills 고정 안내(CC·opencode 공통 탐색 경로, install-skills.mjs 와
   // 동일) — 다른 경로를 쓰는 사람은 명령의 경로만 바꾼다(분기 없음).
-  // 카드는 제목+명령+복사뿐, 안내 산문 없음(사용자 결정 — "글은 필요 없고
-  // 명령어만"). AKG_ANON_READ=0 배포는 이 curl 이 401 — 그 배포의 사용자는
-  // -H 'Authorization: Bearer …' 를 스스로 붙인다(실토큰·힌트 모두 UI에 없음).
+  // UI는 버튼 하나(사용자 결정 — "버튼 하나로, 누르면 명령과 실행 안내만").
+  // 누르면 명령을 클립보드에 복사하고 명령+한 줄 안내 패널을 연다(원클릭:
+  // 누르고 → 터미널에 붙여넣으면 끝). AKG_ANON_READ=0 배포는 이 curl 이 401 —
+  // 그 배포의 사용자는 -H 'Authorization: Bearer …' 를 스스로 붙인다(실토큰·
+  // 힌트 모두 UI에 없음). navigator.clipboard 는 secure context 전용이라 사내
+  // http 배포에선 자동 복사가 실패할 수 있다 — 패널의 명령을 직접 선택하면 된다.
   let installAside = null;
   if (md) {
     const dest = `~/.claude/skills/${s.name}`;
@@ -2262,28 +2265,52 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     const installCmd =
       `mkdir -p ${dest}\n` +
       `curl -fsS "${location.origin}/api/docs/domain-skill/${encodeURIComponent(doc.id)}?format=md" -o ${dest}/SKILL.md`;
-    installAside = el("aside", { class: "sk-aside" }, [
-      el("div", { class: "sk-install" }, [
-        el("div", { class: "sk-install-top" }, [
-          el("h2", { class: "sk-h", text: "설치" }),
-        ]),
-        el("div", { class: "install-cmd-wrap" }, [
-          el("pre", { class: "install-cmd", text: installCmd }),
-          el("button", {
-            type: "button",
-            class: "btn ghost sm copy-btn",
-            onclick: async () => {
-              try {
-                await navigator.clipboard.writeText(installCmd);
-                toast("복사했습니다", "");
-              } catch {
-                toast("복사 실패 — 명령을 직접 선택해 복사하세요", "error");
-              }
-            },
-            text: "복사",
-          }),
-        ]),
+    const panel = el("div", { class: "install-pop" }, [
+      el("div", { class: "install-cmd-wrap" }, [
+        el("pre", { class: "install-cmd", text: installCmd }),
+        el("button", {
+          type: "button",
+          class: "btn ghost sm copy-btn",
+          onclick: async () => {
+            try {
+              await navigator.clipboard.writeText(installCmd);
+              toast("복사했습니다", "");
+            } catch {
+              toast("복사 실패 — 명령을 직접 선택해 복사하세요", "error");
+            }
+          },
+          text: "복사",
+        }),
       ]),
+      el("p", {
+        class: "dim install-how",
+        text: "터미널에 붙여넣어 실행하면 설치됩니다 — 새 세션부터 적용.",
+      }),
+    ]);
+    const installBtn = el(
+      "button",
+      {
+        type: "button",
+        class: "btn primary install-btn",
+        "aria-expanded": "false",
+        onclick: async () => {
+          const opening = !panel.classList.contains("on");
+          panel.classList.toggle("on", opening);
+          installBtn.setAttribute("aria-expanded", opening ? "true" : "false");
+          if (!opening) return;
+          try {
+            await navigator.clipboard.writeText(installCmd);
+            toast("설치 명령을 복사했습니다 — 터미널에 붙여넣어 실행하세요", "");
+          } catch {
+            toast("아래 명령을 직접 선택해 복사하세요", "");
+          }
+        },
+      },
+      "이 스킬 설치",
+    );
+    installAside = el("aside", { class: "sk-aside", "aria-label": "스킬 설치" }, [
+      installBtn,
+      panel,
     ]);
   }
 

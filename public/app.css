@@ -1382,19 +1382,24 @@ ol.steps > li p {
   top: 14px;
   margin-top: 46px; /* 본문 eyebrow~제목 높이만큼 내려 시선 나란히 */
 }
-.sk-install {
-  padding: 14px 16px;
+.install-btn {
+  width: 100%;
+}
+/* 버튼을 눌러야 열리는 명령+안내 패널 */
+.install-pop {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: var(--surface-soft);
 }
-.sk-install-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.install-pop.on {
+  display: block;
 }
-.sk-install-top .sk-h {
-  margin: 0;
+.install-how {
+  font-size: 12px;
+  margin: 8px 0 0;
 }
 /* 승인자 JSON 분할이 열리면 3열이 되므로 1열로 접는다 — 패널이 본문 아래로
    흐른다(숨기지 않음). */
