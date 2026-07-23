@@ -1386,6 +1386,22 @@ ol.steps > li p {
   top: 14px;
   margin-top: 46px; /* 본문 eyebrow~제목 높이만큼 내려 시선 나란히 */
 }
+/* 아이콘 버튼 공통(설치·md 복사) — 이름은 title/aria-label 이 든다 */
+.icon-only {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-only svg {
+  display: block;
+}
+.sk-aside-btns {
+  display: flex;
+  gap: 6px;
+}
 /* 버튼을 눌러야 열리는 명령+안내 패널 */
 .install-pop {
   display: none;
@@ -2093,6 +2109,20 @@ button.pchip:hover {
 }
 #toast .api {
   color: var(--teal-ink);
+}
+/* 오류 토스트 — 제목 + 항목별 줄(errToast). 본문 잉크는 유지하고 제목만
+   error 색으로, 목록은 왼쪽 정렬(가운데 정렬 목록은 행 시작점이 들쭉난다). */
+#toast .error .err-title {
+  font-weight: 600;
+  color: var(--error-ink);
+}
+#toast .error .err-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  text-align: left;
+}
+#toast .error .err-list li {
+  margin: 2px 0;
 }
 @media (prefers-reduced-motion: reduce) {
   #toast {

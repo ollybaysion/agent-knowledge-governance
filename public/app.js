@@ -59,6 +59,74 @@ function toast(message, klass) {
   toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
 }
 
+// 오류 토스트 — 검증 상세를 줄 단위 목록으로 보여준다(한 줄로 이어붙이면
+// 읽기 어렵다는 사용자 피드백). 읽을 게 많으므로 표시도 더 오래 유지한다.
+function errToast(title, details) {
+  const t = $("toast");
+  t.replaceChildren(
+    el("div", { class: "error" }, [
+      el("div", { class: "err-title", text: title }),
+      details && details.length
+        ? el(
+            "ul",
+            { class: "err-list" },
+            details.map((m) => el("li", { text: String(m) })),
+          )
+        : null,
+    ]),
+  );
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 10000);
+}
+
+// ---------- 아이콘 (CSP-safe: DOM 으로 만든 인라인 SVG, currentColor) ----------
+function svgIcon(d) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "15");
+  svg.setAttribute("height", "15");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+// 다운로드 글리프: 아래 화살표 + 받침 트레이
+const DL_GLYPH =
+  "M7.25 1.75a.75.75 0 0 1 1.5 0v6.44l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V1.75Z" +
+  "M2.5 10.75a.75.75 0 0 0-1.5 0v2.5c0 .966.784 1.75 1.75 1.75h10.5A1.75 1.75 0 0 0 15 13.25v-2.5a.75.75 0 0 0-1.5 0v2.5a.25.25 0 0 1-.25.25H2.75a.25.25 0 0 1-.25-.25v-2.5Z";
+// 복사 글리프: 겹친 사각형 두 장
+const COPY_GLYPH =
+  "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25v-7.5Z" +
+  "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25v-7.5Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25h-7.5Z";
+
+// md 복사 아이콘 버튼 — 모든 포맷 문서 공통(사용자 결정). 렌더된 md 원문을
+// 클립보드로. localhost/https 는 바로 되고, http 배포에서 클립보드가 막히면
+// 안내 토스트(기존 복사 버튼들과 동일한 폴백 규율).
+function mdCopyBtn(md, what) {
+  return el(
+    "button",
+    {
+      type: "button",
+      class: "btn ghost sm icon-only",
+      "aria-label": `${what} 복사`,
+      title: `${what} 복사`,
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(md);
+          toast(`${what} 내용을 복사했습니다`, "");
+        } catch {
+          toast("복사 실패 — 브라우저가 클립보드를 막았습니다", "error");
+        }
+      },
+    },
+    [svgIcon(COPY_GLYPH)],
+  );
+}
+
 // ---------- JSON 보기 패널 (승인자 전용 — 문서를 좌우로 갈라 원본 store JSON) ----------
 // 모달로 문서를 덮지 않고, 문서 뷰를 좌우로 갈라 오른쪽에 붙인다 — 렌더된 문서와
 // 원본 JSON 을 나란히 대조하며 승격을 판단하게. renderInner 가 다시 그릴 때마다
@@ -1421,6 +1489,9 @@ async function renderDocScreen(type, id) {
         el("span", { class: "brk" }),
         ...keywordChips(doc.keywords || []),
         statusSwitch(),
+        // 렌더된 md 원문 복사 — 스킬 뷰의 SKILL.md 복사와 같은 버튼을 모든
+        // 포맷 문서에(사용자 결정 "다른 포맷 문서도 전부 해당").
+        md ? mdCopyBtn(md, "문서 md") : null,
         // 승인자는 렌더에 안 드러나는 필드(티어드 값의 by/at/evidence, catalog
         // 팩트)까지 원본 store JSON 으로 확인할 수 있다. 데이터는 이미 응답에
         // 있으므로 버튼만 더하는 열람 affordance(승인자 전용).
@@ -1626,13 +1697,13 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
     else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
     else {
+      // JSON.stringify 로 한 줄에 이어붙이지 않는다 — 검증 상세는 항목별
+      // 줄로(errToast). 코드는 사람 말로 바꿔 제목에 싣는다.
       const d = r.data || {};
-      toast(
-        `저장 실패 (${r.status})` +
-          (d.message ? " — " + d.message : "") +
-          (d.details ? " — " + JSON.stringify(d.details) : ""),
-        "error",
-      );
+      const why =
+        d.message ||
+        (d.error === "validation_failed" ? "형식 검증에 걸렸습니다" : d.error);
+      errToast(`저장 실패 (${r.status})${why ? " — " + why : ""}`, d.details);
     }
     return false;
   }
@@ -2333,17 +2404,21 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         text: "터미널에 붙여넣어 실행하면 설치됩니다 — 새 세션부터 적용.",
       }),
     ]);
+    // 아이콘 버튼(사용자 결정 — 텍스트 라벨 대신 아이콘만).
+    // 이름은 title/aria-label 로 — 아이콘만 남겨도 호버·스크린리더가 설명한다.
     const installBtn = el(
       "button",
       {
         type: "button",
-        class: "btn primary sm install-btn",
+        class: "btn primary sm install-btn icon-only",
         "aria-expanded": "false",
+        "aria-label": "이 스킬 설치",
+        title: "이 스킬 설치",
+        // 클릭 = 복사(패널 표시는 호버가 담당 — 아래 mouseenter/leave).
+        // 호버 없는 터치 환경을 위해 클릭도 패널을 열어 둔다.
         onclick: async () => {
-          const opening = !panel.classList.contains("on");
-          panel.classList.toggle("on", opening);
-          installBtn.setAttribute("aria-expanded", opening ? "true" : "false");
-          if (!opening) return;
+          panel.classList.add("on");
+          installBtn.setAttribute("aria-expanded", "true");
           try {
             await navigator.clipboard.writeText(installCmd);
             toast("설치 명령을 복사했습니다 — 터미널에 붙여넣어 실행하세요", "");
@@ -2352,12 +2427,33 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           }
         },
       },
-      "이 스킬 설치",
+      [svgIcon(DL_GLYPH)],
     );
     installAside = el("aside", { class: "sk-aside", "aria-label": "스킬 설치" }, [
-      installBtn,
+      el("div", { class: "sk-aside-btns" }, [
+        installBtn,
+        mdCopyBtn(md, "SKILL.md"),
+      ]),
       panel,
     ]);
+    // 호버 = 상세(명령+안내) 표시(사용자 결정): 올리면 즉시 열리고, 떠나면
+    // 0.1초 뒤 닫힘 — 아이콘→패널로 건너가는 짧은 이탈은 이 유예가 흡수한다.
+    // 대상은 설치 버튼·패널만 — 옆의 md 복사 버튼 호버로는 안 연다.
+    let hideTimer = null;
+    const setOpen = (on) => {
+      panel.classList.toggle("on", on);
+      installBtn.setAttribute("aria-expanded", on ? "true" : "false");
+    };
+    for (const n of [installBtn, panel]) {
+      n.addEventListener("mouseenter", () => {
+        clearTimeout(hideTimer);
+        setOpen(true);
+      });
+      n.addEventListener("mouseleave", () => {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => setOpen(false), 100);
+      });
+    }
   }
 
   // 본문(좌) + 설치 패널(우) — 스크롤 끝이 아니라 본문 오른쪽 빈 공간에 상시
@@ -3220,13 +3316,12 @@ async function saveDraft(type, localId, body) {
   }
   if (r.status === 400) {
     const d = r.data || {};
-    const msg =
+    const why =
       d.error === "validation_failed"
-        ? (d.details || []).join(" · ")
-        : d.error === "edit_rejected"
-          ? d.message
-          : d.error || "";
-    toast("저장 실패: " + msg, "error");
+        ? "형식 검증에 걸렸습니다"
+        : d.message || d.error || "";
+    // 검증 상세는 항목별 줄로 — " · " 한 줄 이어붙이기는 읽기 어렵다.
+    errToast(`저장 실패${why ? " — " + why : ""}`, d.details);
     return;
   }
   toast(`저장 실패 (${r.status || "네트워크"})`, "error");
