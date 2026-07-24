@@ -49,22 +49,6 @@ function el(tag, attrs, children) {
 }
 const $ = (id) => document.getElementById(id);
 
-// Save an in-memory string as a client-side download. No server round-trip: it
-// reuses text api() already fetched with the viewer's token, so it works the
-// same whether or not the deploy allows anonymous reads (AKG_ANON_READ) — a
-// bare <a href> to the md endpoint would 401 under AKG_ANON_READ=0 since anchors
-// carry no Authorization header. CSP-safe: a `download` anchor is not a fetch
-// the `default-src 'self'` policy governs.
-function downloadTextFile(filename, text, mime) {
-  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = el("a", { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 // ---------- toast (prototype pattern — reused for notices/errors) ----------
 let toastTimer = null;
 function toast(message, klass) {
@@ -73,6 +57,156 @@ function toast(message, klass) {
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
+}
+
+// 오류 토스트 — 검증 상세를 줄 단위 목록으로 보여준다(한 줄로 이어붙이면
+// 읽기 어렵다는 사용자 피드백). 읽을 게 많으므로 표시도 더 오래 유지한다.
+function errToast(title, details) {
+  const t = $("toast");
+  t.replaceChildren(
+    el("div", { class: "error" }, [
+      el("div", { class: "err-title", text: title }),
+      details && details.length
+        ? el(
+            "ul",
+            { class: "err-list" },
+            details.map((m) => el("li", { text: String(m) })),
+          )
+        : null,
+    ]),
+  );
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 10000);
+}
+
+// ---------- 아이콘 (CSP-safe: DOM 으로 만든 인라인 SVG, currentColor) ----------
+function svgIcon(d) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "15");
+  svg.setAttribute("height", "15");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+// 다운로드 글리프: 아래 화살표 + 받침 트레이
+const DL_GLYPH =
+  "M7.25 1.75a.75.75 0 0 1 1.5 0v6.44l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 0 1 1.06-1.06l2.22 2.22V1.75Z" +
+  "M2.5 10.75a.75.75 0 0 0-1.5 0v2.5c0 .966.784 1.75 1.75 1.75h10.5A1.75 1.75 0 0 0 15 13.25v-2.5a.75.75 0 0 0-1.5 0v2.5a.25.25 0 0 1-.25.25H2.75a.25.25 0 0 1-.25-.25v-2.5Z";
+// 복사 글리프: 겹친 사각형 두 장
+const COPY_GLYPH =
+  "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25v-7.5Z" +
+  "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25v-7.5Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25h-7.5Z";
+
+// 확인 모달 — 네이티브 confirm() 은 시스템 창이라 화면 결이 깨진다(사용자
+// 피드백). 앱 디자인 언어의 다이얼로그로: Esc·바깥 클릭·취소 = false,
+// 확인 버튼(라벨 = 도착 상태) = true. CSP-safe(el/addEventListener 만).
+function confirmModal({ title, lines, confirmLabel, confirmClass }) {
+  return new Promise((resolve) => {
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        done(false);
+      }
+    };
+    const cancelBtn = el("button", {
+      type: "button",
+      class: "btn ghost",
+      text: "취소",
+      onclick: () => done(false),
+    });
+    const box = el(
+      "div",
+      { class: "cfm", role: "alertdialog", "aria-modal": "true", "aria-label": title },
+      [
+        el("div", { class: "cfm-title", text: title }),
+        el("div", { class: "cfm-body" }, (lines || []).map((l) => el("p", { text: l }))),
+        el("div", { class: "cfm-actions" }, [
+          cancelBtn,
+          el("button", {
+            type: "button",
+            class: `btn ${confirmClass || "primary"}`,
+            text: confirmLabel || "확인",
+            onclick: () => done(true),
+          }),
+        ]),
+      ],
+    );
+    const overlay = el("div", { class: "cfm-overlay" }, [box]);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) done(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    cancelBtn.focus(); // 위험 동작이므로 기본 포커스는 취소
+  });
+}
+
+// 드래프트에 지운 게 아까울 내용이 있는지 — 빈 드래프트 취소는 묻지 않는다.
+function draftHasContent(v) {
+  if (v == null) return false;
+  if (typeof v === "string") return v.trim() !== "";
+  if (typeof v === "object") return Object.values(v).some(draftHasContent);
+  return true; // number/bool 등 — 사람이 만진 값
+}
+
+// 문서 삭제 = 완전 삭제(서버 §6 DELETE, approver 전용). 보관 단계 없이 바로
+// store 트리에서 제거 — 목록·API·세션 주입에서 완전히 사라진다. git 이력에는
+// 감사 기록으로만 남고 화면에서는 되돌릴 수 없다.
+async function archiveDocAction(type, id) {
+  const sure = await confirmModal({
+    title: `${id} 문서를 삭제할까요?`,
+    lines: [
+      "목록·API·세션 주입에서 완전히 사라집니다.",
+      "git 이력에는 감사 기록으로 남습니다 — 화면에서는 되돌릴 수 없습니다.",
+    ],
+    confirmLabel: "삭제",
+    confirmClass: "danger",
+  });
+  if (!sure) return;
+  const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (r.ok) {
+    toast("문서를 삭제했습니다.");
+    await renderDocTree();
+    location.hash = "#/corpus";
+  } else if (r.status === 403) toast("approver 권한이 필요합니다.", "error");
+  else toast(`삭제 실패 (${r.status})`, "error");
+}
+
+// md 복사 아이콘 버튼 — 모든 포맷 문서 공통(사용자 결정). 렌더된 md 원문을
+// 클립보드로. localhost/https 는 바로 되고, http 배포에서 클립보드가 막히면
+// 안내 토스트(기존 복사 버튼들과 동일한 폴백 규율).
+function mdCopyBtn(md, what) {
+  return el(
+    "button",
+    {
+      type: "button",
+      class: "btn ghost sm icon-only",
+      "aria-label": `${what} 복사`,
+      title: `${what} 복사`,
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(md);
+          toast(`${what} 내용을 복사했습니다`, "");
+        } catch {
+          toast("복사 실패 — 브라우저가 클립보드를 막았습니다", "error");
+        }
+      },
+    },
+    [svgIcon(COPY_GLYPH)],
+  );
 }
 
 // ---------- JSON 보기 패널 (승인자 전용 — 문서를 좌우로 갈라 원본 store JSON) ----------
@@ -392,7 +526,8 @@ async function renderDocTree() {
     const res = await api(`/api/docs?type=${type}`);
     // Inactive documents belong in the tree: they are readable by design and
     // invisible ones cannot be reviewed, let alone activated. Archived stays
-    // hidden — that one is a decision to stop carrying the document.
+    // hidden from everyone — 삭제는 바로 완전 삭제라 정상 경로로는 archived
+    // 문서가 생기지 않지만, 옛 store 의 잔재가 있어도 화면엔 안 보인다.
     const docs = (res.ok ? res.data.docs : []).filter(
       (d) => d.status !== "archived",
     );
@@ -788,7 +923,20 @@ async function renderDocScreen(type, id) {
         el("button", {
           type: "button",
           class: "btn danger sm",
-          onclick: () => slotAction("폐기", slot.address, "deprecate"),
+          // 위험 동작 확인은 confirmModal 로 통일(사용자 결정) — 폐기가
+          // 무엇을 남기고 무엇을 끊는지 그 자리에서 말한다.
+          onclick: async () => {
+            const sure = await confirmModal({
+              title: `${slot.address} 슬롯을 폐기할까요?`,
+              lines: [
+                "내용과 근거는 보존되지만 렌더·세션 주입에서 빠집니다.",
+                "복원하면 추정으로 돌아가 재검토 후에만 다시 확정할 수 있습니다.",
+              ],
+              confirmLabel: "폐기",
+              confirmClass: "danger",
+            });
+            if (sure) slotAction("폐기", slot.address, "deprecate");
+          },
           text: "폐기",
         }),
       );
@@ -1289,6 +1437,10 @@ async function renderDocScreen(type, id) {
             }
           : null,
         jsonOpen,
+        // 문서 삭제(완전 삭제) — db-schema 뷰 dochead 와 같은 버튼.
+        canApprove && doc.status !== "archived"
+          ? () => archiveDocAction(type, id)
+          : null,
       );
       section.replaceChildren(
         jsonOpen
@@ -1437,6 +1589,9 @@ async function renderDocScreen(type, id) {
         el("span", { class: "brk" }),
         ...keywordChips(doc.keywords || []),
         statusSwitch(),
+        // 렌더된 md 원문 복사 — 스킬 뷰의 SKILL.md 복사와 같은 버튼을 모든
+        // 포맷 문서에(사용자 결정 "다른 포맷 문서도 전부 해당").
+        md ? mdCopyBtn(md, "문서 md") : null,
         // 승인자는 렌더에 안 드러나는 필드(티어드 값의 by/at/evidence, catalog
         // 팩트)까지 원본 store JSON 으로 확인할 수 있다. 데이터는 이미 응답에
         // 있으므로 버튼만 더하는 열람 affordance(승인자 전용).
@@ -1454,6 +1609,21 @@ async function renderDocScreen(type, id) {
                 },
               },
               "JSON",
+            )
+          : null,
+        // 문서 삭제(소프트 아카이브) — approver 전용, 서버 DELETE 라우트의
+        // FE 노출(지금까지 버튼이 없어 API 로만 가능했다).
+        canApprove && doc.status !== "archived"
+          ? el(
+              "button",
+              {
+                type: "button",
+                class: "btn danger sm",
+                title:
+                  "문서를 완전히 삭제합니다 — 목록·API·주입에서 사라지고 git 이력에만 남습니다.",
+                onclick: () => archiveDocAction(type, id),
+              },
+              "삭제",
             )
           : null,
       ]),
@@ -1614,7 +1784,7 @@ async function renderDocScreen(type, id) {
 }
 
 // domain-skill: editorial reading view (prototype .skwrap), read-only in v1
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, onArchive) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
   // Only one inline editor open at a time. A dirty editor blocks opening
@@ -1642,13 +1812,13 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
     else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
     else {
+      // JSON.stringify 로 한 줄에 이어붙이지 않는다 — 검증 상세는 항목별
+      // 줄로(errToast). 코드는 사람 말로 바꿔 제목에 싣는다.
       const d = r.data || {};
-      toast(
-        `저장 실패 (${r.status})` +
-          (d.message ? " — " + d.message : "") +
-          (d.details ? " — " + JSON.stringify(d.details) : ""),
-        "error",
-      );
+      const why =
+        d.message ||
+        (d.error === "validation_failed" ? "형식 검증에 걸렸습니다" : d.error);
+      errToast(`저장 실패 (${r.status})${why ? " — " + why : ""}`, d.details);
     }
     return false;
   }
@@ -2050,6 +2220,19 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
             "JSON",
           )
         : null,
+      onArchive
+        ? el(
+            "button",
+            {
+              type: "button",
+              class: "btn danger sm",
+              title:
+                "문서를 완전히 삭제합니다 — 목록·API·주입에서 사라지고 git 이력에만 남습니다.",
+              onclick: onArchive,
+            },
+            "삭제",
+          )
+        : null,
     ]),
     // db-schema 뷰와 같은 배너 — 비활성이 실제로 무엇을 의미하는지 본문 자리에서 설명.
     doc.status === "inactive"
@@ -2307,57 +2490,103 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   });
   wrap.appendChild(depsWrap);
 
-  // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
-  // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
-  // 다운로드는 클라이언트 blob(downloadTextFile) — 이미 로드된 md를 재사용한다.
+  // 설치 — curl 원커맨드 하나만 안내한다(#39). 구 방식(브라우저 다운로드 후
+  // mv ~/Downloads/…)은 다운로드 폴더가 사람마다 달라(브라우저 설정, 한글 로케일
+  // XDG = ~/다운로드, "매번 묻기") mv 가 추측이 됐다. curl 은 서버의 raw md
+  // 엔드포인트(?format=md)를 직접 받으므로 출발지 추측이 없다. 목적지는
+  // ~/.claude/skills 고정 안내(CC·opencode 공통 탐색 경로, install-skills.mjs 와
+  // 동일) — 다른 경로를 쓰는 사람은 명령의 경로만 바꾼다(분기 없음).
+  // UI는 버튼 하나(사용자 결정 — "버튼 하나로, 누르면 명령과 실행 안내만").
+  // 누르면 명령을 클립보드에 복사하고 명령+한 줄 안내 패널을 연다(원클릭:
+  // 누르고 → 터미널에 붙여넣으면 끝). AKG_ANON_READ=0 배포는 이 curl 이 401 —
+  // 그 배포의 사용자는 -H 'Authorization: Bearer …' 를 스스로 붙인다(실토큰·
+  // 힌트 모두 UI에 없음). navigator.clipboard 는 secure context 전용이라 사내
+  // http 배포에선 자동 복사가 실패할 수 있다 — 패널의 명령을 직접 선택하면 된다.
+  let installAside = null;
   if (md) {
+    const dest = `~/.claude/skills/${s.name}`;
+    // 두 줄 평문(연속행 \ 없음) — 좁은 패널은 pre-wrap 소프트랩이라 \ 가
+    // 혼자 남은 줄을 만든다. 붙여넣기도 명령 2개가 그대로 2줄.
     const installCmd =
-      `mkdir -p ~/.claude/skills/${s.name}\n` +
-      `mv ~/Downloads/SKILL.md ~/.claude/skills/${s.name}/SKILL.md`;
-    wrap.appendChild(
-      el("div", { class: "sk-install" }, [
-        el("div", { class: "sk-install-top" }, [
-          el("h2", { class: "sk-h", text: "설치" }),
-          el("button", {
-            type: "button",
-            class: "btn primary sm dl-btn",
-            onclick: () => {
-              downloadTextFile("SKILL.md", md, "text/markdown;charset=utf-8");
-              toast("SKILL.md 다운로드 — 아래 위치에 넣으세요", "");
-            },
-            text: "↓ SKILL.md 다운로드",
-          }),
-        ]),
-        el("p", { class: "dim install-lead" }, [
-          "받은 ",
-          el("code", { text: "SKILL.md" }),
-          " 를 아래 위치에 넣으면 끝 — Claude Code·opencode 모두 이 경로를 읽습니다.",
-        ]),
-        el("div", { class: "install-cmd-wrap" }, [
-          el("pre", { class: "install-cmd", text: installCmd }),
-          el("button", {
-            type: "button",
-            class: "btn ghost sm copy-btn",
-            onclick: async () => {
-              try {
-                await navigator.clipboard.writeText(installCmd);
-                toast("복사했습니다", "");
-              } catch {
-                toast("복사 실패 — 명령을 직접 선택해 복사하세요", "error");
-              }
-            },
-            text: "복사",
-          }),
-        ]),
-        el("p", {
-          class: "dim",
-          text: "설치 후 새 세션(또는 스킬 새로고침)부터 이 스킬을 쓸 수 있습니다.",
+      `mkdir -p ${dest}\n` +
+      `curl -fsS "${location.origin}/api/docs/domain-skill/${encodeURIComponent(doc.id)}?format=md" -o ${dest}/SKILL.md`;
+    const panel = el("div", { class: "install-pop" }, [
+      el("div", { class: "install-cmd-wrap" }, [
+        el("pre", { class: "install-cmd", text: installCmd }),
+        el("button", {
+          type: "button",
+          class: "btn ghost sm copy-btn",
+          onclick: async () => {
+            try {
+              await navigator.clipboard.writeText(installCmd);
+              toast("복사했습니다", "");
+            } catch {
+              toast("복사 실패 — 명령을 직접 선택해 복사하세요", "error");
+            }
+          },
+          text: "복사",
         }),
       ]),
+      el("p", {
+        class: "dim install-how",
+        text: "터미널에 붙여넣어 실행하면 설치됩니다 — 새 세션부터 적용.",
+      }),
+    ]);
+    // 아이콘 버튼(사용자 결정 — 텍스트 라벨 대신 아이콘만).
+    // 이름은 title/aria-label 로 — 아이콘만 남겨도 호버·스크린리더가 설명한다.
+    const installBtn = el(
+      "button",
+      {
+        type: "button",
+        class: "btn primary sm install-btn icon-only",
+        "aria-expanded": "false",
+        "aria-label": "이 스킬 설치",
+        title: "이 스킬 설치",
+        // 클릭 = 복사(패널 표시는 호버가 담당 — 아래 mouseenter/leave).
+        // 호버 없는 터치 환경을 위해 클릭도 패널을 열어 둔다.
+        onclick: async () => {
+          panel.classList.add("on");
+          installBtn.setAttribute("aria-expanded", "true");
+          try {
+            await navigator.clipboard.writeText(installCmd);
+            toast("설치 명령을 복사했습니다 — 터미널에 붙여넣어 실행하세요", "");
+          } catch {
+            toast("아래 명령을 직접 선택해 복사하세요", "");
+          }
+        },
+      },
+      [svgIcon(DL_GLYPH)],
     );
+    installAside = el("aside", { class: "sk-aside", "aria-label": "스킬 설치" }, [
+      el("div", { class: "sk-aside-btns" }, [
+        installBtn,
+        mdCopyBtn(md, "SKILL.md"),
+      ]),
+      panel,
+    ]);
+    // 호버 = 상세(명령+안내) 표시(사용자 결정): 올리면 즉시 열리고, 떠나면
+    // 0.1초 뒤 닫힘 — 아이콘→패널로 건너가는 짧은 이탈은 이 유예가 흡수한다.
+    // 대상은 설치 버튼·패널만 — 옆의 md 복사 버튼 호버로는 안 연다.
+    let hideTimer = null;
+    const setOpen = (on) => {
+      panel.classList.toggle("on", on);
+      installBtn.setAttribute("aria-expanded", on ? "true" : "false");
+    };
+    for (const n of [installBtn, panel]) {
+      n.addEventListener("mouseenter", () => {
+        clearTimeout(hideTimer);
+        setOpen(true);
+      });
+      n.addEventListener("mouseleave", () => {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => setOpen(false), 100);
+      });
+    }
   }
 
-  return wrap;
+  // 본문(좌) + 설치 패널(우) — 스크롤 끝이 아니라 본문 오른쪽 빈 공간에 상시
+  // 보인다(#39). 패널이 없으면(el 이 null 을 걸러) 본문이 그대로 한 폭을 쓴다.
+  return el("div", { class: "sk-layout" }, [wrap, installAside]);
 }
 
 // ================= 검토 대기열 =================
@@ -2433,7 +2662,15 @@ async function renderQueue() {
         el("button", {
           type: "button",
           class: "btn danger",
-          onclick: () => reject(p),
+          onclick: async () => {
+            const sure = await confirmModal({
+              title: "이 제안을 기각할까요?",
+              lines: ["제안은 대기열에서 사라지고 문서는 바뀌지 않습니다."],
+              confirmLabel: "기각",
+              confirmClass: "danger",
+            });
+            if (sure) reject(p);
+          },
           text: "기각",
         }),
       ]),
@@ -2807,6 +3044,80 @@ function startDraft(type) {
   location.hash = `#/draft/${type}/${localId}`;
 }
 
+// ---- 칸별 실시간 가이드 (사용자 요청 — "서버 400 검증 문구로는 어디를
+// 고쳐야 할지 감이 안 잡힌다"). 서버 규칙의 클라이언트 거울:
+// 테이블·커맨드 ^[A-Z][A-Z0-9_]*$ · 스킬명 ^[a-z][a-z0-9-]*$ (스키마 파일),
+// 파생 id ^[a-z0-9._-]+$ · kw ^[a-z0-9_. -]+$ (envelope). 문제를 문자 단위로
+// 짚고 고치는 방법을 같이 말한다 — 통과하면 파생될 id·키워드를 미리 보여준다.
+const HANGUL_RE = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+function idSourceGuide(type) {
+  const kebab = type === "domain-skill";
+  const ex = kebab
+    ? "fdc-explain-sensor"
+    : type === "db-schema"
+      ? "FDC_SENSOR"
+      : "CMD_START_LOT";
+  return (raw) => {
+    const v = raw.trim();
+    if (!v) return null; // 빈 칸은 placeholder + 저장 버튼 비활성이 이미 안내
+    // 커밋 시 자동 변환(대/소문자)을 먼저 적용한 형태로 판정 — 케이스는
+    // 알아서 고쳐 주므로 케이스 지적은 하지 않는다.
+    const c = kebab ? v.toLowerCase() : v.toUpperCase();
+    const msgs = [];
+    if (HANGUL_RE.test(c)) msgs.push("한글은 쓸 수 없습니다 — 영문명으로 적어주세요.");
+    if (/\s/.test(c))
+      msgs.push(
+        kebab
+          ? `공백은 쓸 수 없습니다 — '-' 로 이어주세요 (예: ${ex}).`
+          : `공백은 쓸 수 없습니다 — '_' 로 이어주세요 (예: ${ex}).`,
+      );
+    if (!kebab && /-/.test(c))
+      msgs.push("'-' 는 쓸 수 없습니다 — 테이블·커맨드명은 '_' 를 씁니다.");
+    if (kebab && /_/.test(c))
+      msgs.push("'_' 는 쓸 수 없습니다 — 스킬명은 '-' 를 씁니다.");
+    if (/\./.test(c))
+      msgs.push(
+        type === "db-schema"
+          ? "'.' 은 쓸 수 없습니다 — 스키마는 owner 칸에 따로, 여기는 테이블명만."
+          : "'.' 은 쓸 수 없습니다.",
+      );
+    const allowed = kebab ? /[a-z0-9-]/ : /[A-Z0-9_]/;
+    const others = [
+      ...new Set(
+        [...c].filter(
+          (ch) =>
+            !allowed.test(ch) &&
+            !/\s/.test(ch) &&
+            !HANGUL_RE.test(ch) &&
+            !"-_.".includes(ch),
+        ),
+      ),
+    ];
+    if (others.length)
+      msgs.push(`쓸 수 없는 문자입니다: ${others.join(" ")}`);
+    if (!msgs.length && !/^[A-Za-z]/.test(c))
+      msgs.push("첫 글자는 영문이어야 합니다.");
+    if (msgs.length) return { ok: false, msgs };
+    const id = deriveDraftId(
+      type,
+      kebab ? { name: c } : { table: c, command: c },
+    );
+    return { ok: true, msgs: [`저장하면 문서 id·키워드 = ${id}`] };
+  };
+}
+// owner (db-schema, 선택) — ^[A-Z][A-Z0-9_]*$. 비우면 통과.
+function ownerGuide(raw) {
+  const v = raw.trim();
+  if (!v) return null;
+  const c = v.toUpperCase();
+  const msgs = [];
+  if (HANGUL_RE.test(c)) msgs.push("한글은 쓸 수 없습니다 — 영문 스키마명으로.");
+  if (/[^A-Z0-9_]/.test(c))
+    msgs.push("영문·숫자·'_' 만 쓸 수 있습니다 (예: TESTUSER).");
+  else if (!/^[A-Z]/.test(c)) msgs.push("첫 글자는 영문이어야 합니다.");
+  return msgs.length ? { ok: false, msgs } : null;
+}
+
 // 헤더 제목 = id 소스(테이블/커맨드/스킬명) 클릭-투-편집. "이름"이 곧 문서 제목.
 function idSourceField(type, body, onIdChange) {
   if (type === "db-schema")
@@ -2816,6 +3127,7 @@ function idSourceField(type, body, onIdChange) {
       title: true,
       placeholder: "테이블명 클릭해서 입력 (예: FDC_SENSOR)",
       onChange: onIdChange,
+      check: idSourceGuide(type),
     });
   if (type === "msg-format")
     return eField(() => body.command, (v) => (body.command = v), {
@@ -2824,12 +3136,14 @@ function idSourceField(type, body, onIdChange) {
       title: true,
       placeholder: "커맨드명 클릭해서 입력 (예: CMD_START_LOT)",
       onChange: onIdChange,
+      check: idSourceGuide(type),
     });
   return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
     mono: true,
     title: true,
     placeholder: "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
+    check: idSourceGuide(type),
   });
 }
 
@@ -2877,7 +3191,18 @@ function renderDraftScreen(type, localId) {
       type: "button",
       class: "btn ghost",
       text: "취소",
-      onclick: () => {
+      onclick: async () => {
+        // 내용이 있으면 confirmModal 로 확인(위험 동작 통일) — 로컬 전용이라
+        // 버리면 어디에도 안 남는다는 걸 그 자리에서 말한다.
+        if (draftHasContent(body)) {
+          const sure = await confirmModal({
+            title: "드래프트를 버릴까요?",
+            lines: ["입력한 내용은 저장되지 않고 사라집니다."],
+            confirmLabel: "버리기",
+            confirmClass: "danger",
+          });
+          if (!sure) return;
+        }
         deleteDraft(localId);
         toast("드래프트를 버렸습니다.");
         renderDocTree();
@@ -2907,8 +3232,24 @@ function renderDraftScreen(type, localId) {
 }
 
 // 클릭-투-편집 텍스트 (제자리 스왑, 전체 재렌더 없음). onChange 는 커밋 후 호출.
+// opts.check(v) → null | { ok, msgs } — 칸 밑에 실시간 가이드(타이핑마다 갱신,
+// 커밋 후에도 읽기 뷰에 유지). 서버 400 을 맞고서야 아는 대신 치는 동안 알린다.
 function eField(get, set, opts = {}) {
   const wrap = el("span", { class: "df-v" });
+  const guide = opts.check ? el("span", { class: "df-guide" }) : null;
+  function renderGuide(raw) {
+    if (!guide) return;
+    const res = opts.check(String(raw ?? ""));
+    if (!res) {
+      guide.className = "df-guide";
+      guide.replaceChildren();
+      return;
+    }
+    guide.className = `df-guide ${res.ok ? "ok" : "bad"}`;
+    guide.replaceChildren(
+      ...res.msgs.map((m) => el("span", { class: "g-line", text: m })),
+    );
+  }
   function showRead() {
     const val = get();
     const has = val != null && String(val) !== "";
@@ -2918,7 +3259,8 @@ function eField(get, set, opts = {}) {
       text: has ? String(val) : opts.placeholder || "클릭해서 입력",
       onclick: showEdit,
     });
-    wrap.replaceChildren(btn);
+    wrap.replaceChildren(...[btn, guide].filter(Boolean));
+    renderGuide(has ? String(val) : "");
   }
   function showEdit() {
     const val = get();
@@ -2936,6 +3278,7 @@ function eField(get, set, opts = {}) {
       opts.onChange?.();
       showRead();
     };
+    inp.addEventListener("input", () => renderGuide(inp.value));
     inp.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !opts.area) {
         e.preventDefault();
@@ -2945,7 +3288,8 @@ function eField(get, set, opts = {}) {
       }
     });
     inp.addEventListener("blur", commit);
-    wrap.replaceChildren(inp);
+    wrap.replaceChildren(...[inp, guide].filter(Boolean));
+    renderGuide(inp.value);
     inp.focus();
   }
   showRead();
@@ -2990,6 +3334,7 @@ function draftDbSchema(body, onIdChange, persist, rerender) {
         upper: true,
         placeholder: "선택 (예: TESTUSER)",
         onChange: persist,
+        check: ownerGuide,
       }),
     ),
   );
@@ -3215,13 +3560,12 @@ async function saveDraft(type, localId, body) {
   }
   if (r.status === 400) {
     const d = r.data || {};
-    const msg =
+    const why =
       d.error === "validation_failed"
-        ? (d.details || []).join(" · ")
-        : d.error === "edit_rejected"
-          ? d.message
-          : d.error || "";
-    toast("저장 실패: " + msg, "error");
+        ? "형식 검증에 걸렸습니다"
+        : d.message || d.error || "";
+    // 검증 상세는 항목별 줄로 — " · " 한 줄 이어붙이기는 읽기 어렵다.
+    errToast(`저장 실패${why ? " — " + why : ""}`, d.details);
     return;
   }
   toast(`저장 실패 (${r.status || "네트워크"})`, "error");

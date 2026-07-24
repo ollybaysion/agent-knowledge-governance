@@ -243,7 +243,7 @@ test("turning a doc on is an approver decision, and needs a matching rev", async
   await cleanup();
 });
 
-test("repeating a transition is a no-op, and archived docs stay archived", async () => {
+test("repeating a transition is a no-op; DELETE removes the doc outright", async () => {
   const { app, cleanup } = await setup();
   const rev = await create(app, doc());
 
@@ -254,14 +254,16 @@ test("repeating a transition is a no-op, and archived docs stay archived", async
   assert.equal(again.json().unchanged, true);
   assert.equal(again.json().rev, rev);
 
+  // DELETE 는 완전 삭제(사용자 결정 2026-07-24) — 보관 상태를 거치지 않으므로
+  // 이후 어떤 전이도 대상 문서를 찾지 못한다.
   const del = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
-  const revived = await transition(app, "activate", del.json().rev);
-  assert.equal(revived.statusCode, 400);
-  assert.equal(revived.json().error, "doc_archived");
+  assert.equal(del.statusCode, 200);
+  const gone = await transition(app, "activate", del.json().rev);
+  assert.equal(gone.statusCode, 404);
 
   await cleanup();
 });

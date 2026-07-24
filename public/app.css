@@ -1371,31 +1371,71 @@ ol.steps > li p {
   font-size: 13px;
 }
 
-/* 설치 카드 */
-.sk-install {
-  margin-top: 22px;
-  padding: 14px 16px;
+/* 설치 카드 — 본문 오른쪽 빈 공간의 sticky 패널(#39). .sk-layout 이 본문(좌,
+   기존 820px 컬럼) | 설치(우)를 가르고, 패널이 없으면 el() 이 null 을 걸러
+   본문이 그대로 한 폭을 쓴다. */
+.sk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 820px) 300px;
+  gap: 18px;
+  justify-content: center;
+  align-items: start;
+}
+.sk-aside {
+  position: sticky;
+  top: 14px;
+  margin-top: 46px; /* 본문 eyebrow~제목 높이만큼 내려 시선 나란히 */
+}
+/* 아이콘 버튼 공통(설치·md 복사) — 이름은 title/aria-label 이 든다 */
+.icon-only {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-only svg {
+  display: block;
+}
+.sk-aside-btns {
+  display: flex;
+  gap: 6px;
+}
+/* 버튼을 눌러야 열리는 명령+안내 패널 */
+.install-pop {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: var(--surface-soft);
 }
-.sk-install-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.install-pop.on {
+  display: block;
 }
-.sk-install-top .sk-h {
-  margin: 0;
+.install-how {
+  font-size: 12px;
+  margin: 8px 0 0;
 }
-.sk-install .dl-btn {
-  margin-left: auto;
+/* 승인자 JSON 분할이 열리면 3열이 되므로 1열로 접는다 — 패널이 본문 아래로
+   흐른다(숨기지 않음). */
+.doc-split.open .sk-layout {
+  grid-template-columns: minmax(0, 820px);
 }
-.install-lead {
-  font-size: 13px;
-  margin: 6px 0 0;
+.doc-split.open .sk-aside {
+  position: static;
+  margin-top: 0;
 }
-.install-lead code {
-  font-family: var(--mono);
+/* 좁은 화면도 세로 스택 — .doc-split 과 같은 브레이크포인트. */
+@media (max-width: 900px) {
+  .sk-layout {
+    grid-template-columns: minmax(0, 820px);
+  }
+  .sk-aside {
+    position: static;
+    margin-top: 0;
+  }
 }
 .install-cmd-wrap {
   position: relative;
@@ -1418,6 +1458,14 @@ ol.steps > li p {
   position: absolute;
   top: 8px;
   right: 8px;
+  /* 명령 텍스트 위에 뜨는 버튼 — ghost 그대로면 글자가 비쳐 겹쳐 보인다 */
+  background: var(--surface-card);
+}
+/* 좁은 패널에서는 가로 스크롤 대신 줄바꿈 — 복사 버튼과의 겹침도 없앤다.
+   시각적 소프트랩일 뿐 복사되는 문자열은 그대로다. */
+.sk-aside .install-cmd {
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* 스킬 구조화 편집 (클릭-투-편집) */
@@ -2035,6 +2083,46 @@ button.pchip:hover {
 }
 
 /* ---- 토스트 ---- */
+/* 확인 모달 — 네이티브 confirm 대신 앱 결의 다이얼로그 */
+.cfm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 22, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25; /* header(5) 위, toast(20)보다도 위 — 닫히면 토스트가 보인다 */
+  padding: 20px;
+}
+.cfm {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 18px 20px 16px;
+  width: min(440px, 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.cfm-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--body-strong);
+}
+.cfm-body {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.cfm-body p {
+  margin: 0 0 4px;
+}
+.cfm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 #toast {
   position: fixed;
   left: 50%;
@@ -2061,6 +2149,20 @@ button.pchip:hover {
 }
 #toast .api {
   color: var(--teal-ink);
+}
+/* 오류 토스트 — 제목 + 항목별 줄(errToast). 본문 잉크는 유지하고 제목만
+   error 색으로, 목록은 왼쪽 정렬(가운데 정렬 목록은 행 시작점이 들쭉난다). */
+#toast .error .err-title {
+  font-weight: 600;
+  color: var(--error-ink);
+}
+#toast .error .err-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  text-align: left;
+}
+#toast .error .err-list li {
+  margin: 2px 0;
 }
 @media (prefers-reduced-motion: reduce) {
   #toast {
@@ -2751,6 +2853,25 @@ aside.sidebar {
 .df-v {
   flex: 1;
   min-width: 0;
+}
+/* 칸별 실시간 가이드 — 입력 밑에 문제·고치는 법(빨강) 또는 파생 id 프리뷰(회색).
+   df-title(큰 제목) 밑에 붙어도 본문 크기로 고정. */
+.df-guide {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--sans, inherit);
+  line-height: 1.55;
+  margin-top: 4px;
+}
+.df-guide.bad {
+  color: var(--error-ink);
+}
+.df-guide.ok {
+  color: var(--muted);
+}
+.df-guide .g-line {
+  display: block;
 }
 /* 클릭해서 편집하는 값 */
 .df-click {
