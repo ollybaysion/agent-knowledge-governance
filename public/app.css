@@ -316,11 +316,6 @@ main {
 .doc-item.off .nm {
   color: var(--muted);
 }
-/* 보관(archived) — approver 에게만 보인다(2단계 삭제의 2단 진입로). 취소선으로
-   "더는 운반하지 않는 문서"임을 이름에서부터 말한다. */
-.doc-item.archived .nm {
-  text-decoration: line-through;
-}
 @media (prefers-reduced-motion: reduce) {
   .chev {
     transition: none;

@@ -12,7 +12,6 @@ import {
 } from "../store.mjs";
 import {
   persistDoc,
-  archiveDoc,
   purgeDoc,
   renderDocMd,
   docWrites,
@@ -581,8 +580,11 @@ export function registerDocsRoutes(app) {
     );
   }
 
-  // §6 DELETE — soft archive (status: archived): dropped from the compiled
-  // injection index, but the JSON + git history are preserved.
+  // §6 DELETE — 완전 삭제(사용자 결정 2026-07-24: 보관 단계 없이 바로 삭제).
+  // store 트리에서 파일을 제거하는 git rm 커밋 — HEAD 에서 사라져 목록·API
+  // 에서 완전히 없어지고, git 이력에는 감사 기록으로만 남는다(이력 소거는
+  // 감사 설계와 충돌하므로 API 로 열지 않는다). archiveDoc(보관)은 되돌리기
+  // 쉽도록 render-store 에 함수로 남겨 뒀다 — 지금 경로에서만 안 쓴다.
   app.delete(
     "/api/docs/:type/:id",
     { config: { roles: ["approver"] } },
@@ -597,41 +599,9 @@ export function registerDocsRoutes(app) {
           const relpath = `${type}/${id}.json`;
           const doc = readJson(storeDir, relpath);
           if (!doc) return { status: 404, body: { error: "not_found" } };
-          const rev = archiveDoc(storeDir, type, doc, {
-            author: request.user.id,
-            message: `archive ${type}/${id}`,
-          });
-          return { status: 200, body: { rev } };
-        },
-        { priority: priorityOf(request.user) },
-      );
-      return reply.code(result.status).send(result.body);
-    },
-  );
-
-  // 2단계 삭제의 2단(사용자 결정 2026-07-24): archived 문서를 store 트리에서
-  // 제거한다. HEAD 에서 파일이 사라져 목록·API 에서 완전히 없어지고, git
-  // 이력에는 감사 기록으로만 남는다(이력 소거는 API 로 열지 않는다 — 감사
-  // 설계와 충돌). archived 에서만 허용: 1단(보관)이 실수 방지 게이트다.
-  app.post(
-    "/api/docs/:type/:id/purge",
-    { config: { roles: ["approver"] } },
-    async (request, reply) => {
-      const { type, id } = request.params;
-      // 신설 표면이라 더 엄격히: 대시보드가 다루는 타입 화이트리스트 + id 형식
-      // 검증을 경로 조립 전에 (S11, §13-1 부류 차단).
-      if (!DOC_TYPES.includes(type) || !isValidId(id))
-        return reply.code(404).send({ error: "not_found" });
-      const result = await queue.enqueue(
-        async () => {
-          const relpath = `${type}/${id}.json`;
-          const doc = readJson(storeDir, relpath);
-          if (!doc) return { status: 404, body: { error: "not_found" } };
-          if (doc.status !== "archived")
-            return { status: 409, body: { error: "not_archived" } };
           const rev = purgeDoc(storeDir, type, doc, {
             author: request.user.id,
-            message: `purge ${type}/${id}`,
+            message: `delete ${type}/${id}`,
           });
           return { status: 200, body: { rev } };
         },
