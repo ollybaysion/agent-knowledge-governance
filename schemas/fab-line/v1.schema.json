@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fab-line/v1",
+  "title": "fab-line/v1 body",
+  "description": "A production line the fab actually has — reference data that consumers turn into a closed choice (a dropdown), not prose. One document per line: the list is the document set, exactly like domain-skill, so a line is added or retired by pushing or archiving one document rather than editing a shared array. There are no tiered-value slots here: a line code is not a claim someone has to review, it either exists or it does not. The id is lower(code), so a consumer can list documents and know the codes without fetching each body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "What people write on a board and type into a form — the line's short identifier (L1, M2, P1). Uppercase because that is how it is written everywhere else; the id lowercases it.",
+      "pattern": "^[A-Z0-9][A-Z0-9_-]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Spliced into a single rendered line — no newline, no leading markdown block marker.",
+      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    },
+    "note": {
+      "type": "string",
+      "pattern": "\\S"
+    }
+  }
+}
