@@ -1,0 +1,14 @@
+{
+  "schema": "fab-line/v1",
+  "id": "l1",
+  "keywords": [
+    { "kw": "l1", "inject": "pointer" },
+    { "kw": "라인", "inject": "pointer" }
+  ],
+  "status": "active",
+  "body": {
+    "code": "L1",
+    "name": "1라인 — 8인치 전공정",
+    "note": "설비 등록 폼의 라인 드롭다운이 이 문서 집합을 읽는다."
+  }
+}

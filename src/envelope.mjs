@@ -16,6 +16,7 @@ const SCHEMA_FILES = {
   "db-schema/v1": "db-schema/v1.schema.json",
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
+  "fab-line/v1": "fab-line/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -86,6 +87,10 @@ export function deriveId(schema, body) {
         : null;
     case "domain-skill/v1":
       return body.name ?? null;
+    case "fab-line/v1":
+      // Lowercased so the id keeps the store's one-case rule while the body
+      // keeps the code as people write it (L1, not l1).
+      return body.code ? body.code.toLowerCase() : null;
     default:
       return null;
   }
@@ -96,6 +101,7 @@ const ID_SOURCE = {
   "db-schema/v1": () => "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
+  "fab-line/v1": () => "lower(code)",
 };
 
 // Cross-field checks the JSON-Schema layer can't express (sibling-node
@@ -128,6 +134,9 @@ const SEMANTIC_CHECKS = {
     }
   },
   "msg-format/v1"(doc, errors) {
+    checkDerivedId(doc, errors);
+  },
+  "fab-line/v1"(doc, errors) {
     checkDerivedId(doc, errors);
   },
   "domain-skill/v1"(doc, errors) {

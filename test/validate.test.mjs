@@ -454,3 +454,42 @@ test("unclassified/v1: a body key is rejected (only 4 envelope keys apply here)"
   const errors = validateDocument(doc, refs);
   assert.ok(errors.some((e) => e.includes("body")));
 });
+
+// fab-line — reference data a consumer turns into a closed choice. One doc per
+// line, so the id carries the code and a lister knows the codes without
+// fetching every body.
+function fabLineDoc() {
+  return {
+    schema: "fab-line/v1",
+    id: "l1",
+    keywords: [{ kw: "l1", inject: "pointer" }],
+    status: "active",
+    body: { code: "L1", name: "1라인 — 8인치 전공정" },
+  };
+}
+
+test("fab-line: a minimal doc is valid and the id is lower(code)", () => {
+  assert.deepEqual(validateDocument(fabLineDoc(), refs), []);
+});
+
+test("fab-line: an id that is not lower(code) is rejected", () => {
+  const doc = fabLineDoc();
+  doc.id = "line-1";
+  const errors = validateDocument(doc, refs);
+  assert.ok(errors.some((e) => e.includes("lower(code)")));
+});
+
+test("fab-line: code is uppercase — lowercase is rejected", () => {
+  // 같은 라인이 표기만 달라 두 문서로 갈라지는 것을 스키마에서 막는다.
+  const errors = validate(refs["fab-line/v1"], { code: "l1" }, refs);
+  assert.ok(errors.length > 0);
+});
+
+test("fab-line: unknown keys are rejected", () => {
+  const errors = validate(
+    refs["fab-line/v1"],
+    { code: "L1", fab: "P3" },
+    refs,
+  );
+  assert.ok(errors.some((e) => e.includes("fab")));
+});
