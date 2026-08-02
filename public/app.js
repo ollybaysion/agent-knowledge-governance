@@ -2222,6 +2222,19 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
                 field(st.lead, { empty: "(lead — 실행 전 안내 한 줄)" }, setOpt2(i, "steps", "lead")),
               ])
             : null,
+          // 원천 테이블은 SQL 바로 위 — 이 코드블록이 무엇을 읽는지의 라벨이고,
+          // 소비자에겐 데이터 블록 제목이자 db-schema 문서를 찾는 키다(#44).
+          st.table || canEdit
+            ? el("div", { class: "sk-table" }, [
+                el("span", {
+                  class: "sk-table-k has-help",
+                  text: "FROM",
+                  title:
+                    "이 스텝이 읽는 원천 테이블(선택). SQL 의 FROM 과 일치해야 저장됩니다. 서술형 답변에서는 이 이름이 데이터 블록 제목이 되고, 컬럼 의미를 발췌할 db-schema 문서를 찾는 키로 쓰입니다.",
+                }),
+                field(st.table, { mono: true, empty: "(table)" }, setOpt2(i, "steps", "table")),
+              ])
+            : null,
           el("div", { class: "sqlblock" }, [
             field(st.sql, { kind: "area", mono: true, block: true }, (n, v) => (n.steps[i].sql = v)),
           ]),

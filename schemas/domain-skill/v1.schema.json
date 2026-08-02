@@ -124,6 +124,11 @@
             "type": "string",
             "pattern": "\\S"
           },
+          "table": {
+            "type": "string",
+            "description": "This step's source table (issue #44). Optional, and singular — every step today is a single-table SELECT; a join step is where a plural is discussed. Two consumers need it: a narrative prompt heads each step's data block with the table name, and the column meanings under that heading are excerpted from the db-schema doc this names (doc id = lower(table), so owner prefix and case do not matter to the lookup). `anchorTable` cannot serve — it is one table for the whole skill. A skill-level table list is NOT authored: derive it from the union of these (two places to write drift apart). Agreement with the step's sql FROM is the envelope.mjs semantic check, which schema keywords cannot see.",
+            "pattern": "\\S"
+          },
           "sql": {
             "type": "string",
             "pattern": "\\S"

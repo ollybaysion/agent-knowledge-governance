@@ -419,6 +419,103 @@ test("domain-skill: a spec without binds stays valid (prose-only consumers)", ()
   assert.deepEqual(validateDocument(doc, refs), []);
 });
 
+// steps[].table (issue #44) — the step's source table, named for the prompt
+// synthesizer's data-block heading and the db-schema excerpt lookup. The
+// schema only says "a non-empty string"; whether it agrees with the SQL beside
+// it is the envelope semantic check.
+const TABLED_BODY = () => {
+  const body = V2_BODY();
+  body.steps = [
+    {
+      title: "s1",
+      produces: "현재 상태",
+      table: "fdc_sensor",
+      sql: "SELECT eqp_id FROM fdc_sensor WHERE snsr_id = :x",
+      binds: { x: { from: "arg", arg: "id" } },
+    },
+  ];
+  return body;
+};
+
+const tabledDoc = () => ({
+  schema: "domain-skill/v1",
+  id: "x",
+  keywords: [{ kw: "x", inject: "full" }],
+  status: "active",
+  body: TABLED_BODY(),
+});
+
+test("domain-skill: table — a step naming the table it selects from is valid", () => {
+  assert.deepEqual(validate(refs["domain-skill/v1"], TABLED_BODY(), refs), []);
+  assert.deepEqual(validateDocument(tabledDoc(), refs), []);
+});
+
+test("domain-skill: table — must be a non-empty string", () => {
+  const schema = refs["domain-skill/v1"];
+
+  const blank = TABLED_BODY();
+  blank.steps[0].table = "   ";
+  assert.ok(validate(schema, blank, refs).some((e) => e.includes("table")));
+
+  const list = TABLED_BODY();
+  list.steps[0].table = ["fdc_sensor"]; // 스킬 레벨 목록은 기각됐다 — 스텝당 하나
+  assert.ok(validate(schema, list, refs).some((e) => e.includes("table")));
+});
+
+test("domain-skill: table semantic — disagreeing with the sql FROM is rejected", () => {
+  const doc = tabledDoc();
+  doc.body.steps[0].table = "fdc_equipment"; // SQL 은 fdc_sensor 를 읽는다
+  assert.ok(
+    validateDocument(doc, refs).some((e) =>
+      e.includes('"fdc_equipment" but the sql selects from "fdc_sensor"'),
+    ),
+  );
+});
+
+test("domain-skill: table semantic — case and owner prefix are noise", () => {
+  // db-schema 문서 id 는 lower(table) 이고 owner 는 body 속성일 뿐이라
+  // TESTUSER.FDC_SENSOR 와 fdc_sensor 는 같은 문서를 가리킨다.
+  const doc = tabledDoc();
+  doc.body.steps[0].table = "TESTUSER.FDC_SENSOR";
+  assert.deepEqual(validateDocument(doc, refs), []);
+
+  const quoted = tabledDoc();
+  quoted.body.steps[0].sql = 'SELECT eqp_id FROM "FDC_SENSOR" s WHERE s.snsr_id = :x';
+  assert.deepEqual(validateDocument(quoted, refs), []);
+});
+
+test("domain-skill: table semantic — a step with no sole FROM is not judged", () => {
+  // 조인·집합연산·인라인뷰는 대조할 단일 FROM 이 없다. 추측하느니 비켜선다
+  // (binds 없는 스텝을 안 건드리는 것과 같은 규율).
+  for (const sql of [
+    "SELECT s.eqp_id FROM fdc_sensor s JOIN fdc_equipment e ON e.eqp_id = s.eqp_id WHERE s.snsr_id = :x",
+    "SELECT eqp_id FROM fdc_sensor, fdc_equipment WHERE snsr_id = :x",
+    "SELECT eqp_id FROM (SELECT eqp_id FROM fdc_sensor WHERE snsr_id = :x)",
+  ]) {
+    const doc = tabledDoc();
+    doc.body.steps[0].sql = sql;
+    doc.body.steps[0].table = "fdc_equipment";
+    assert.deepEqual(validateDocument(doc, refs), [], sql);
+  }
+
+  // 따옴표 속 FROM 은 구문이 아니다 — 리터럴을 벗기고 세므로 여전히 단일 FROM.
+  const literal = tabledDoc();
+  literal.body.steps[0].sql =
+    "SELECT 'FROM me' AS note, eqp_id FROM fdc_sensor WHERE snsr_id = :x";
+  literal.body.steps[0].table = "fdc_equipment";
+  assert.ok(
+    validateDocument(literal, refs).some((e) =>
+      e.includes('the sql selects from "fdc_sensor"'),
+    ),
+  );
+});
+
+test("domain-skill: a spec without table stays valid (기존 spec 무회귀)", () => {
+  const doc = tabledDoc();
+  delete doc.body.steps[0].table;
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
 test("whitespace-only strings are rejected by the \\S pattern", () => {
   const schema = refs["domain-skill/v1"];
   const body = {
