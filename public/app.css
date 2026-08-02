@@ -1448,7 +1448,8 @@ ol.steps > li p {
   padding-top: 3px;
 }
 /* 라벨에 필드 정의 툴팁이 달린 행 — 점선 밑줄 + help 커서로 호버를 유도 */
-.drow .dk.has-help {
+.drow .dk.has-help,
+.sk-table-k.has-help {
   cursor: help;
   text-decoration: underline dotted;
   text-decoration-color: var(--muted-soft);
@@ -1726,6 +1727,20 @@ button.pchip:hover {
   color: var(--muted);
   font-size: 12.5px;
   margin: 2px 0 4px;
+}
+.sk-table {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.sk-table-k {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }
 .sqlblock {
   margin: 6px 0;

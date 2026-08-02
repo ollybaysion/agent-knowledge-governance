@@ -115,6 +115,34 @@ function checkDerivedId(doc, errors) {
   }
 }
 
+// The table a step's SQL selects from, when there is exactly one to name
+// (issue #44). A join, a set operator or a subquery has no sole FROM, so this
+// returns null and the caller steps aside instead of guessing — the same
+// discipline as leaving a binds-less step alone. Quoted literals are stripped
+// first for the same reason binds does it: a keyword inside a string is not
+// syntax.
+function soleFromTable(sql) {
+  const text = String(sql ?? "").replace(/'[^']*'/g, "''");
+  if (/\bjoin\b/i.test(text)) return null;
+  const froms = [...text.matchAll(/\bfrom\b/gi)];
+  if (froms.length !== 1) return null;
+  const clause = text
+    .slice(froms[0].index + 4)
+    .split(
+      /\b(?:where|group|order|having|fetch|offset|start|connect|union|minus|intersect|pivot)\b/i,
+    )[0];
+  // A comma is an implicit join and a paren is an inline view — neither has a
+  // single source table either.
+  if (clause.includes(",") || clause.includes("(")) return null;
+  return clause.trim().split(/\s+/)[0] || null; // the alias, if any, drops off
+}
+
+// Case and owner prefix are noise for this comparison: the db-schema document
+// this points at is keyed by lower(table) with `owner` a plain body attribute
+// (deriveId above), so `TESTUSER.FDC_SENSOR` and `fdc_sensor` name one doc.
+const normalizeTable = (name) =>
+  String(name).replace(/"/g, "").split(".").pop().trim().toLowerCase();
+
 const SEMANTIC_CHECKS = {
   "db-schema/v1"(doc, errors) {
     const { catalog, columnDescs } = doc.body;
@@ -166,6 +194,22 @@ const SEMANTIC_CHECKS = {
         .filter(Boolean),
     );
     (Array.isArray(doc.body.steps) ? doc.body.steps : []).forEach((step, i) => {
+      // steps[].table coherence (issue #44). The declared table is what the
+      // prompt synthesizer heads the step's data block with and what the
+      // db-schema excerpt is looked up by, so a table that disagrees with the
+      // FROM beside it aims both at the wrong document — silently, since the
+      // SQL still runs. The SQL is where that truth is already written, so it
+      // is the reference; only a single-table SELECT can be judged.
+      const table = step?.table;
+      if (typeof table === "string" && table.trim()) {
+        const from = soleFromTable(step?.sql);
+        if (from && normalizeTable(from) !== normalizeTable(table)) {
+          fail(
+            errors,
+            `$.body.steps[${i}].table: "${table}" but the sql selects from "${from}"`,
+          );
+        }
+      }
       const binds = step?.binds;
       if (binds === undefined || binds === null || typeof binds !== "object")
         return;

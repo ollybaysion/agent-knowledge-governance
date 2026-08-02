@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 문서 JSON 스펙 (v0.6.0)
+# agent-knowledge-governance — 문서 JSON 스펙 (v0.7.0)
 
 > 허브 문서의 **JSON 포맷 정의서**. 모체 설계도
 > [`agent-knowledge-governance-design.md`](agent-knowledge-governance-design.md) §5(데이터 모델)를 구현
@@ -62,6 +62,17 @@
 > 규칙대로 `domain-skill/v1` 유지.** 정합은 시맨틱 체크가 본다(아래 §4.4).
 > 렌더는 무변경 — binds는 실행기용이고 산문 소비자(CC)는 `lead`로 배선을
 > 이미 받는다.
+> **v0.7.0 개정(2026-08-02): §4.4 `steps[].table` 신설(이슈 #44)** — 스텝별
+> 원천 테이블. 소비자(fdc-agent-be-spring 서술 프롬프트)가 스텝 스냅샷마다
+> `## <테이블명> — <라벨> (N행)` 데이터 블록을 세우고, 그 아래 컬럼 의미를
+> akg db-schema 문서에서 발췌해 붙이는데 **어느 문서인지의 키**가 이것이다.
+> `anchorTable`은 스킬 레벨 1개라 2단계 이후 스텝을 표현하지 못하고, FROM 절
+> 파싱은 소비자마다 다시 짜야 한다. 스킬 레벨 `tableList`는 기각 —
+> 스텝↔테이블 대응이 순서 암묵 규칙이 되고 조용히 어긋난다. 스킬이 만지는
+> 테이블 목록이 필요하면 이 필드의 **합집합으로 유도**한다(두 곳에 적으면
+> 드리프트만 생긴다). **선택 필드 추가라 §6 규칙대로 `domain-skill/v1` 유지.**
+> 렌더는 무변경 — 소비자는 spec.json을 파싱하고(SkillSpec.java), SKILL.md에는
+> FROM 절이 이미 있다.
 
 ---
 
@@ -396,6 +407,9 @@ body = **agent-skill-foundry spec.json(v2) 무변형 수용**. 렌더 산출물�
       "produces": "센서 정체·상태",          // 선택 — 답에 기여하는 차원 한 마디.
                                             //   비면 조회만 하고 답엔 안 나옴(ID 해소 스텝 등)
       "lead": "...",                        // 선택
+      "table": "fdc_sensor",                // 선택 — 이 스텝의 원천 테이블(단수).
+                                            //   서술형 답변의 데이터 블록 제목 + 컬럼 의미를
+                                            //   발췌할 db-schema 문서의 조회 키(id = lower(table))
       "sql": "SELECT * FROM FDC_SENSOR WHERE SNSR_ID = :snsr_id",   // :bind 필수
       "binds": {                            // 선택 — 실행기 배선: 이 스텝 SQL 의 :bind 가 어디서 오는지
         "snsr_id": { "from": "arg", "arg": "snsr_id" }
@@ -440,6 +454,13 @@ firstLine 계약까지 깨진다. `avoid` 항목은 형태 계약을 정규식�
 집합의 **정확 일치**(빠짐 = 실행 불가 스텝, 남음 = 근거 없는 주장. 따옴표
 리터럴은 벗기고 스캔 — 날짜 마스크 속 `:`는 bind가 아니다). binds 없는 스텝은
 검사하지 않는다 — 산문 소비자용 기존 spec은 그대로 유효하다.
+`steps[].table`도 같은 자리에서 **그 스텝 SQL의 FROM과 대조**한다 — 어긋난
+테이블명은 SQL이 멀쩡히 도는 채로 데이터 블록 제목과 db-schema 발췌를 둘 다
+엉뚱한 문서로 보내기 때문이다. 판정은 **단일 테이블 SELECT일 때만**: 조인·집합
+연산·인라인뷰는 대조할 단일 FROM이 없으므로 추측하지 않고 비켜선다(binds 없는
+스텝을 안 건드리는 것과 같은 규율). 대소문자와 owner 접두사는 무시한다 —
+db-schema 문서 id가 `lower(table)`이라 `TESTUSER.FDC_SENSOR`와 `fdc_sensor`는
+같은 문서다.
 
 **티어 예외 해소**: v1에서 이 타입만 갖고 있던 예외(`valueRules[].basis`의
 `추정)` 인라인)는 **`valueRules` 제거와 함께 사라졌다** — 값 의미의 티어드 값
