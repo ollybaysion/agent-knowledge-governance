@@ -75,13 +75,19 @@ function domainSkillDoc(name) {
     body: {
       name,
       argumentHint: "{id}",
-      scope: { 단위: "센서", 카디널리티: "단일", 의도: "상태" },
-      focus: "현재 상태",
-      intro: "테스트 스킬.",
+      question: "T-1 지금 어때?",
+      rephrasing: "테스트 스킬 — T-1 의 현재 상태.",
       inputs: [{ name: "id", required: true, description: "조회 키" }],
       dependencies: [{ mcp: "agent-db-plugin" }],
-      steps: [
-        { title: "1단계", produces: "현재 상태", sql: "SELECT 1 FROM dual" },
+      needs: [
+        {
+          id: "state",
+          what: "현재 상태",
+          filledBy: [{ query: "row", column: "STATE" }],
+        },
+      ],
+      queries: [
+        { id: "row", kind: "sql", sql: "SELECT state FROM dual" },
       ],
       output: {
         avoid: [

@@ -270,7 +270,10 @@ test("cli push: a bare spec.json creates the doc, and a second run updates it", 
 
     writeFileSync(
       specPath,
-      JSON.stringify({ ...GOLDEN_SPEC, focus: "정체·소속 설비·현재 상태와 이력" }),
+      JSON.stringify({
+        ...GOLDEN_SPEC,
+        rephrasing: "센서 하나의 정체·소속 설비·현재 상태와 이력.",
+      }),
     );
     const second = await runCli(["push", "domain-skill", specPath], {
       token: "ed-tok",
@@ -294,7 +297,8 @@ test("cli push --dry-run: renders the skill with no token, no server, and writes
     assert.equal(r.status, 0, r.stderr);
     // The preview IS the SKILL.md the factory used to print locally.
     assert.match(r.stdout, /^---\nname: fdc-explain-sensor\n/);
-    assert.match(r.stdout, /## 조회 절차/);
+    assert.match(r.stdout, /## 필요 데이터/);
+    assert.match(r.stdout, /## 조달 수단/);
     assert.match(r.stderr, /DRY-RUN/);
     // Nothing about a missing token or server, because it needs neither.
     assert.doesNotMatch(r.stderr, /no token|no server URL/);

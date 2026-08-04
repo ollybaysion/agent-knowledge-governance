@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 문서 JSON 스펙 (v0.7.0)
+# agent-knowledge-governance — 문서 JSON 스펙 (v0.8.0)
 
 > 허브 문서의 **JSON 포맷 정의서**. 모체 설계도
 > [`agent-knowledge-governance-design.md`](agent-knowledge-governance-design.md) §5(데이터 모델)를 구현
@@ -73,6 +73,25 @@
 > 드리프트만 생긴다). **선택 필드 추가라 §6 규칙대로 `domain-skill/v1` 유지.**
 > 렌더는 무변경 — 소비자는 spec.json을 파싱하고(SkillSpec.java), SKILL.md에는
 > FROM 절이 이미 있다.
+> **v0.8.0 개정(2026-08-04): §4.4 = spec v3, 네 칸 재편(이슈 #46)** — 스킬은
+> **질문 → rephrasing → 필요 데이터 → 조달 수단** 네 칸이고 각 화살표가 원래
+> LLM의 추론인데, v2 spec에는 네 번째 칸(`steps[].sql`)만 1급으로 있었다.
+> 그래서 "필요 데이터(명세)"와 "도착 데이터(행)"를 잇는 필드가 없어 종결 판정이
+> 소비자 재량에 떠 있었다. 신설: `question`·`rephrasing`·`needs[]`(`id`·`what`·
+> `when`·`filledBy[]`)·`queries[].id`·`queries[].kind`. 개명: `steps[]` →
+> `queries[]`(순서 의미 제거 = 카탈로그), `binds.from:"step"`(인덱스) →
+> `"query"`(id). 제거: `steps[].produces`·`focus`·`intro`(→ rephrasing이 흡수)·
+> `scope`·`branches`·`steps[].title`·`steps[].lead`. **`needs`가 1급이고 쿼리는
+> 그것을 채우는 수단** — 답이 조회를 정하는 방향으로 뒤집혔다.
+> **봉투 타입은 `domain-skill/v1` 유지**: §6 규칙(파괴적 변경 = 새 `v<N+1>` +
+> 마이그레이터)의 두 번째 예외이고, 근거는 v0.5.0과 같다 — 저장된 domain-skill
+> 문서가 예시·번들 스킬 두어 건뿐이라 두 버전을 병존시키는 비용(스키마 2벌,
+> 렌더·검증 분기, 대시보드 이중 뷰)이 이득을 넘는다. 세 번째로 이 예외를 쓰기
+> 전에는 마이그레이터를 먼저 만드는 게 맞다.
+> 미결이던 3건은 이 개정에서 확정: ① `filledBy` 여럿 = **OR**(하나라도 채워지면
+> 충족; AND는 needs를 쪼개서 표현) ② 멈춤형 분기 문안은 **자리를 만들지 않는다**
+> (서술 프롬프트가 미충족 needs 목록만 받고 문장은 LLM이 쓴다) ③ 다른 스킬의
+> 쿼리를 가리키는 **풀 주소 = `스킬명#쿼리id`**(인덱스 주소는 순서와 함께 소멸).
 
 ---
 
@@ -367,57 +386,62 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 
 ### 4.4 `domain-skill/v1` — 실행형 조회 절차 스킬
 
-body = **agent-skill-foundry spec.json(v2) 무변형 수용**. 렌더 산출물은 md 문서가
-아니라 `rendered/domain-skill/<name>/SKILL.md`이고, foundry `renderSkill()`과
-**바이트 동일**이 계약이다(frontmatter `disable-model-invocation: true`).
+body = **spec v3, 네 칸 구조**. 렌더 산출물은 md 문서가 아니라
+`rendered/domain-skill/<name>/SKILL.md`이고, 렌더러는 akg 하나다
+(frontmatter `disable-model-invocation: true`). 골든은
+`test/fixtures/domain-skill-golden-SKILL.md` — 렌더의 고정 문자열 전부를 한자리에
+못 박는다.
 
-**포맷 진실원 = akg (발효 2026-07-21)**. foundry spec v2 검증분이
-`schemas/domain-skill/v1.schema.json`에 반영되면서 이관 조건(v0.4.2)이 충족됐다.
-이제 foundry `validateSpec`·`renderSkill`이 akg 스키마를 **추종**하고, 다음 spec
-개정도 akg가 발행한다(설계도 §5.3·§12-2). 골든 테스트는 양방향 어긋남 감지기로
-유지 — akg 쪽은 `test/fixtures/foundry-golden-SKILL.md`(foundry 골든 산출물의
-체크인 사본)로 그 계약을 고정한다.
+**포맷 진실원 = akg (발효 2026-07-21)**. foundry `validateSpec`은 akg 스키마의
+**추종자**이고, spec 개정도 akg가 발행한다(설계도 §5.3·§12-2). foundry의
+`renderSkill`은 이후 제거돼(asf PR #14) md를 만드는 곳은 akg뿐이다.
 
-**v2 의 뼈대**: `description`은 **필드가 아니다** — 렌더러가
-`scope`+`focus`+`inputs`에서 합성한다(에이전트의 유일한 레버는 `focus`).
-`valueRules`도 없다 — 값 의미(코드표)는 db-schema 문서 소관이다. 출력은 **형식을
-강제하지 않고 내용에만 바닥**을 둔다: `steps[].produces`가 「반드시 포함」 줄을
-만든다.
+**v3의 뼈대 — 스킬 = 정답지**. 스킬은 **질문 → rephrasing → 필요 데이터 →
+조달 수단** 네 칸이고, 각 화살표는 원래 LLM이 해야 할 추론인데 그 답을 사람이 미리
+채워둔 것이다. v2에는 네 번째 칸만 1급으로 있어서 **알아야 할 것**을 적을 자리가
+없었다(`produces`는 조회 산출물이지 알아야 할 것이 아니다). v3에서 `needs`가
+1급이 되고 쿼리는 그것을 채우는 **수단**이 된다 — 답이 조회를 정하는 방향이다.
+`description`은 여전히 필드가 아니다: 렌더러가 `question`에서 합성한다(대표 발화가
+곧 라우팅 신호).
 
 ```jsonc
 "body": {
   "name": "fdc-explain-sensor",             // 필수, kebab-case. 봉투 id와 일치, H1 = "# {name}"
   "argumentHint": "{snsr_id}",              // 필수 — 표시용 인자 힌트. inputs에서 합성:
                                             //   required는 {name}, 선택은 [name] (대시보드가 자동 유지)
-  "scope": { "단위": "센서",                 // 필수 — 닫힌 enum 3축. description 골격·추적 방향을 고름
-             "카디널리티": "단일",           //   단위 = 설비|챔버|센서, 카디널리티 = 단일,
-             "의도": "상태" },               //   의도 = 상태|생성 이력 (비교·집계·이상 분석은 미도입)
-  "focus": "정체·소속 설비·현재 상태",        // 필수 — description 빈칸을 채우는 도메인 구절(한 줄).
-                                            //   라우팅용 요약이지 답의 목록이 아니다(그건 produces)
+  "question": "S-0004 설명해줘",             // 필수 — 이 스킬이 답하는 대표 발화(한 줄).
+                                            //   라우팅 신호이자 합성 description의 인용문
+  "rephrasing": "센서 S-0004가 무엇을 재고…", // 필수 — 답할 수 있는 형태로 다시 말한 것.
+                                            //   없던 의도를 더하지 않는다(옛 intro를 흡수)
   "anchorTable": "FDC_SENSOR",              // 선택 — 있으면 테이블→스킬 결정적 라우팅
-  "intro": "...",                           // 필수 — 도메인 주의사항(실행 도입부는 렌더러 고정)
   "inputs": [                               // 필수 — 인자 계약의 진실원(소비자 wiring 이 아니라 여기)
     { "name": "snsr_id", "required": true, "description": "조회 키" }
   ],
   "dependencies": [                         // 필수 — 필요한 MCP 만. fail-fast 문장은 렌더러 고정
     { "mcp": "agent-db-plugin", "tools": ["run_query"], "why": "센서·설비 조회" }
   ],
-  "steps": [                                // 필수 — 순서 있는 조회 절차(흐름)
-    { "title": "센서 조회",
-      "produces": "센서 정체·상태",          // 선택 — 답에 기여하는 차원 한 마디.
-                                            //   비면 조회만 하고 답엔 안 나옴(ID 해소 스텝 등)
-      "lead": "...",                        // 선택
-      "table": "fdc_sensor",                // 선택 — 이 스텝의 원천 테이블(단수).
-                                            //   서술형 답변의 데이터 블록 제목 + 컬럼 의미를
-                                            //   발췌할 db-schema 문서의 조회 키(id = lower(table))
-      "sql": "SELECT * FROM FDC_SENSOR WHERE SNSR_ID = :snsr_id",   // :bind 필수
-      "binds": {                            // 선택 — 실행기 배선: 이 스텝 SQL 의 :bind 가 어디서 오는지
-        "snsr_id": { "from": "arg", "arg": "snsr_id" }
-      },                                    //   {from:"arg",arg} | {from:"step",step,column(앞 스텝 결과 컬럼)}
-      "branches": [                         // 선택 — 흐름 제어. when 은 프로즈가 아니라 조건식
-        { "when": "rows = 0", "then": "종료하고 '미등록 센서'로 답한다" }
-      ],
-      "notes": "..." }                      // 선택 — 분기가 아닌 자유 코멘트. 단일 raw md 문자열
+  "needs": [                                // 필수 — 알아야 할 것. 답의 바닥(반드시 포함)이 여기서 온다
+    { "id": "sensor_kind",                  //   id = 조건식이 부르는 이름 ^[a-z][a-z0-9_]*$
+      "what": "물리인지 가상인지",            //   what = 사람 말로 알아야 할 것(한 줄)
+      "filledBy": [                         //   filledBy = 채울 수단. 여럿이면 OR(하나면 충족),
+        { "query": "sensor_row",            //     빈 배열이면 "이 스킬로는 못 얻는다"(답불가 선언)
+          "column": "SNSR_KIND" }           //   column 까지 못 박는다 — 한 쿼리를 여러 needs가
+      ] },                                  //     나눠 쓸 때 rows>0 만으로는 NULL 컬럼을 못 잡는다
+    { "id": "message_vid", "what": "값이 실려 오는 메시지의 VID",
+      "when": "sensor_kind = PHYSICAL",     //   선택 — 다른 need 값의 조건. 갈림형 분기가 여기로 왔다
+      "filledBy": [ { "query": "message_row", "column": "VID" } ] }
+  ],
+  "queries": [                              // 필수 — 조달 수단 카탈로그(순서 의미 없음)
+    { "id": "sensor_row",                   //   id = filledBy·binds 가 부르는 이름
+      "kind": "sql",                        //   필수, 현재 enum ["sql"] — 이 칸은 "쿼리"가 아니라
+                                            //     조달 수단이라, 인덱스 조회·상수 카탈로그가 뒤에 온다
+      "table": "fdc_sensor",                //   선택 — 이 쿼리의 원천 테이블(단수). 서술형 답변의
+                                            //     데이터 블록 제목 + db-schema 문서 조회 키(id = lower(table))
+      "sql": "SELECT snsr_id, snsr_kind FROM fdc_sensor WHERE snsr_id = :id",
+      "binds": {                            //   선택 — 실행기 배선: 이 SQL 의 :bind 가 어디서 오는지
+        "id": { "from": "arg", "arg": "snsr_id" }
+      },                                    //   {from:"arg",arg} | {from:"query",query(id),column}
+      "notes": "..." }                      //   선택 — 자유 코멘트. 단일 raw md 문자열
   ],
   "output": {                               // 필수 — 형식은 자유, 내용에만 바닥
     "avoid": [                              // 필수, 3개 이상 —「끌리는 오추론」—「금하는 데이터 사실」
@@ -432,39 +456,65 @@ body = **agent-skill-foundry spec.json(v2) 무변형 수용**. 렌더 산출물�
 }
 ```
 
-**스키마 사영 시 필수 세부**(foundry 실행 대조로 확정): 배열은 **minItems**
-(`steps`/`inputs`/`dependencies` 1, `avoid` 3, `examples` 2), 필수 문자열은
-공백만으로 채울 수 없음(`\S` 패턴 — minLength로는 부족), `name`은
-`^[a-z][a-z0-9-]*$`, `scope` 세 축은 **enum**, `inputs`에 필수 인자가 **최소
-하나**(없으면 description 전제조건이 빈다). `binds` 값은 `from`으로 갈리는
-두 닫힌 형태(if/then/else 사영, `step`은 integer) — 어느 쪽도 모르는 키를
-받지 않는다.
+**따라오는 규칙 둘**(소비자 계약):
 
-**한 줄에 끼워 넣는 조각**(`focus`·`produces`·`examples[].ask`)은 개행과 선두
-마크다운 블록 문자를 금지한다 — 줄 구조가 깨지고, description은 소비자
-firstLine 계약까지 깨진다. `avoid` 항목은 형태 계약을 정규식으로 강제한다
-(양쪽 6자 이상 + ` — ` 구분자): **개수만 세면** "부정확한 설명을 한다" 같은
-규율의 재진술이 도메인 지식 행세로 통과했다.
+1. **채워짐 판정 = 결정론** — 쿼리 도착 && `rows > 0` && `filledBy`가 지정한 컬럼
+   non-null. 못 채운 **활성** needs가 남으면 열린 질문이 남은 것이고, 종결은 "열린
+   질문이 없으면"이다.
+2. **쿼리 실행 조건** — 그 쿼리를 `filledBy`로 지목한 needs 중 **활성(`when` 충족)인
+   것이 하나라도 있을 때만** 실행한다. 갈림형(물리/가상)에서는 어느 쪽이든 한
+   쿼리가 반드시 0행이라, 이 규칙이 없으면 결정론 판정이 그 0행을 "채우기 실패"로
+   읽는다.
 
-**검증기가 표현 못 하는 것**: `steps[].produces`가 **최소 하나**는 있어야 한다는
-규칙은 JSON Schema `contains`인데 `src/validate.mjs`가 구현하지 않아
-`envelope.mjs`의 **시맨틱 체크**로 둔다(다른 타입의 sibling 비교와 같은 자리).
-`steps[].binds`의 정합 3종도 같은 자리다 — ① `from:"arg"`의 arg가 `inputs`에
-실재 ② `from:"step"`의 step이 **앞** 스텝 ③ SQL의 `:var` 집합과 binds 키
-집합의 **정확 일치**(빠짐 = 실행 불가 스텝, 남음 = 근거 없는 주장. 따옴표
-리터럴은 벗기고 스캔 — 날짜 마스크 속 `:`는 bind가 아니다). binds 없는 스텝은
-검사하지 않는다 — 산문 소비자용 기존 spec은 그대로 유효하다.
-`steps[].table`도 같은 자리에서 **그 스텝 SQL의 FROM과 대조**한다 — 어긋난
-테이블명은 SQL이 멀쩡히 도는 채로 데이터 블록 제목과 db-schema 발췌를 둘 다
-엉뚱한 문서로 보내기 때문이다. 판정은 **단일 테이블 SELECT일 때만**: 조인·집합
-연산·인라인뷰는 대조할 단일 FROM이 없으므로 추측하지 않고 비켜선다(binds 없는
-스텝을 안 건드리는 것과 같은 규율). 대소문자와 owner 접두사는 무시한다 —
-db-schema 문서 id가 `lower(table)`이라 `TESTUSER.FDC_SENSOR`와 `fdc_sensor`는
-같은 문서다.
+**미결 3건의 확정**(2026-08-04, 사용자 결정): ① `filledBy` 여럿 = **OR** —
+하나라도 채워지면 충족이고, AND가 필요하면 needs를 쪼갠다(그래야 무엇이 비었는지가
+컬럼 단위로 보인다). ② 멈춤형 분기 문안("센서 {id}는 등록되어 있지 않다")은
+**자리를 만들지 않는다** — 미충족 needs 목록만 서술 프롬프트에 넘기고 문장은 LLM이
+쓴다. 렌더러는 그 자리에 고정 문장(못 채운 항목을 밝히고 채운 것만으로 답한다)을
+넣는다. ③ 다른 스킬의 쿼리를 가리키는 **풀 주소는 `스킬명#쿼리id`** — 순서가
+사라져 인덱스 주소(`fdc-explain-sensor#0`)는 더 이상 유효하지 않다.
 
-**티어 예외 해소**: v1에서 이 타입만 갖고 있던 예외(`valueRules[].basis`의
-`추정)` 인라인)는 **`valueRules` 제거와 함께 사라졌다** — 값 의미의 티어드 값
-구조화는 db-schema 타입이 온전히 소유한다.
+**스키마 사영 시 필수 세부**: 배열은 **minItems**(`needs`/`queries`/`inputs`/
+`dependencies` 1, `avoid` 3, `examples` 2 — `filledBy`만 **0 허용**), 필수 문자열은
+공백만으로 채울 수 없음(`\S` 패턴), `name`은 `^[a-z][a-z0-9-]*$`, `needs[].id`·
+`queries[].id`는 `^[a-z][a-z0-9_]*$`, `queries[].kind`는 **enum**, `inputs`에 필수
+인자가 **최소 하나**(없으면 description 전제조건이 빈다). `binds` 값은 `from`으로
+갈리는 두 닫힌 형태(if/then/else 사영) — 어느 쪽도 모르는 키를 받지 않는다.
+
+**한 줄에 끼워 넣는 조각**(`question`·`needs[].what`·`examples[].ask`)은 개행과 선두
+마크다운 블록 문자를 금지한다 — 줄 구조가 깨지고, description은 소비자 firstLine
+계약까지 깨진다. `avoid` 항목은 형태 계약을 정규식으로 강제한다(양쪽 6자 이상 +
+` — ` 구분자): **개수만 세면** "부정확한 설명을 한다" 같은 규율의 재진술이 도메인
+지식 행세로 통과했다.
+
+**검증기가 표현 못 하는 것** — 전부 `envelope.mjs`의 **시맨틱 체크**다(다른 타입의
+sibling 비교와 같은 자리). v3에서는 대부분 같은 질문의 반복이다: **이 포인터가
+가리키는 게 실재하는가.**
+
+- `needs[].id`·`queries[].id`의 **유일성** — id가 주소가 됐으므로 중복은 모든 참조를
+  모호하게 만든다.
+- `filledBy[].query`가 실재하는 쿼리, `filledBy[].column`이 **그 쿼리 SELECT 목록에
+  실재**. 뒤엣것이 컬럼을 못 박은 이유다 — 없는 컬럼은 영영 안 채워지는데 결정론
+  판정은 그걸 "데이터가 없다"로 읽는다.
+- `needs[].when`이 **다른 need를 지목**(소문자 식별자 중 하나가 need id여야 한다)
+  하고, when 그래프에 **순환이 없을 것**.
+- `binds`의 정합 4종: `from:"arg"`의 arg가 `inputs`에 실재 / `from:"query"`의 query가
+  실재하고 그 column이 SELECT에 실재 / **binds 그래프 무순환**(v2에서 `step < i`가
+  막아 주던 것이 순서와 함께 사라져 여기로 왔다 — 자기 참조는 길이 1의 순환) / SQL의
+  `:var` 집합과 binds 키 집합의 **정확 일치**(빠짐 = 실행 불가, 남음 = 근거 없는
+  주장. 따옴표 리터럴은 벗기고 스캔 — 날짜 마스크 속 `:`는 bind가 아니다).
+- `queries[].table`을 **그 쿼리 SQL의 FROM과 대조**(#44) — 어긋난 테이블명은 SQL이
+  멀쩡히 도는 채로 데이터 블록 제목과 db-schema 발췌를 둘 다 엉뚱한 문서로 보낸다.
+  판정은 **단일 테이블 SELECT일 때만**: 조인·집합연산·인라인뷰는 대조할 단일 FROM이
+  없으므로 추측하지 않고 비켜선다. 대소문자·owner 접두사는 무시한다(db-schema 문서
+  id가 `lower(table)`).
+
+**판정하지 않는 것**: SELECT 목록을 읽을 수 없으면(`*`, 별칭 없는 식) 컬럼 대조를
+**비켜선다** — 단일 FROM이 없을 때와 같은 규율이다. **아무 need도 지목하지 않는
+쿼리**(죽은 쿼리)는 akg가 막지 않는다 — 저작 중에는 정상 상태이고, 경고 채널이 없는
+검증기에서 오류로 올리면 대시보드 저작이 막힌다. 이건 **생성 시점(foundry)의
+경고**로 남는다. 빈 `filledBy`도 같은 이유로 오류가 아니다 — 그건 흠이 아니라 답불가의
+선언이다.
 
 ### 4.5 `unclassified/v1` — 타입 분류 밖의 md 문서
 

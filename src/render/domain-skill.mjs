@@ -1,16 +1,15 @@
-// domain-skill/v1 body (agent-skill-foundry spec v2) -> SKILL.md.
+// domain-skill/v1 body (spec v3) -> SKILL.md.
 //
-// This is a port of agent-skill-foundry/forge/render-skill.mjs and the
-// contract is byte-equality with it (json-spec §4.4): the same body must
-// render to the same file on both sides. Keep every fixed string identical —
-// the fixed intro, the section headings, the output scaffolding, the
-// discipline block. (The previous port had drifted here: its fixed intro read
-// "주어진 인자를 받아…" while the renderer emits "입력 `{argumentHint}`를
-// 받아…", so the two sides could never have been byte-equal.)
+// The document is the four cells in order: 질문 → rephrasing → 필요 데이터 →
+// 조달 수단 (issue #46). What changed for a reader of the md is the middle: a
+// numbered 조회 절차 became a list of what must be known, each item pointing at
+// the query that fills it. Order is gone from the queries — so the wiring that
+// used to live in prose (`lead`: "1단계의 EQP_ID로:") is now rendered from
+// `binds`, which is the only dependency left between two queries.
 //
-// `description` is not a body field: it is synthesized here from scope +
-// focus + inputs, so the routing sentence cannot drift off its skeleton.
-// Korean particle agreement is computed so any focus reads naturally.
+// `description` is not a body field: it is synthesized here from `question`, so
+// the routing sentence quotes how someone actually asks instead of a skeleton
+// assembled from taxonomy fields (scope/focus, removed in v3).
 //
 // Schema validation (unknown keys, minItems, patterns) is the caller's job
 // via envelope.mjs — this module only renders.
@@ -24,17 +23,6 @@ export const DEFAULT_DISCIPLINE = [
   "  db-schema-apply 제안 JSON으로 넘긴다 (승격은 사람).",
 ].join("\n");
 
-function hasFinalConsonant(text) {
-  const last = text.trim().slice(-1);
-  if (!last) return false;
-  const code = last.charCodeAt(0);
-  if (code < 0xac00 || code > 0xd7a3) return false;
-  return (code - 0xac00) % 28 !== 0;
-}
-
-const objectParticle = (text) => (hasFinalConsonant(text) ? "을" : "를");
-const subjectParticle = (text) => (hasFinalConsonant(text) ? "이" : "가");
-
 /** The precondition clause: the required argument names, joined. */
 function precondition(inputs) {
   return `${inputs
@@ -43,12 +31,12 @@ function precondition(inputs) {
     .join("·")} 필요`;
 }
 
-/** "언제 부르나"(트리거)만 적는다 — 골격은 scope.의도 가 고른다. */
+// The routing sentence quotes `question` verbatim — the representative
+// utterance IS the routing signal (issue #46 supersedes the scope+focus
+// skeleton). The consumer contract is unchanged: one complete sentence ending
+// in a period, on the first line.
 export function synthesizeDescription(spec) {
-  const when = precondition(spec.inputs);
-  if (spec.scope.의도 === "생성 이력")
-    return `특정 ${spec.focus}${subjectParticle(spec.focus)} 어떻게 만들어졌는지 묻는 상황에서 호출한다 (${when}).`;
-  return `특정 ${spec.scope.단위}의 ${spec.focus}${objectParticle(spec.focus)} 묻는 상황에서 호출한다 (${when}).`;
+  return `"${spec.question}" 같은 질문에 답한다 (${precondition(spec.inputs)}).`;
 }
 
 function frontmatter(spec) {
@@ -68,12 +56,17 @@ function frontmatter(spec) {
 }
 
 // The execution framing is invariant across every stamped skill, so the
-// renderer owns it; body.intro may only add domain caveats below this line.
+// renderer owns it. It names the two sections that carry the work, in the
+// direction v3 fixed: the needs decide what to fetch, not the other way round.
 function fixedIntro(spec) {
   return [
-    `입력 \`${spec.argumentHint}\`를 받아 아래 **조회 절차**를 순서대로 실행하고,`,
-    "얻은 값을 **출력 형식**대로 자연어로 답한다.",
+    `입력 \`${spec.argumentHint}\`를 받아 아래 **필요 데이터**를 **조달 수단**으로 채우고,`,
+    "채운 값으로 **출력 형식**대로 자연어로 답한다.",
   ].join("\n");
+}
+
+function questionBlocks(spec) {
+  return [`> ${spec.question}`, spec.rephrasing];
 }
 
 function inputBlocks(inputs) {
@@ -99,15 +92,48 @@ function dependencyBlocks(dependencies) {
   ];
 }
 
-function stepBlocks(step) {
-  const blocks = [`### ${step.title}`];
-  if (step.lead) blocks.push(step.lead);
-  blocks.push("```sql\n" + step.sql + "\n```");
-  if (step.branches)
-    blocks.push(
-      step.branches.map((b) => `- 만약 ${b.when} → ${b.then}`).join("\n"),
-    );
-  if (step.notes) blocks.push(step.notes);
+// A need reads as one line: what it is, when it applies, where it comes from.
+// An empty filledBy is not a gap in the document — it is the document saying
+// this skill cannot get that, which is the point of making needs first class.
+const sourceOf = (need) =>
+  need.filledBy.length === 0
+    ? "(조달 수단 없음 — 이 스킬로는 알 수 없다)"
+    : need.filledBy.map((f) => `\`${f.query}.${f.column}\``).join(" 또는 ");
+
+function needBlocks(needs) {
+  return [
+    "알아야 할 것 하나에 조달 수단이 붙는다. 여럿이면 **아무거나 하나**면 되고,\n" +
+      "조달 수단이 없는 항목은 이 스킬로 알 수 없는 것이다.",
+    needs
+      .map((n) => {
+        const when = n.when ? ` (\`${n.when}\` 일 때)` : "";
+        return `- **${n.id}** — ${n.what}${when} ← ${sourceOf(n)}`;
+      })
+      .join("\n"),
+  ];
+}
+
+// binds is where a query says it depends on another one — the last thing left
+// of the old step order, and now the only thing. Rendering it keeps the md
+// reader able to chain queries without a numbered flow to follow.
+function bindLines(binds) {
+  return Object.entries(binds)
+    .map(([name, src]) =>
+      src.from === "arg"
+        ? `- \`:${name}\` ← 인자 \`${src.arg}\``
+        : `- \`:${name}\` ← \`${src.query}.${src.column}\``,
+    )
+    .join("\n");
+}
+
+function queryBlocks(query) {
+  const head = query.table
+    ? `### \`${query.id}\` — \`${query.table}\``
+    : `### \`${query.id}\``;
+  const blocks = [head, "```sql\n" + query.sql + "\n```"];
+  if (query.binds && Object.keys(query.binds).length)
+    blocks.push(bindLines(query.binds));
+  if (query.notes) blocks.push(query.notes);
   return blocks;
 }
 
@@ -118,19 +144,45 @@ function quoted(label, text) {
     .join("\n");
 }
 
-// Form is free, content is not. The narration line refuses to fix a format;
-// 반드시 포함 (composed from steps[].produces) is the floor that keeps a weak
-// model from silently dropping a dimension it actually fetched. The clause
-// "질문이 특정 항목만 묻는 게 아니면" is what keeps that floor from
-// contradicting the deliberately narrow second example.
+// Form is free, content is not. The floor is composed from `needs` now, not
+// from what the queries happened to produce — the same inversion the body made.
+// A conditional need is listed apart so the floor stays true when its condition
+// does not hold, and the unmet line is fixed text: v3 gives a stop message no
+// field of its own (user decision 2026-08-04), so the model names the needs it
+// could not fill and answers with the rest.
 function outputBlocks(spec) {
+  // A need with no filledBy is not part of the floor — it can never be filled,
+  // and demanding it would make every answer report the same permanent gap.
+  // It gets its own line instead, which says what to do when asked for it.
+  const procurable = spec.needs.filter((n) => n.filledBy.length > 0);
+  const always = procurable.filter((n) => !n.when);
+  const conditional = procurable.filter((n) => n.when);
+  const unknown = spec.needs.filter((n) => n.filledBy.length === 0);
   const blocks = [
-    `조회한 데이터로 ${spec.scope.단위}의 ${spec.focus}${objectParticle(spec.focus)} 설명한다. 정해진 형식은 없다.\n` +
+    "채운 값으로 위 **질문**에 답한다. 정해진 형식은 없다.\n" +
       "체계적·논리적으로, 없는 정보는 지어내지 않는다.",
   ];
-  const produces = spec.steps.map((s) => s.produces).filter(Boolean);
+  if (always.length)
+    blocks.push(
+      `**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): ${always
+        .map((n) => n.what)
+        .join(" · ")}`,
+    );
+  if (conditional.length)
+    blocks.push(
+      `**조건부 포함**: ${conditional
+        .map((n) => `${n.what} (\`${n.when}\` 일 때)`)
+        .join(" · ")}`,
+    );
+  if (unknown.length)
+    blocks.push(
+      `**알 수 없는 것**: ${unknown
+        .map((n) => n.what)
+        .join(" · ")} — 조달 수단이 없다. 물으면 지어내지 말고 없다고 답한다.`,
+    );
   blocks.push(
-    `**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): ${produces.join(" · ")}`,
+    "채우지 못한 항목이 있으면 **무엇을 못 채웠는지 밝히고** 채운 것만으로 답한다 —\n" +
+      "빈칸을 추측으로 메우지 않는다.",
   );
   blocks.push(
     "**하지 말 것**",
@@ -149,13 +201,18 @@ export function renderDomainSkillMd(doc) {
     frontmatter(spec),
     `# ${spec.name}`,
     fixedIntro(spec),
-    spec.intro,
+    "## 질문",
+    ...questionBlocks(spec),
     "## 입력 파라미터",
     inputBlocks(spec.inputs),
     "## 의존성",
     ...dependencyBlocks(spec.dependencies),
-    "## 조회 절차",
-    ...spec.steps.flatMap(stepBlocks),
+    "## 필요 데이터",
+    ...needBlocks(spec.needs),
+    "## 조달 수단",
+    "순서는 의미가 없다 — 각 쿼리는 그것을 지목한 필요 데이터 중 조건이 성립한 것이\n" +
+      "하나라도 있을 때 실행한다.",
+    ...spec.queries.flatMap(queryBlocks),
     "## 출력 형식",
     ...outputBlocks(spec),
     "## 규율",

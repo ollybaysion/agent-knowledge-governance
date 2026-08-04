@@ -4,15 +4,19 @@ argument-hint: "{snsr_id}"
 anchor-table: FDC_SENSOR
 disable-model-invocation: true
 description: >-
-  특정 센서의 정체·소속 설비·현재 상태를 묻는 상황에서 호출한다 (snsr_id 필요).
+  "S-0004 설명해줘" 같은 질문에 답한다 (snsr_id 필요).
 ---
 
 # fdc-explain-sensor
 
-입력 `{snsr_id}`를 받아 아래 **조회 절차**를 순서대로 실행하고,
-얻은 값을 **출력 형식**대로 자연어로 답한다.
+입력 `{snsr_id}`를 받아 아래 **필요 데이터**를 **조달 수단**으로 채우고,
+채운 값으로 **출력 형식**대로 자연어로 답한다.
 
-센서 하나의 기준 정보를 조회해 설명한다 — 종류·단위, 소속 설비, 활성/비활성 상태, 최근 설비 이벤트 맥락. 센서가 비활성이면 소속 설비의 미사용 여부까지 짚어 원인 단서를 준다.
+## 질문
+
+> S-0004 설명해줘
+
+센서 S-0004가 무엇을 재는 센서이고(종류·단위) 어느 설비에 속해 있으며 지금 쓰이는 상태인지, 쓰이지 않는다면 소속 설비 자체가 미사용이라 그런 것인지, 그리고 그 설비에 최근 어떤 정비 이벤트가 있었는지.
 
 ## 입력 파라미터
 
@@ -24,27 +28,42 @@ description: >-
 
 실행 전 `list_connections`로 확인하고, 없으면 무엇이 없는지 밝히고 멈춘다.
 
-## 조회 절차
+## 필요 데이터
 
-### 1단계 — 센서 기본 정보
+알아야 할 것 하나에 조달 수단이 붙는다. 여럿이면 **아무거나 하나**면 되고,
+조달 수단이 없는 항목은 이 스킬로 알 수 없는 것이다.
+
+- **sensor_type** — 센서가 재는 값의 종류 ← `sensor_row.SNSR_TYPE_CD`
+- **sensor_unit** — 측정 단위 ← `sensor_row.UNIT_CD`
+- **sensor_active** — 센서가 지금 쓰이는 상태인지 ← `sensor_row.USE_YN`
+- **owner_equipment** — 센서가 속한 설비 ← `equipment_row.EQP_NAME`
+- **equipment_active** — 소속 설비 자체가 미사용인지 (`sensor_active = N` 일 때) ← `equipment_row.USE_YN`
+- **recent_events** — 소속 설비의 최근 정비 이벤트 ← `event_rows.EVT_LABEL`
+
+## 조달 수단
+
+순서는 의미가 없다 — 각 쿼리는 그것을 지목한 필요 데이터 중 조건이 성립한 것이
+하나라도 있을 때 실행한다.
+
+### `sensor_row` — `fdc_sensor`
 
 ```sql
 SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn
   FROM fdc_sensor WHERE snsr_id = :id
 ```
 
-- 만약 rows = 0 → 종료하고 "센서 {id}는 등록되어 있지 않다"로 답한다
+- `:id` ← 인자 `snsr_id`
 
-### 2단계 — 소속 설비
-
-1단계의 `EQP_ID`로:
+### `equipment_row` — `fdc_equipment`
 
 ```sql
 SELECT eqp_id, eqp_name, model_cd, vendor, use_yn
   FROM fdc_equipment WHERE eqp_id = :eqp
 ```
 
-### 3단계 — 설비 최근 이벤트 (정비 맥락)
+- `:eqp` ← `sensor_row.EQP_ID`
+
+### `event_rows` — `fdc_setup_event`
 
 ```sql
 SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label
@@ -52,14 +71,21 @@ SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label
  ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY
 ```
 
+- `:eqp` ← `sensor_row.EQP_ID`
+
 `EVT_TYPE_CD`의 코드→뜻 번역은 표준 db-schema 문서(keyword-docs 주입)를 따른다.
 
 ## 출력 형식
 
-조회한 데이터로 센서의 정체·소속 설비·현재 상태를 설명한다. 정해진 형식은 없다.
+채운 값으로 위 **질문**에 답한다. 정해진 형식은 없다.
 체계적·논리적으로, 없는 정보는 지어내지 않는다.
 
-**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): 센서 정체·상태 · 소속 설비 · 최근 설비 이벤트
+**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): 센서가 재는 값의 종류 · 측정 단위 · 센서가 지금 쓰이는 상태인지 · 센서가 속한 설비 · 소속 설비의 최근 정비 이벤트
+
+**조건부 포함**: 소속 설비 자체가 미사용인지 (`sensor_active = N` 일 때)
+
+채우지 못한 항목이 있으면 **무엇을 못 채웠는지 밝히고** 채운 것만으로 답한다 —
+빈칸을 추측으로 메우지 않는다.
 
 **하지 말 것**
 

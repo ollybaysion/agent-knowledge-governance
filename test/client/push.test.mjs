@@ -162,12 +162,15 @@ test("validateForPush: an unknown key in the body is rejected before any network
   assert.match(errors.join("\n"), /description/);
 });
 
-test("validateForPush: a spec where no step declares produces is rejected", () => {
+test("validateForPush: a need pointing at no query is rejected before any network call", () => {
   const { doc } = buildDocument("domain-skill", {
     ...GOLDEN_SPEC,
-    steps: GOLDEN_SPEC.steps.map(({ produces, ...rest }) => rest),
+    needs: GOLDEN_SPEC.needs.map((need) => ({
+      ...need,
+      filledBy: need.filledBy.map((src) => ({ ...src, query: "nope" })),
+    })),
   });
-  assert.match(validateForPush(doc).join("\n"), /반드시 포함/);
+  assert.match(validateForPush(doc).join("\n"), /인 쿼리가 없습니다/);
 });
 
 // ------------------------------------------------------------ create/update
@@ -184,7 +187,7 @@ test("push: a first push creates the doc and renders it to the skill tree", asyn
     assert.deepEqual(calls, ["POST /api/docs/domain-skill"]);
 
     // The whole point of pushing a spec: the hub now serves the SKILL.md, and
-    // it is byte-identical to the golden foundry renders locally.
+    // it is byte-identical to the checked-in golden.
     const md = await app.inject({
       method: "GET",
       url: "/api/docs/domain-skill/fdc-explain-sensor?format=md",
@@ -194,7 +197,7 @@ test("push: a first push creates the doc and renders it to the skill tree", asyn
     assert.equal(
       md.body,
       readFileSync(
-        join(__dirname, "..", "fixtures", "foundry-golden-SKILL.md"),
+        join(__dirname, "..", "fixtures", "domain-skill-golden-SKILL.md"),
         "utf8",
       ),
     );
@@ -211,7 +214,7 @@ test("push: pushing the same spec again updates it instead of failing", async ()
 
     const edited = buildDocument("domain-skill", {
       ...GOLDEN_SPEC,
-      focus: "정체·소속 설비·현재 상태와 최근 이벤트",
+      rephrasing: "센서 하나의 정체·소속 설비·현재 상태와 최근 이벤트.",
     }).doc;
     const calls = [];
     const second = await pushTo(app, edited, calls);
@@ -230,8 +233,8 @@ test("push: pushing the same spec again updates it instead of failing", async ()
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.equal(
-      after.json().json.body.focus,
-      "정체·소속 설비·현재 상태와 최근 이벤트",
+      after.json().json.body.rephrasing,
+      "센서 하나의 정체·소속 설비·현재 상태와 최근 이벤트.",
     );
   } finally {
     await cleanup();
