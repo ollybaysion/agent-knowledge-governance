@@ -7,7 +7,7 @@
 // used to live in prose (`lead`: "1단계의 EQP_ID로:") is now rendered from
 // `binds`, which is the only dependency left between two queries.
 //
-// `description` is not a body field: it is synthesized here from `question`, so
+// `description` is not a body field: it is synthesized here from `questions`, so
 // the routing sentence quotes how someone actually asks instead of a skeleton
 // assembled from taxonomy fields (scope/focus, removed in v3).
 //
@@ -31,12 +31,14 @@ function precondition(inputs) {
     .join("·")} 필요`;
 }
 
-// The routing sentence quotes `question` verbatim — the representative
-// utterance IS the routing signal (issue #46 supersedes the scope+focus
-// skeleton). The consumer contract is unchanged: one complete sentence ending
-// in a period, on the first line.
+// The routing sentence quotes `questions` verbatim — the utterances ARE the
+// routing signal (issue #46 supersedes the scope+focus skeleton), and all of
+// them are quoted because a variant that never reaches the description cannot
+// route anything. The consumer contract is unchanged: one complete sentence
+// ending in a period, on the first line.
 export function synthesizeDescription(spec) {
-  return `"${spec.question}" 같은 질문에 답한다 (${precondition(spec.inputs)}).`;
+  const asked = spec.questions.map((q) => `"${q}"`).join(", ");
+  return `${asked} 같은 질문에 답한다 (${precondition(spec.inputs)}).`;
 }
 
 function frontmatter(spec) {
@@ -65,8 +67,11 @@ function fixedIntro(spec) {
   ].join("\n");
 }
 
+// Every phrasing is quoted, separated by a bare `>` so md reads them as
+// distinct paragraphs of one quote — a single question renders exactly as
+// before.
 function questionBlocks(spec) {
-  return [`> ${spec.question}`, spec.rephrasing];
+  return [spec.questions.map((q) => `> ${q}`).join("\n>\n"), spec.rephrasing];
 }
 
 function inputBlocks(inputs) {

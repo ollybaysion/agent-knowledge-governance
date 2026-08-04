@@ -75,7 +75,7 @@ function domainSkillDoc(name) {
     body: {
       name,
       argumentHint: "{id}",
-      question: "T-1 지금 어때?",
+      questions: ["T-1 지금 어때?"],
       rephrasing: "테스트 스킬 — T-1 의 현재 상태.",
       inputs: [{ name: "id", required: true, description: "조회 키" }],
       dependencies: [{ mcp: "agent-db-plugin" }],

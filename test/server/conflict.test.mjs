@@ -13,12 +13,12 @@ const schema = refs["db-schema/v1"];
 const skillSchema = refs["domain-skill/v1"];
 const NOW = "2026-07-20T00:00:00Z";
 
-// domain-skill has no tiered-value slots (spec v2), so the whole body is the
+// domain-skill has no tiered-value slots (spec v3), so the whole body is the
 // conflict unit — the slot-level rebase would otherwise silently drop the edit.
 function skillBody() {
   return JSON.parse(
     readFileSync(
-      join(__dirname, "..", "..", "examples", "domain-skill", "fdc-explain-sensor.json"),
+      join(__dirname, "..", "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"),
     ),
   ).body;
 }
@@ -156,9 +156,9 @@ test("rebase correctly appends a brand-new row the client added while the server
 test("slotless type (domain-skill): stale base whose body the client changed -> 409, never a silent lost update", () => {
   const base = skillBody();
   const current = skillBody();
-  current.intro = "서버가 먼저 바꾼 intro"; // someone else already saved onto base
+  current.rephrasing = "서버가 먼저 바꾼 rephrasing."; // someone else already saved onto base
   const client = skillBody();
-  client.intro = "클라이언트가 바꾼 intro"; // client edited from the now-stale base
+  client.rephrasing = "클라이언트가 바꾼 rephrasing."; // client edited from the now-stale base
   const result = resolveConflict(skillSchema, base, current, client, "ed", NOW);
   assert.equal(result.conflict, true);
   assert.deepEqual(result.overlap, ["(문서 전체)"]);
@@ -167,7 +167,7 @@ test("slotless type (domain-skill): stale base whose body the client changed -> 
 test("slotless type (domain-skill): fresh rev (base === current) -> not a rebase, route applies the full client body", () => {
   const base = skillBody();
   const client = skillBody();
-  client.intro = "편집됨";
+  client.rephrasing = "편집됨.";
   const result = resolveConflict(skillSchema, base, base, client, "ed", NOW);
   assert.equal(result.conflict, false);
   assert.equal(result.rebased, false);
@@ -176,9 +176,9 @@ test("slotless type (domain-skill): fresh rev (base === current) -> not a rebase
 test("slotless type (domain-skill): stale base but client already equals current -> harmless no-op, not a conflict", () => {
   const base = skillBody();
   const current = skillBody();
-  current.intro = "이미 반영된 값";
+  current.rephrasing = "이미 반영된 값.";
   const client = skillBody();
-  client.intro = "이미 반영된 값"; // identical to current
+  client.rephrasing = "이미 반영된 값."; // identical to current
   const result = resolveConflict(skillSchema, base, current, client, "ed", NOW);
   assert.equal(result.conflict, false);
   assert.equal(result.rebased, false);

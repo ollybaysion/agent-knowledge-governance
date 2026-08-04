@@ -181,7 +181,7 @@ test("msg-format: output.exampleLabel requires example and vice versa", () => {
 const V3_BODY = () => ({
   name: "x",
   argumentHint: "{id}",
-  question: "T-1 지금 어때?",
+  questions: ["T-1 지금 어때?", "T-1 상태 어떻지?"],
   rephrasing: "T-1 의 현재 상태.",
   inputs: [{ name: "id", required: true, description: "조회 키" }],
   dependencies: [{ mcp: "agent-db-plugin" }],
@@ -262,16 +262,20 @@ test("domain-skill: name must be kebab-case", () => {
   assert.ok(errors.some((e) => e.includes("$.name")));
 });
 
-test("domain-skill: question is the routing signal and stays on one line", () => {
+test("domain-skill: questions are the routing signal and each stays on one line", () => {
   const schema = refs["domain-skill/v1"];
 
   const missing = V3_BODY();
-  delete missing.question;
-  assert.ok(validate(schema, missing, refs).some((e) => e.includes("question")));
+  delete missing.questions;
+  assert.ok(validate(schema, missing, refs).some((e) => e.includes("questions")));
 
-  const multiline = { ...V3_BODY(), question: "T-1\n지금 어때?" };
+  // 같은 질문의 다른 말투를 여러 줄로 — 하나로는 사람들이 묻는 방식을 못 덮는다.
+  const none = { ...V3_BODY(), questions: [] };
+  assert.ok(validate(schema, none, refs).some((e) => e.includes("$.questions")));
+
+  const multiline = { ...V3_BODY(), questions: ["T-1 지금 어때?", "T-1\n상태는?"] };
   assert.ok(
-    validate(schema, multiline, refs).some((e) => e.includes("$.question")),
+    validate(schema, multiline, refs).some((e) => e.includes("$.questions[1]")),
   );
 });
 

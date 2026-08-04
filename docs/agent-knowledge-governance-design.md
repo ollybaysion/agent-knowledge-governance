@@ -476,7 +476,7 @@ v1 body = command·direction·purpose·fields·examples. 필드표는 가장 정
 
 ### 5.3 domain-skill/v1 (domain-aware-skill)
 
-- `body` = spec v3 — 네 칸(question, rephrasing, needs[], queries[]) +
+- `body` = spec v3 — 네 칸(questions[], rephrasing, needs[], queries[]) +
   name·argumentHint·anchorTable?·inputs[]·dependencies[]·output·discipline?
   (이슈 #46, 정본 json-spec §4.4 v0.8.0). 초안 시점의 목록
   (description·h1Title·intro·steps[]·valueRules[])은 v2·v3 개정으로 전부

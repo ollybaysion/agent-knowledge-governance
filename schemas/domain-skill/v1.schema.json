@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "domain-skill/v1",
   "title": "domain-skill/v1 body",
-  "description": "agent-knowledge-governance-json-spec.md §4.4 — akg is the format owner (§5.3). Body is spec v3, the four-cell shape: question → rephrasing → needs → queries. Each arrow is an inference the LLM would otherwise have to make; a skill is the answer key someone filled in ahead of time. `needs` is first class and a query is only the means of filling one, so a skill can say what it must know — and, when `filledBy` is empty, that it cannot get it. `description` is still NOT a field: the renderer synthesizes it, now from `question`, which doubles as the routing signal. Unknown keys are rejected at every level so a typo cannot silently drop a rule.",
+  "description": "agent-knowledge-governance-json-spec.md §4.4 — akg is the format owner (§5.3). Body is spec v3, the four-cell shape: questions → rephrasing → needs → queries. Each arrow is an inference the LLM would otherwise have to make; a skill is the answer key someone filled in ahead of time. `needs` is first class and a query is only the means of filling one, so a skill can say what it must know — and, when `filledBy` is empty, that it cannot get it. `description` is still NOT a field: the renderer synthesizes it, now from `questions`, which double as the routing signal. Unknown keys are rejected at every level so a typo cannot silently drop a rule.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "name",
     "argumentHint",
-    "question",
+    "questions",
     "rephrasing",
     "inputs",
     "dependencies",
@@ -25,10 +25,15 @@
       "type": "string",
       "pattern": "\\S"
     },
-    "question": {
-      "type": "string",
-      "description": "The representative user utterance this skill answers — cell 1. It is also the routing signal (the synthesized description quotes it verbatim), so it is written the way someone actually asks, not as a title. Spliced into a single rendered line.",
-      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The user utterances this skill answers — cell 1, and the routing signal: the synthesized description quotes them verbatim, so they are written the way people actually ask, not as titles. Several because one phrasing does not cover how the same question gets asked (\"값 어디서 오는 거야?\" / \"물리야 가상이야?\" are one question in two mouths). They must be the SAME question — a second question the skill also answers means the needs differ, which is a second skill. Order is the author's lever: the description reads them in order, and a long list dilutes the routing signal, so a handful is the practical ceiling.",
+      "items": {
+        "type": "string",
+        "description": "Spliced into a single rendered line — no newline, no leading markdown block marker.",
+        "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+      }
     },
     "rephrasing": {
       "type": "string",

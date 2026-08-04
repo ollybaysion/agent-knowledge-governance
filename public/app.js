@@ -2250,15 +2250,30 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
 
   // ── 질문 ──────────────────────────────────────────────────────────────
   // 네 칸의 앞 둘. 질문은 라우팅 신호(합성 description 이 그대로 인용)이고,
-  // rephrasing 은 그 질문을 답할 수 있는 형태로 다시 말한 것이다.
-  sec("질문");
+  // rephrasing 은 그 질문을 답할 수 있는 형태로 다시 말한 것이다. 같은 질문의
+  // 다른 말투를 여러 줄로 적는다 — 한 문장으로는 사람들이 묻는 방식을 못 덮는다.
+  sec(
+    el("span", {
+      class: "has-help",
+      text: "질문",
+      title:
+        "이 스킬이 답하는 발화들. 제목이 아니라 사람이 실제로 묻는 말투로, 같은 질문의 다른 표현을 여러 줄로 적습니다 — SKILL.md 의 라우팅 문장이 이 줄들을 그대로 인용하므로, 여기 없는 말투는 라우팅에도 없습니다. 다른 질문(필요 데이터가 달라지는)이라면 그건 다른 스킬입니다.",
+    }),
+    addBtn("+ 질문 추가", (n) => n.questions.push("이렇게도 묻는다")),
+  );
+  const questionsWrap = el("div", { class: "sk-list sk-questions" });
+  (s.questions || []).forEach((q, i) => {
+    questionsWrap.appendChild(
+      el("div", { class: "sk-li" }, [
+        el("span", { class: "q-mark", text: "❝" }),
+        field(q, {}, (n, v) => (n.questions[i] = v)),
+        delBtn((s.questions || []).length > 1, (n) => n.questions.splice(i, 1)),
+      ]),
+    );
+  });
+  wrap.appendChild(questionsWrap);
   wrap.appendChild(
     el("div", { class: "sk-def" }, [
-      drow(
-        "question",
-        field(s.question, {}, (n, v) => (n.question = v)),
-        "이 스킬이 답하는 대표 발화. 제목이 아니라 사람이 실제로 묻는 말투로 씁니다 — SKILL.md 의 라우팅 문장이 이 문장을 그대로 인용합니다.",
-      ),
       drow(
         "rephrasing",
         field(s.rephrasing, { kind: "area" }, (n, v) => (n.rephrasing = v)),
@@ -3421,8 +3436,10 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
     dfRow(
       "question",
       false,
+      // 드래프트는 대표 질문 한 줄만 받는다 — 다른 말투 추가는 저장 후 문서
+      // 화면에서(폼을 여기서 목록으로 키우면 생성 화면이 무거워진다).
       eField(() => body.question, (v) => (body.question = v), {
-        placeholder: "대표 질문 — 사람이 실제로 묻는 말투로",
+        placeholder: "질문 — 사람이 실제로 묻는 말투로",
         onChange: persist,
       }),
     ),
@@ -3482,7 +3499,7 @@ function finalizeDraftBody(type, body) {
   // domain-skill: 채워진 것만 + 문서 화면이 접근하는 컨테이너는 안전한 빈 값으로
   const b = { name: body.name };
   if (body.argumentHint) b.argumentHint = body.argumentHint;
-  if (body.question) b.question = body.question;
+  b.questions = body.question ? [body.question] : [];
   if (body.rephrasing) b.rephrasing = body.rephrasing;
   b.inputs = [];
   b.dependencies = [];

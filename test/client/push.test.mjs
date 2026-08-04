@@ -23,11 +23,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const EXAMPLE = JSON.parse(
   readFileSync(
-    join(__dirname, "..", "..", "examples", "domain-skill", "fdc-explain-sensor.json"),
+    join(__dirname, "..", "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"),
     "utf8",
   ),
 );
-/** The example's body IS agent-skill-foundry's golden spec.json. */
+/** 체크인된 예시의 body — 공장이 내보내는 spec.json 과 같은 모양이다. */
 const GOLDEN_SPEC = EXAMPLE.body;
 
 async function setupServer() {
@@ -81,9 +81,9 @@ test("buildDocument: a bare foundry spec.json gets its envelope derived", () => 
   const { doc, derived } = buildDocument("domain-skill", GOLDEN_SPEC);
   assert.equal(derived, true);
   assert.equal(doc.schema, "domain-skill/v1");
-  assert.equal(doc.id, "fdc-explain-sensor"); // == body.name
+  assert.equal(doc.id, "fdc-explain-sensor-origin"); // == body.name
   assert.deepEqual(doc.keywords, [
-    { kw: "fdc-explain-sensor", inject: "full" },
+    { kw: "fdc-explain-sensor-origin", inject: "full" },
   ]);
   assert.equal(doc.status, "active");
   assert.deepEqual(doc.body, GOLDEN_SPEC);
@@ -190,7 +190,7 @@ test("push: a first push creates the doc and renders it to the skill tree", asyn
     // it is byte-identical to the checked-in golden.
     const md = await app.inject({
       method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor?format=md",
+      url: "/api/docs/domain-skill/fdc-explain-sensor-origin?format=md",
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.equal(md.statusCode, 200);
@@ -214,7 +214,7 @@ test("push: pushing the same spec again updates it instead of failing", async ()
 
     const edited = buildDocument("domain-skill", {
       ...GOLDEN_SPEC,
-      rephrasing: "센서 하나의 정체·소속 설비·현재 상태와 최근 이벤트.",
+      rephrasing: "센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처.",
     }).doc;
     const calls = [];
     const second = await pushTo(app, edited, calls);
@@ -223,18 +223,18 @@ test("push: pushing the same spec again updates it instead of failing", async ()
     assert.notEqual(second.rev, first.rev);
     assert.deepEqual(calls, [
       "POST /api/docs/domain-skill",
-      "GET /api/docs/domain-skill/fdc-explain-sensor",
-      "PUT /api/docs/domain-skill/fdc-explain-sensor",
+      "GET /api/docs/domain-skill/fdc-explain-sensor-origin",
+      "PUT /api/docs/domain-skill/fdc-explain-sensor-origin",
     ]);
 
     const after = await app.inject({
       method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor",
+      url: "/api/docs/domain-skill/fdc-explain-sensor-origin",
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.equal(
       after.json().json.body.rephrasing,
-      "센서 하나의 정체·소속 설비·현재 상태와 최근 이벤트.",
+      "센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처.",
     );
   } finally {
     await cleanup();
@@ -258,11 +258,11 @@ test("push: an update reports that the envelope it built was not applied", async
 
     const after = await app.inject({
       method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor",
+      url: "/api/docs/domain-skill/fdc-explain-sensor-origin",
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.deepEqual(after.json().json.keywords, [
-      { kw: "fdc-explain-sensor", inject: "full" },
+      { kw: "fdc-explain-sensor-origin", inject: "full" },
     ]);
   } finally {
     await cleanup();

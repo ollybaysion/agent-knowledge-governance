@@ -185,7 +185,7 @@ test("domain-skill: render(spec v3) matches the expected SKILL.md byte-for-byte"
     body: {
       name: "fdc-x",
       argumentHint: "{id}",
-      question: "T-1 지금 어때?",
+      questions: ["T-1 지금 어때?", "T-1 상태 어떻지?"],
       rephrasing: "T-1 의 현재 상태와, 멈춰 있다면 그 사유 코드까지.",
       inputs: [{ name: "id", required: true, description: "조회 키" }],
       dependencies: [{ mcp: "agent-db-plugin", tools: ["run_query"] }],
@@ -235,7 +235,7 @@ test("domain-skill: render(spec v3) matches the expected SKILL.md byte-for-byte"
   assert.deepEqual(validateDocument(doc, refs), []);
 
   const expected =
-    '---\nname: fdc-x\nargument-hint: "{id}"\ndisable-model-invocation: true\ndescription: >-\n  "T-1 지금 어때?" 같은 질문에 답한다 (id 필요).\n---' +
+    '---\nname: fdc-x\nargument-hint: "{id}"\ndisable-model-invocation: true\ndescription: >-\n  "T-1 지금 어때?", "T-1 상태 어떻지?" 같은 질문에 답한다 (id 필요).\n---' +
     "\n\n" +
     "# fdc-x" +
     "\n\n" +
@@ -244,7 +244,7 @@ test("domain-skill: render(spec v3) matches the expected SKILL.md byte-for-byte"
     "\n\n" +
     "## 질문" +
     "\n\n" +
-    "> T-1 지금 어때?" +
+    "> T-1 지금 어때?\n>\n> T-1 상태 어떻지?" +
     "\n\n" +
     "T-1 의 현재 상태와, 멈춰 있다면 그 사유 코드까지." +
     "\n\n" +
@@ -330,7 +330,7 @@ test("domain-skill: render(spec v3) matches the expected SKILL.md byte-for-byte"
 test("domain-skill: the example renders byte-identically to the checked-in golden", () => {
   const doc = JSON.parse(
     readFileSync(
-      join(__dirname, "..", "examples", "domain-skill", "fdc-explain-sensor.json"),
+      join(__dirname, "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"),
       "utf8",
     ),
   );
@@ -348,7 +348,7 @@ test("domain-skill: the description quotes the question and lists the required a
   const body = {
     name: "fdc-trace",
     argumentHint: "{eqp} {pidx}",
-    question: "이 측정값 어떻게 나온 거야?",
+    questions: ["이 측정값 어떻게 나온 거야?", "이 값 어디서 왔어?"],
     rephrasing: "그 측정값이 어느 레시피 스텝에서 언제 수집됐는지.",
     inputs: [
       { name: "eqp", required: true, description: "설비" },
@@ -358,6 +358,6 @@ test("domain-skill: the description quotes the question and lists the required a
   };
   assert.equal(
     synthesizeDescription(body),
-    '"이 측정값 어떻게 나온 거야?" 같은 질문에 답한다 (eqp·pidx 필요).',
+    '"이 측정값 어떻게 나온 거야?", "이 값 어디서 왔어?" 같은 질문에 답한다 (eqp·pidx 필요).',
   );
 });

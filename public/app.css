@@ -1777,6 +1777,23 @@ button.pchip:hover {
   font-size: 12px;
   margin-top: 4px;
 }
+.sk-questions {
+  margin: 8px 0 4px;
+  gap: 6px;
+}
+.sk-questions .sk-li {
+  align-items: baseline;
+}
+.sk-questions .fx-val {
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.q-mark {
+  flex: none;
+  color: var(--muted-soft);
+  font-size: 12px;
+  line-height: 1;
+}
 .sk-list {
   display: flex;
   flex-direction: column;

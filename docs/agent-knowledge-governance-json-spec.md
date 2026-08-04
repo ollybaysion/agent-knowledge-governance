@@ -77,8 +77,11 @@
 > **질문 → rephrasing → 필요 데이터 → 조달 수단** 네 칸이고 각 화살표가 원래
 > LLM의 추론인데, v2 spec에는 네 번째 칸(`steps[].sql`)만 1급으로 있었다.
 > 그래서 "필요 데이터(명세)"와 "도착 데이터(행)"를 잇는 필드가 없어 종결 판정이
-> 소비자 재량에 떠 있었다. 신설: `question`·`rephrasing`·`needs[]`(`id`·`what`·
-> `when`·`filledBy[]`)·`queries[].id`·`queries[].kind`. 개명: `steps[]` →
+> 소비자 재량에 떠 있었다. 신설: `questions[]`·`rephrasing`·`needs[]`(`id`·`what`·
+> `when`·`filledBy[]`)·`queries[].id`·`queries[].kind`. `questions`가 **배열**인 것은
+> 한 문장으로 사람들이 같은 질문을 묻는 방식을 못 덮기 때문이다(같은 질문의 다른
+> 말투 — 다른 질문이면 needs가 달라지고, 그건 다른 스킬이다). 합성 description이
+> **전부 인용**한다 — 여기 없는 말투는 라우팅에도 없다. 개명: `steps[]` →
 > `queries[]`(순서 의미 제거 = 카탈로그), `binds.from:"step"`(인덱스) →
 > `"query"`(id). 제거: `steps[].produces`·`focus`·`intro`(→ rephrasing이 흡수)·
 > `scope`·`branches`·`steps[].title`·`steps[].lead`. **`needs`가 1급이고 쿼리는
@@ -386,11 +389,13 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 
 ### 4.4 `domain-skill/v1` — 실행형 조회 절차 스킬
 
-body = **spec v3, 네 칸 구조**. 렌더 산출물은 md 문서가 아니라
+body = **spec v3, 네 칸 구조**(질문 → rephrasing → 필요 데이터 → 조달 수단). 렌더 산출물은 md 문서가 아니라
 `rendered/domain-skill/<name>/SKILL.md`이고, 렌더러는 akg 하나다
 (frontmatter `disable-model-invocation: true`). 골든은
 `test/fixtures/domain-skill-golden-SKILL.md` — 렌더의 고정 문자열 전부를 한자리에
-못 박는다.
+못 박는다. 아래 예시는 체크인된 예시 문서
+(`examples/domain-skill/fdc-explain-sensor-origin.json`)와 같은 스킬이다 — 물리/가상
+갈림이 `needs[].when` 하나로 표현되는 실물이라 v3의 모양을 그대로 보여준다.
 
 **포맷 진실원 = akg (발효 2026-07-21)**. foundry `validateSpec`은 akg 스키마의
 **추종자**이고, spec 개정도 akg가 발행한다(설계도 §5.3·§12-2). foundry의
@@ -401,24 +406,26 @@ body = **spec v3, 네 칸 구조**. 렌더 산출물은 md 문서가 아니라
 채워둔 것이다. v2에는 네 번째 칸만 1급으로 있어서 **알아야 할 것**을 적을 자리가
 없었다(`produces`는 조회 산출물이지 알아야 할 것이 아니다). v3에서 `needs`가
 1급이 되고 쿼리는 그것을 채우는 **수단**이 된다 — 답이 조회를 정하는 방향이다.
-`description`은 여전히 필드가 아니다: 렌더러가 `question`에서 합성한다(대표 발화가
-곧 라우팅 신호).
+`description`은 여전히 필드가 아니다: 렌더러가 `questions`에서 합성한다(사용자 발화가
+곧 라우팅 신호 — 적힌 말투 전부를 인용한다).
 
 ```jsonc
 "body": {
-  "name": "fdc-explain-sensor",             // 필수, kebab-case. 봉투 id와 일치, H1 = "# {name}"
+  "name": "fdc-explain-sensor-origin",      // 필수, kebab-case. 봉투 id와 일치, H1 = "# {name}"
   "argumentHint": "{snsr_id}",              // 필수 — 표시용 인자 힌트. inputs에서 합성:
                                             //   required는 {name}, 선택은 [name] (대시보드가 자동 유지)
-  "question": "S-0004 설명해줘",             // 필수 — 이 스킬이 답하는 대표 발화(한 줄).
-                                            //   라우팅 신호이자 합성 description의 인용문
-  "rephrasing": "센서 S-0004가 무엇을 재고…", // 필수 — 답할 수 있는 형태로 다시 말한 것.
+  "questions": [                            // 필수, 1개 이상 — 이 스킬이 답하는 발화들(각 한 줄).
+    "S-0004 값 어디서 오는 거야?",            //   라우팅 신호이자 합성 description의 인용문.
+    "S-0004 물리 센서야 가상 센서야?"          //   같은 질문의 다른 말투를 나열한다 — 여기 없는
+  ],                                        //   말투는 라우팅에도 없다. 순서가 저자의 레버
+  "rephrasing": "센서 S-0004의 값이 …",       // 필수 — 답할 수 있는 형태로 다시 말한 것.
                                             //   없던 의도를 더하지 않는다(옛 intro를 흡수)
   "anchorTable": "FDC_SENSOR",              // 선택 — 있으면 테이블→스킬 결정적 라우팅
   "inputs": [                               // 필수 — 인자 계약의 진실원(소비자 wiring 이 아니라 여기)
-    { "name": "snsr_id", "required": true, "description": "조회 키" }
+    { "name": "snsr_id", "required": true, "description": "값의 출처를 물을 센서" }
   ],
   "dependencies": [                         // 필수 — 필요한 MCP 만. fail-fast 문장은 렌더러 고정
-    { "mcp": "agent-db-plugin", "tools": ["run_query"], "why": "센서·설비 조회" }
+    { "mcp": "agent-db-plugin", "tools": ["run_query"], "why": "센서·메시지·수식 조회" }
   ],
   "needs": [                                // 필수 — 알아야 할 것. 답의 바닥(반드시 포함)이 여기서 온다
     { "id": "sensor_kind",                  //   id = 조건식이 부르는 이름 ^[a-z][a-z0-9_]*$
@@ -445,11 +452,11 @@ body = **spec v3, 네 칸 구조**. 렌더 산출물은 md 문서가 아니라
   ],
   "output": {                               // 필수 — 형식은 자유, 내용에만 바닥
     "avoid": [                              // 필수, 3개 이상 —「끌리는 오추론」—「금하는 데이터 사실」
-      "비활성 '사유'를 추측한다 — 사유 컬럼은 데이터에 없다"
+      "물리인데 VID가 안 잡히면 이름으로 추측한다 — 매핑이 없으면 없다고 답한다"
     ],
-    "examples": [                           // 필수, 2개 이상 — 넓은 질문 + 좁은 질문의 대비쌍
-      { "ask": "S-0004 설명해줘", "answer": "..." },
-      { "ask": "S-0004 어느 설비 거야?", "answer": "..." }
+    "examples": [                           // 필수, 2개 이상 — 대비되는 두 경우(물리/가상)
+      { "ask": "S-0004 값 어디서 오는 거야?", "answer": "..." },
+      { "ask": "S-0007 값 어디서 오는 거야?", "answer": "..." }
     ]
   },
   "discipline": "..."                       // 선택 — 생략 시 고정 규율 블록
@@ -478,10 +485,10 @@ body = **spec v3, 네 칸 구조**. 렌더 산출물은 md 문서가 아니라
 `dependencies` 1, `avoid` 3, `examples` 2 — `filledBy`만 **0 허용**), 필수 문자열은
 공백만으로 채울 수 없음(`\S` 패턴), `name`은 `^[a-z][a-z0-9-]*$`, `needs[].id`·
 `queries[].id`는 `^[a-z][a-z0-9_]*$`, `queries[].kind`는 **enum**, `inputs`에 필수
-인자가 **최소 하나**(없으면 description 전제조건이 빈다). `binds` 값은 `from`으로
+인자가 **최소 하나**(없으면 description 전제조건이 빈다), `questions`도 **최소 하나**. `binds` 값은 `from`으로
 갈리는 두 닫힌 형태(if/then/else 사영) — 어느 쪽도 모르는 키를 받지 않는다.
 
-**한 줄에 끼워 넣는 조각**(`question`·`needs[].what`·`examples[].ask`)은 개행과 선두
+**한 줄에 끼워 넣는 조각**(`questions[]`·`needs[].what`·`examples[].ask`)은 개행과 선두
 마크다운 블록 문자를 금지한다 — 줄 구조가 깨지고, description은 소비자 firstLine
 계약까지 깨진다. `avoid` 항목은 형태 계약을 정규식으로 강제한다(양쪽 6자 이상 +
 ` — ` 구분자): **개수만 세면** "부정확한 설명을 한다" 같은 규율의 재진술이 도메인

@@ -79,7 +79,7 @@ test("domain-skill has zero slots (basis-string exception, json-spec §1.2)", ()
   const body = {
     name: "x",
     argumentHint: "{id}",
-    question: "T-1 지금 어때?",
+    questions: ["T-1 지금 어때?"],
     rephrasing: "T-1 의 현재 상태.",
     needs: [
       { id: "state", what: "현재 상태", filledBy: [{ query: "row", column: "STATE" }] },

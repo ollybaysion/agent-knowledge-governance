@@ -1,30 +1,34 @@
 ---
-name: fdc-explain-sensor
+name: fdc-explain-sensor-origin
 argument-hint: "{snsr_id}"
 anchor-table: FDC_SENSOR
 disable-model-invocation: true
 description: >-
-  "S-0004 설명해줘" 같은 질문에 답한다 (snsr_id 필요).
+  "S-0004 값 어디서 오는 거야?", "S-0004 물리 센서야 가상 센서야?", "S-0004 값은 어떻게 만들어져?" 같은 질문에 답한다 (snsr_id 필요).
 ---
 
-# fdc-explain-sensor
+# fdc-explain-sensor-origin
 
 입력 `{snsr_id}`를 받아 아래 **필요 데이터**를 **조달 수단**으로 채우고,
 채운 값으로 **출력 형식**대로 자연어로 답한다.
 
 ## 질문
 
-> S-0004 설명해줘
+> S-0004 값 어디서 오는 거야?
+>
+> S-0004 물리 센서야 가상 센서야?
+>
+> S-0004 값은 어떻게 만들어져?
 
-센서 S-0004가 무엇을 재는 센서이고(종류·단위) 어느 설비에 속해 있으며 지금 쓰이는 상태인지, 쓰이지 않는다면 소속 설비 자체가 미사용이라 그런 것인지, 그리고 그 설비에 최근 어떤 정비 이벤트가 있었는지.
+센서 S-0004의 값이 장비에서 직접 올라오는 것인지(물리) 다른 센서 값으로 계산되는 것인지(가상), 물리면 어느 메시지의 어느 VID로 들어오고, 가상이면 어떤 수식이 어떤 입력 센서를 쓰는지.
 
 ## 입력 파라미터
 
-- **snsr_id** (필수) — 설명할 센서를 특정하는 조회 키
+- **snsr_id** (필수) — 값의 출처를 물을 센서 (예: S-0004)
 
 ## 의존성
 
-- **agent-db-plugin** (run_query) — 센서·설비·이벤트 조회
+- **agent-db-plugin** (run_query) — 센서 기준 정보·메시지 매핑·수식 조회
 
 실행 전 `list_connections`로 확인하고, 없으면 무엇이 없는지 밝히고 멈춘다.
 
@@ -33,12 +37,11 @@ description: >-
 알아야 할 것 하나에 조달 수단이 붙는다. 여럿이면 **아무거나 하나**면 되고,
 조달 수단이 없는 항목은 이 스킬로 알 수 없는 것이다.
 
-- **sensor_type** — 센서가 재는 값의 종류 ← `sensor_row.SNSR_TYPE_CD`
-- **sensor_unit** — 측정 단위 ← `sensor_row.UNIT_CD`
-- **sensor_active** — 센서가 지금 쓰이는 상태인지 ← `sensor_row.USE_YN`
-- **owner_equipment** — 센서가 속한 설비 ← `equipment_row.EQP_NAME`
-- **equipment_active** — 소속 설비 자체가 미사용인지 (`sensor_active = N` 일 때) ← `equipment_row.USE_YN`
-- **recent_events** — 소속 설비의 최근 정비 이벤트 ← `event_rows.EVT_LABEL`
+- **sensor_kind** — 물리인지 가상인지 ← `sensor_row.SNSR_KIND`
+- **message_vid** — 값이 실려 오는 메시지의 VID (`sensor_kind = PHYSICAL` 일 때) ← `message_row.VID`
+- **message_name** — 그 메시지의 이름 (`sensor_kind = PHYSICAL` 일 때) ← `message_row.MSG_NAME`
+- **formula_expr** — 값을 만드는 수식 (`sensor_kind = VIRTUAL` 일 때) ← `formula_row.EXPR`
+- **formula_inputs** — 수식이 참조하는 입력 센서들 (`sensor_kind = VIRTUAL` 일 때) ← `formula_input_rows.SRC_SNSR_ID`
 
 ## 조달 수단
 
@@ -48,60 +51,67 @@ description: >-
 ### `sensor_row` — `fdc_sensor`
 
 ```sql
-SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn
+SELECT snsr_id, eqp_id, snsr_kind, snsr_type_cd, unit_cd
   FROM fdc_sensor WHERE snsr_id = :id
 ```
 
 - `:id` ← 인자 `snsr_id`
 
-### `equipment_row` — `fdc_equipment`
+### `message_row` — `fdc_message`
 
 ```sql
-SELECT eqp_id, eqp_name, model_cd, vendor, use_yn
-  FROM fdc_equipment WHERE eqp_id = :eqp
+SELECT vid, msg_name FROM fdc_message WHERE snsr_id = :id
 ```
 
-- `:eqp` ← `sensor_row.EQP_ID`
+- `:id` ← 인자 `snsr_id`
 
-### `event_rows` — `fdc_setup_event`
+### `formula_row` — `fdc_formula`
 
 ```sql
-SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label
-  FROM fdc_setup_event WHERE eqp_id = :eqp
- ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY
+SELECT expr FROM fdc_formula WHERE snsr_id = :id
 ```
 
-- `:eqp` ← `sensor_row.EQP_ID`
+- `:id` ← 인자 `snsr_id`
 
-`EVT_TYPE_CD`의 코드→뜻 번역은 표준 db-schema 문서(keyword-docs 주입)를 따른다.
+### `formula_input_rows` — `fdc_formula_input`
+
+```sql
+SELECT src_snsr_id, arg_order
+  FROM fdc_formula_input WHERE snsr_id = :id
+ ORDER BY arg_order
+```
+
+- `:id` ← 인자 `snsr_id`
+
+`ARG_ORDER`는 수식의 인자 순서다 — 값의 크기나 중요도가 아니다.
 
 ## 출력 형식
 
 채운 값으로 위 **질문**에 답한다. 정해진 형식은 없다.
 체계적·논리적으로, 없는 정보는 지어내지 않는다.
 
-**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): 센서가 재는 값의 종류 · 측정 단위 · 센서가 지금 쓰이는 상태인지 · 센서가 속한 설비 · 소속 설비의 최근 정비 이벤트
+**반드시 포함** (질문이 특정 항목만 묻는 게 아니면): 물리인지 가상인지
 
-**조건부 포함**: 소속 설비 자체가 미사용인지 (`sensor_active = N` 일 때)
+**조건부 포함**: 값이 실려 오는 메시지의 VID (`sensor_kind = PHYSICAL` 일 때) · 그 메시지의 이름 (`sensor_kind = PHYSICAL` 일 때) · 값을 만드는 수식 (`sensor_kind = VIRTUAL` 일 때) · 수식이 참조하는 입력 센서들 (`sensor_kind = VIRTUAL` 일 때)
 
 채우지 못한 항목이 있으면 **무엇을 못 채웠는지 밝히고** 채운 것만으로 답한다 —
 빈칸을 추측으로 메우지 않는다.
 
 **하지 말 것**
 
-- 비활성 '사유'를 추측한다 — 사유 컬럼은 데이터에 없다
-- 마지막 측정값·정상 여부를 지어낸다 — 이 스킬 범위 밖이다
-- 이벤트 코드 '기타'를 '정기 점검' 등으로 구체화한다 — 라벨 이상은 모른다
+- 물리인데 VID가 안 잡히면 이름으로 추측한다 — 매핑이 없으면 없다고 답한다
+- 수식의 의미를 해석한다 — 데이터에 있는 것은 식과 입력 센서까지다
+- 입력 센서를 다시 파고들어 설명한다 — 이 스킬은 한 단계만 거슬러 올라간다
 
 **예시** (모양만 참고, 값은 조회 결과로 바꾼다)
 
-> **질문**: S-0004 설명해줘
-> **답**: 센서 S-0004는 증착기 1호(CVD-01, AMAT CV-800)의 FLOW 센서(SCCM)로, 현재 비활성이다.
-> 소속 설비 자체가 미사용 상태다. 최근 설비 이벤트: 2026-05-11 기타.
-> ⚠ SNSR_TYPE_CD=FLOW, UNIT_CD=SCCM은 의미 미확인.
+> **질문**: S-0004 값 어디서 오는 거야?
+> **답**: S-0004는 물리 센서다. 설비가 올려 보내는 PROC_DATA 메시지의 VID 1204로 값이 들어온다.
+> 수식 계산 없이 그 값이 그대로 저장된다.
 
-> **질문**: S-0004 어느 설비 거야?
-> **답**: 센서 S-0004는 증착기 1호(CVD-01)에 속한다. 다만 이 설비는 현재 미사용 상태다.
+> **질문**: S-0007 값 어디서 오는 거야?
+> **답**: S-0007은 가상 센서다. 값은 수식 (S-0004 + S-0005) / 2 로 계산되고, 입력 센서는 S-0004·S-0005 둘이다.
+> 두 입력 센서가 각각 어디서 오는지는 그 센서로 다시 물어야 한다.
 
 ## 규율
 

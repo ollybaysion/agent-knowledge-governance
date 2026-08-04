@@ -223,7 +223,7 @@ test("cli catalog-push: target doc missing -> exit 1, 404 hint printed", async (
 const GOLDEN_SPEC = JSON.parse(
   readFileSync(
     fileURLToPath(
-      new URL("../../examples/domain-skill/fdc-explain-sensor.json", import.meta.url),
+      new URL("../../examples/domain-skill/fdc-explain-sensor-origin.json", import.meta.url),
     ),
     "utf8",
   ),
@@ -257,22 +257,22 @@ test("cli push: a bare spec.json creates the doc, and a second run updates it", 
       serverUrl,
     });
     assert.equal(first.status, 0, first.stderr);
-    assert.match(first.stdout, /^created domain-skill\/fdc-explain-sensor \(rev /);
+    assert.match(first.stdout, /^created domain-skill\/fdc-explain-sensor-origin \(rev /);
 
     // The hub now serves the skill — this is the whole point of the command.
     const md = await app.inject({
       method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor?format=md",
+      url: "/api/docs/domain-skill/fdc-explain-sensor-origin?format=md",
       headers: { authorization: "Bearer ed-tok" },
     });
     assert.equal(md.statusCode, 200);
-    assert.match(md.body, /^---\nname: fdc-explain-sensor\n/);
+    assert.match(md.body, /^---\nname: fdc-explain-sensor-origin\n/);
 
     writeFileSync(
       specPath,
       JSON.stringify({
         ...GOLDEN_SPEC,
-        rephrasing: "센서 하나의 정체·소속 설비·현재 상태와 이력.",
+        rephrasing: "센서 값이 물리 수집인지 수식 계산인지.",
       }),
     );
     const second = await runCli(["push", "domain-skill", specPath], {
@@ -280,7 +280,7 @@ test("cli push: a bare spec.json creates the doc, and a second run updates it", 
       serverUrl,
     });
     assert.equal(second.status, 0, second.stderr);
-    assert.match(second.stdout, /^updated domain-skill\/fdc-explain-sensor \(rev /);
+    assert.match(second.stdout, /^updated domain-skill\/fdc-explain-sensor-origin \(rev /);
   } finally {
     rmSync(home, { recursive: true, force: true });
     await cleanup();
@@ -296,7 +296,7 @@ test("cli push --dry-run: renders the skill with no token, no server, and writes
     const r = await runCliBare(["push", "domain-skill", specPath, "--dry-run"], home);
     assert.equal(r.status, 0, r.stderr);
     // The preview IS the SKILL.md the factory used to print locally.
-    assert.match(r.stdout, /^---\nname: fdc-explain-sensor\n/);
+    assert.match(r.stdout, /^---\nname: fdc-explain-sensor-origin\n/);
     assert.match(r.stdout, /## 필요 데이터/);
     assert.match(r.stdout, /## 조달 수단/);
     assert.match(r.stderr, /DRY-RUN/);
