@@ -1645,95 +1645,101 @@ button.pchip:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
-/* ── 조회 절차: 번호 레일 + 실행 흐름 레이아웃 ──
- * 절차는 key:value 나열이 아니라 순서 있는 흐름 — 레일 번호·연결선이 순서를,
- * 코드 블록이 SQL을, when → then 행이 분기를 각각 제 모양으로 보여준다. */
-.sk-steps {
+/* ── 필요 데이터 · 조달 수단 (spec v3) ──
+ * v2 의 번호 레일이 사라진 자리다 — 순서가 의미를 잃었으므로 흐름이 아니라
+ * 목록으로 읽힌다. 필요 데이터는 "무엇을 알아야 하나 ← 어디서 오나" 한 줄,
+ * 조달 수단은 id 로 불리는 쿼리 카드. */
+.sk-needs {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   margin: 8px 0 2px;
 }
-.sk-step {
-  display: flex;
-  gap: 12px;
+.sk-need {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline-soft);
 }
-.sk-step-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: none;
-  width: 24px;
+.sk-need:last-child {
+  border-bottom: none;
 }
-.sk-step-num {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: var(--primary);
-  color: var(--on-primary);
-  font-size: 11px;
-  font-weight: 700;
-  display: grid;
-  place-items: center;
-}
-.sk-step-rail::after {
-  content: "";
-  flex: 1;
-  width: 2px;
-  background: var(--hairline);
-  margin: 4px 0;
-}
-.sk-step:last-child .sk-step-rail::after {
-  display: none;
-}
-.sk-step-body {
-  flex: 1;
-  min-width: 0;
-  padding-bottom: 18px;
-}
-.sk-step:last-child .sk-step-body {
-  padding-bottom: 4px;
-}
-.sk-step-h {
+.sk-need-h {
   display: flex;
   align-items: baseline;
   gap: 10px;
   flex-wrap: wrap;
 }
-.sk-step-title {
-  flex: 2 1 200px;
-  min-width: 0;
-  font-size: 13.5px;
+.sk-need-id {
+  flex: none;
+  min-width: 90px;
+  font-size: 12.5px;
   font-weight: 600;
+}
+.sk-need-id .fx-val {
+  color: var(--primary);
+}
+.sk-need-what {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-size: 13px;
   color: var(--ink);
 }
-.sk-produces {
-  flex: 1 1 160px;
+.sk-when {
+  flex: 0 1 auto;
   min-width: 0;
-  font-size: 12px;
-  color: var(--teal-ink);
   display: inline-flex;
   align-items: baseline;
-  gap: 2px;
+  gap: 6px;
+  font-size: 12px;
 }
-.sk-produces .fx {
-  width: auto;
-  flex: 1;
-}
-.sk-produces-arrow {
+.sk-when-k {
   flex: none;
-}
-.sk-lead {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   color: var(--muted);
-  font-size: 12.5px;
-  margin: 2px 0 4px;
+}
+.sk-when .fx-val {
+  color: var(--warning-ink);
+}
+.sk-fills {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 3px;
+}
+.fill-arrow {
+  flex: none;
+  color: var(--muted-soft);
+}
+.sk-fills .fx {
+  flex: 1;
+  min-width: 0;
+}
+.sk-queries {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 8px 0 2px;
+}
+.sk-query-h {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sk-query-id {
+  flex: none;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.sk-query-id .fx-val {
+  color: var(--primary);
 }
 .sk-table {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
   font-size: 12px;
-  margin-top: 4px;
 }
 .sk-table-k {
   flex: none;
@@ -1756,38 +1762,37 @@ button.pchip:hover {
   font-size: 12.5px;
   line-height: 1.55;
 }
+.sk-binds {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.sk-binds .fx {
+  flex: 1;
+  min-width: 0;
+}
 .sk-notes {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
 }
-.sk-branches {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
+.sk-questions {
+  margin: 8px 0 4px;
+  gap: 6px;
 }
-.sk-branch {
-  display: flex;
+.sk-questions .sk-li {
   align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
 }
-.br-when {
-  flex: none;
-  min-width: 110px;
-  max-width: 40%;
+.sk-questions .fx-val {
+  font-size: 13.5px;
+  color: var(--ink);
 }
-.br-when .fx-val {
-  color: var(--warning-ink);
-}
-.br-arrow {
+.q-mark {
   flex: none;
   color: var(--muted-soft);
-}
-.br-then {
-  flex: 1;
-  min-width: 0;
+  font-size: 12px;
+  line-height: 1;
 }
 .sk-list {
   display: flex;

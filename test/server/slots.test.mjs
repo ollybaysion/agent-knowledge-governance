@@ -79,10 +79,13 @@ test("domain-skill has zero slots (basis-string exception, json-spec §1.2)", ()
   const body = {
     name: "x",
     argumentHint: "{id}",
-    description: "설명.",
-    steps: [{ title: "s", sql: "SELECT 1" }],
-    valueRules: [{ target: "A", rule: "B", basis: "scaffold" }],
-    output: { lead: "l", template: "t" },
+    questions: ["T-1 지금 어때?"],
+    rephrasing: "T-1 의 현재 상태.",
+    needs: [
+      { id: "state", what: "현재 상태", filledBy: [{ query: "row", column: "STATE" }] },
+    ],
+    queries: [{ id: "row", kind: "sql", sql: "SELECT state FROM t" }],
+    output: { avoid: [], examples: [] },
   };
   assert.equal(hasNoSlots(refs["domain-skill/v1"], body), true);
 });

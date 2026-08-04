@@ -476,19 +476,23 @@ v1 body = command·direction·purpose·fields·examples. 필드표는 가장 정
 
 ### 5.3 domain-skill/v1 (domain-aware-skill)
 
-- `body` = foundry spec(name, argumentHint, description, h1Title, intro, steps[],
-  valueRules[], output, discipline?). **포맷 진실원 = akg**(사용자 결정 2026-07-19,
+- `body` = spec v3 — 네 칸(questions[], rephrasing, needs[], queries[]) +
+  name·argumentHint·anchorTable?·inputs[]·dependencies[]·output·discipline?
+  (이슈 #46, 정본 json-spec §4.4 v0.8.0). 초안 시점의 목록
+  (description·h1Title·intro·steps[]·valueRules[])은 v2·v3 개정으로 전부
+  사라졌다. **포맷 진실원 = akg**(사용자 결정 2026-07-19,
   v0.4.7): 발효 시점은 foundry 세션의 spec 검증 완료분이 akg
   `schemas/domain-skill/v1.schema.json`으로 반영되는 순간부터 — 그 전까지는
   현행대로 foundry 계약을 무변형 수용(스펙 §4.4의 v0.4.1 정정이 그 예).
   발효 후에는 foundry `validateSpec`이 akg 스키마의 추종자다(계약 방향 역전 —
   골든 테스트가 양방향 어긋남을 잡는 건 동일).
-- 렌더러는 `renderSkill()` 바이트 동일 출력 — 허브가 SKILL.md를 찍는다. 정본
-  렌더러도 이관 발효 후 akg 소유, foundry는 재사용/추종.
-- v1에서는 valueRules의 티어가 basis 문자열 인라인(현 foundry 규약)임을 그대로 둔다.
-  구조화 티어로의 spec v2는 **akg가 발행**하고 foundry가 따라온다(§12-2 프레임
-  해소 — "동조 협상"이 아니라 소유자의 버전 발행). 허브는 `schema` 필드로
-  v1/v2를 공존시킬 수 있다.
+- 렌더러는 akg 하나다 — 허브가 SKILL.md를 찍는다(이관 발효 후 foundry의
+  `renderSkill`은 제거됐다, asf PR #14). 골든은 akg 레포 안의 체크인 산출물.
+- spec 개정은 **akg가 발행**하고 foundry가 따라온다(§12-2 프레임 해소 — "동조
+  협상"이 아니라 소유자의 버전 발행). 봉투 타입은 v2·v3 두 번의 body 비호환
+  개정에도 `domain-skill/v1`을 유지했다(저장 문서가 예시·번들 두어 건이라 병존
+  비용 > 이득, json-spec §4.4 changelog에 근거). 병존이 필요해지면 `schema`
+  필드가 v1/v2를 갈라 준다.
 - 배포: `akg sync`가 confirmed 상태의 스킬을 `~/.claude/skills/<name>/SKILL.md`로
   렌더 설치(선택 플래그). 검토 중(inferred 슬롯 잔존) 스킬은 기본 미설치.
 
