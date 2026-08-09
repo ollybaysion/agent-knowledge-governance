@@ -1914,6 +1914,14 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         placeholder: "설명 (예: 조회 키)",
       });
       if (cur) desc.value = cur.description || "";
+      // Input-widget signal (issue #49): a machine field consumers use to put
+      // a calendar on the field. Omitted (the default) means free text.
+      const typ = el("select", { class: "fld" }, [
+        el("option", { value: "", text: "자유 텍스트 (생략)" }),
+        el("option", { value: "datetime", text: "datetime — 날짜+시각 달력" }),
+        el("option", { value: "date", text: "date — 날짜 달력" }),
+      ]);
+      if (cur && cur.type) typ.value = cur.type;
       const growDesc = () => {
         desc.style.height = "auto";
         desc.style.height = `${desc.scrollHeight}px`;
@@ -1942,6 +1950,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           required: req.value === "true",
           description: desc.value.trim(),
         };
+        if (typ.value) entry.type = typ.value;
         const done = await commit((n) => {
           if (!n.inputs) n.inputs = [];
           if (i >= 0) n.inputs[i] = entry;
@@ -1985,6 +1994,8 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         req,
         el("div", { class: "fieldlab", text: "설명 (description)" }),
         desc,
+        el("div", { class: "fieldlab", text: "입력 위젯 (type)" }),
+        typ,
         el("div", { class: "editacts" }, acts),
       ]);
       card.addEventListener("keydown", (e) => {
@@ -2002,8 +2013,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           cur
             ? name.value.trim() !== cur.name ||
               (req.value === "true") !== !!cur.required ||
-              desc.value.trim() !== (cur.description || "")
-            : name.value.trim() !== "" || desc.value.trim() !== "",
+              desc.value.trim() !== (cur.description || "") ||
+              typ.value !== (cur.type || "")
+            : name.value.trim() !== "" || desc.value.trim() !== "" || typ.value !== "",
         flash: () => {
           card.classList.remove("dirtyflash");
           void card.offsetWidth;

@@ -62,6 +62,10 @@
           "description": {
             "type": "string",
             "pattern": "\\S"
+          },
+          "type": {
+            "enum": ["datetime", "date"],
+            "description": "Input-widget signal for consumers (issue #49): datetime = date+time picker (value convention YYYY-MM-DD HH:mm), date = date-only picker (YYYY-MM-DD). Omitted = free text. The value stays a plain string either way — this hints the widget, not the wire contract. Machine field like steps[].binds/table: not rendered into SKILL.md."
           }
         }
       }

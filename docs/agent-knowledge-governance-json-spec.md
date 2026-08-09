@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 문서 JSON 스펙 (v0.8.0)
+# agent-knowledge-governance — 문서 JSON 스펙 (v0.9.0)
 
 > 허브 문서의 **JSON 포맷 정의서**. 모체 설계도
 > [`agent-knowledge-governance-design.md`](agent-knowledge-governance-design.md) §5(데이터 모델)를 구현
@@ -95,6 +95,15 @@
 > 충족; AND는 needs를 쪼개서 표현) ② 멈춤형 분기 문안은 **자리를 만들지 않는다**
 > (서술 프롬프트가 미충족 needs 목록만 받고 문장은 LLM이 쓴다) ③ 다른 스킬의
 > 쿼리를 가리키는 **풀 주소 = `스킬명#쿼리id`**(인덱스 주소는 순서와 함께 소멸).
+> **v0.9.0 개정(2026-08-09): §4.4 `inputs[].type` 신설(이슈 #49)** — 입력 위젯
+> 신호. 소비자 FE(demo-fe #190)가 날짜 인자에 캘린더를 붙이는데 spec에 타입
+> 신호가 없어 key·설명 문구를 휴리스틱으로 추측하고 있었다 — "왜 이 칸에 달력이
+> 떴지?"의 답은 spec 한 곳에 있어야 한다. 선택 필드, 닫힌 enum
+> `["datetime", "date"]`(datetime = 날짜+시각 위젯, 값 관례 `YYYY-MM-DD HH:mm` /
+> date = 날짜만, `YYYY-MM-DD`), 생략 = 자유 텍스트. **값은 여전히 문자열** —
+> bind·실행 계약이 아니라 화면 위젯 힌트다. `binds`(v0.6.0)·`table`(v0.7.0)과
+> 같은 기계 필드 관례: 봉투 `domain-skill/v1` 유지(§6 선택 필드 규칙), SKILL.md
+> 렌더 무변경(골든 바이트 동일 — 소비 spring은 spec.json을 파싱).
 
 ---
 
@@ -423,6 +432,9 @@ body = **spec v3, 네 칸 구조**(질문 → rephrasing → 필요 데이터 �
   "anchorTable": "FDC_SENSOR",              // 선택 — 있으면 테이블→스킬 결정적 라우팅
   "inputs": [                               // 필수 — 인자 계약의 진실원(소비자 wiring 이 아니라 여기)
     { "name": "snsr_id", "required": true, "description": "값의 출처를 물을 센서" }
+                                            //   선택 "type": "datetime"|"date" — 입력 위젯 신호(v0.9.0).
+                                            //   datetime = 날짜+시각(YYYY-MM-DD HH:mm), date = 날짜만.
+                                            //   생략 = 자유 텍스트. 값은 여전히 문자열, 렌더 무변경
   ],
   "dependencies": [                         // 필수 — 필요한 MCP 만. fail-fast 문장은 렌더러 고정
     { "mcp": "agent-db-plugin", "tools": ["run_query"], "why": "센서·메시지·수식 조회" }
