@@ -17,6 +17,7 @@ const SCHEMA_FILES = {
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
   "fab-line/v1": "fab-line/v1.schema.json",
+  "screen-map/v1": "screen-map/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -91,6 +92,11 @@ export function deriveId(schema, body) {
       // Lowercased so the id keeps the store's one-case rule while the body
       // keeps the code as people write it (L1, not l1).
       return body.code ? body.code.toLowerCase() : null;
+    case "screen-map/v1":
+      // Already the value a classification carries downstream, so deriving it
+      // is really a drift check: the id a lister sees and the id the consumer
+      // pins a capture to must be the same string.
+      return body.id ?? null;
     default:
       return null;
   }
@@ -102,6 +108,7 @@ const ID_SOURCE = {
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
+  "screen-map/v1": () => "== body.id",
 };
 
 // Cross-field checks the JSON-Schema layer can't express (sibling-node
@@ -248,6 +255,23 @@ const SEMANTIC_CHECKS = {
   },
   "fab-line/v1"(doc, errors) {
     checkDerivedId(doc, errors);
+  },
+  "screen-map/v1"(doc, errors) {
+    checkDerivedId(doc, errors);
+    // A column named in both lists is a contradiction the schema cannot see:
+    // the extraction step reads `required` as "reject the table without it" and
+    // `optional` as "carry it if present", and it cannot do both.
+    const expected = doc.body?.expectedColumns;
+    if (Array.isArray(expected?.required) && Array.isArray(expected?.optional)) {
+      const required = new Set(expected.required);
+      for (const name of expected.optional) {
+        if (required.has(name))
+          fail(
+            errors,
+            `$.body.expectedColumns.optional: "${name}" is already in required`,
+          );
+      }
+    }
   },
   // spec v3 (issue #46): needs are first class and queries are the means of
   // filling them, so what the schema cannot see is now mostly ONE question —
