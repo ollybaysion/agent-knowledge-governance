@@ -4,6 +4,7 @@
 // direct coverage independent of those fixtures.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -745,4 +746,109 @@ test("fab-line: unknown keys are rejected", () => {
     refs,
   );
   assert.ok(errors.some((e) => e.includes("fab")));
+});
+
+// screen-map — the closed list a capture classifier answers from (issue #48,
+// consumer fdc-agent-be#63). Like fab-line it is reference data with no tiered
+// slots; unlike fab-line the id is carried in the body, because it is also the
+// value a confirmed classification hands downstream.
+function screenMapDoc() {
+  return {
+    schema: "screen-map/v1",
+    id: "fdc-monitor-history",
+    keywords: [{ kw: "fdc-monitor-history", inject: "pointer" }],
+    status: "active",
+    body: {
+      id: "fdc-monitor-history",
+      name: "센서값 이력 조회",
+      program: "FDC Monitor",
+      menuPath: ["이력조회"],
+      hints: ["시각별 측정값을 행으로 나열한 표가 화면의 대부분을 차지한다"],
+      expectedColumns: {
+        required: ["설비ID", "측정시각", "측정값"],
+        optional: ["단위"],
+      },
+    },
+  };
+}
+
+test("screen-map: a full doc is valid", () => {
+  assert.deepEqual(validateDocument(screenMapDoc(), refs), []);
+});
+
+test("screen-map: id and name alone are enough", () => {
+  // 저작자가 program·hints 를 안 채워도 문서는 선다 — 소비자(BE)가 빠진 필드를
+  // null 로 느슨하게 받는 것과 같은 관용.
+  const doc = screenMapDoc();
+  doc.body = { id: "spc-control-chart", name: "관리도 조회" };
+  doc.id = "spc-control-chart";
+  doc.keywords = [{ kw: "spc-control-chart", inject: "pointer" }];
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("screen-map: a document id that drifts from body.id is rejected", () => {
+  // 목록의 id 와 본문의 id 가 갈리면 소비자가 어느 쪽을 확정값으로 쓸지 모른다.
+  const doc = screenMapDoc();
+  doc.id = "fdc-monitor-hist";
+  const errors = validateDocument(doc, refs);
+  assert.ok(errors.some((e) => e.includes("== body.id")));
+});
+
+test("screen-map: id and name are required", () => {
+  assert.ok(
+    validate(refs["screen-map/v1"], { name: "이름만" }, refs).length > 0,
+  );
+  assert.ok(
+    validate(refs["screen-map/v1"], { id: "only-id" }, refs).length > 0,
+  );
+});
+
+test("screen-map: a blank name is rejected", () => {
+  // BE 가 후보 행에 그대로 찍는 값이라 공백이면 이름 없는 선택지가 된다.
+  const errors = validate(
+    refs["screen-map/v1"],
+    { id: "x", name: "   " },
+    refs,
+  );
+  assert.ok(errors.length > 0);
+});
+
+test("screen-map: an uppercase id is rejected", () => {
+  const errors = validate(
+    refs["screen-map/v1"],
+    { id: "FDC-Monitor", name: "이력조회" },
+    refs,
+  );
+  assert.ok(errors.length > 0);
+});
+
+test("screen-map: a column in both required and optional is rejected", () => {
+  const doc = screenMapDoc();
+  doc.body.expectedColumns = {
+    required: ["측정시각", "측정값"],
+    optional: ["측정값"],
+  };
+  const errors = validateDocument(doc, refs);
+  assert.ok(errors.some((e) => e.includes("already in required")));
+});
+
+test("screen-map: unknown keys are rejected", () => {
+  const errors = validate(
+    refs["screen-map/v1"],
+    { id: "x", name: "이력조회", route: "/fdc/history" },
+    refs,
+  );
+  assert.ok(errors.some((e) => e.includes("route")));
+});
+
+test("screen-map: the shipped example validates", () => {
+  // 이 문서는 BE 번들(src/main/resources/screen-maps/)의 같은 화면과 짝이다 —
+  // 예제가 깨지면 사내 저작자가 베낄 견본이 없다.
+  const doc = JSON.parse(
+    readFileSync(
+      new URL("../examples/screen-map/fdc-monitor-history.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(validateDocument(doc, refs), []);
 });

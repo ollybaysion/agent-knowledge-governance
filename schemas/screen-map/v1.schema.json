@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "screen-map/v1",
+  "title": "screen-map/v1 body",
+  "description": "A screen a person can capture and paste — the closed list a classifier is allowed to answer from. One document per screen, exactly like fab-line and domain-skill, so a screen is added or retired by pushing or archiving one document instead of editing a shared array. The consumer (fdc-agent-be#63) hands this whole catalog to a vision model and then throws away any id the model made up, so the list is not a hint: it is the answer space. There are no tiered-value slots — a screen either exists in the system or it does not, and nothing here is a claim awaiting review. The id is body.id so a lister knows every screen without fetching each body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The value a confirmed classification carries downstream. Lowercase kebab because it is also the document id, and the store keeps one case.",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "What the screen is called where people work. Spliced into a single rendered line — no newline, no leading markdown block marker.",
+      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    },
+    "program": {
+      "type": "string",
+      "description": "The application the screen belongs to (FDC Monitor, SPC). Consumers group by this string WITHOUT normalising it, so two spellings split into two groups — keep the wording identical across documents.",
+      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    },
+    "menuPath": {
+      "type": "array",
+      "description": "Where the screen sits under its program, outermost first. Joined with the program into one caption line, so it is a trail rather than a sentence.",
+      "items": {
+        "type": "string",
+        "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+      }
+    },
+    "hints": {
+      "type": "array",
+      "description": "What the screen LOOKS like — the only field that changes how well classification works, because it is what the vision model reads beside the capture. Write what is visibly distinctive (a chart above a table, a UCL line, a filter form), not what the screen is for; purpose does not survive a screenshot.",
+      "items": {
+        "type": "string",
+        "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+      }
+    },
+    "expectedColumns": {
+      "type": "object",
+      "description": "What a table extracted from this screen should contain. Not consumed yet — the extraction step (fdc-agent-be#63 follow-up) reads it; the classifier ignores it.",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "\\S" }
+        },
+        "optional": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "\\S" }
+        }
+      }
+    }
+  }
+}

@@ -21,7 +21,7 @@ import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill"];
+const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map"];
 
 function mdRelPath(type, doc) {
   if (type === "domain-skill")
