@@ -289,6 +289,25 @@ test("domain-skill: queries[].kind is a closed enum", () => {
   );
 });
 
+// inputs[].type (issue #49) — input-widget signal for consumers. Optional and
+// closed: omitted means free text, and anything outside the enum is a typo
+// that must fail loudly, not silently render as a text box.
+test("domain-skill: inputs[].type is optional and a closed enum", () => {
+  const schema = refs["domain-skill/v1"];
+
+  for (const t of ["datetime", "date"]) {
+    const body = V3_BODY();
+    body.inputs[0].type = t;
+    assert.deepEqual(validate(schema, body, refs), []);
+  }
+
+  const bad = V3_BODY();
+  bad.inputs[0].type = "time";
+  assert.ok(
+    validate(schema, bad, refs).some((e) => e.includes("$.inputs[0].type")),
+  );
+});
+
 test("domain-skill: needs require at least one item, and an empty filledBy is allowed", () => {
   const schema = refs["domain-skill/v1"];
 

@@ -342,6 +342,22 @@ test("domain-skill: the example renders byte-identically to the checked-in golde
   assert.equal(renderDomainSkillMd(doc), expected);
 });
 
+// inputs[].type (issue #49) is a machine field like binds/table: the widget
+// hint must never leak into SKILL.md, so a typed body renders byte-identically
+// to the same body without it.
+test("domain-skill: inputs[].type does not change the rendered md", () => {
+  const doc = JSON.parse(
+    readFileSync(
+      join(__dirname, "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"),
+      "utf8",
+    ),
+  );
+  const plain = renderDomainSkillMd(doc);
+  doc.body.inputs[0].type = "datetime";
+  assert.deepEqual(validateDocument(doc, refs), []);
+  assert.equal(renderDomainSkillMd(doc), plain);
+});
+
 // The routing sentence quotes the question verbatim (issue #46) — no skeleton
 // picked by a taxonomy field, so there is one shape instead of two.
 test("domain-skill: the description quotes the question and lists the required args", () => {
