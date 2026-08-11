@@ -12,7 +12,7 @@ import {
 } from "../store.mjs";
 import {
   persistDoc,
-  archiveDoc,
+  purgeDoc,
   renderDocMd,
   docWrites,
 } from "../render-store.mjs";
@@ -580,21 +580,28 @@ export function registerDocsRoutes(app) {
     );
   }
 
-  // §6 DELETE — soft archive (status: archived): dropped from the compiled
-  // injection index, but the JSON + git history are preserved.
+  // §6 DELETE — 완전 삭제(사용자 결정 2026-07-24: 보관 단계 없이 바로 삭제).
+  // store 트리에서 파일을 제거하는 git rm 커밋 — HEAD 에서 사라져 목록·API
+  // 에서 완전히 없어지고, git 이력에는 감사 기록으로만 남는다(이력 소거는
+  // 감사 설계와 충돌하므로 API 로 열지 않는다). archiveDoc(보관)은 되돌리기
+  // 쉽도록 render-store 에 함수로 남겨 뒀다 — 지금 경로에서만 안 쓴다.
   app.delete(
     "/api/docs/:type/:id",
     { config: { roles: ["approver"] } },
     async (request, reply) => {
       const { type, id } = request.params;
+      // S11: 파라미터가 그대로 경로가 된다 — Fastify 는 %2F 를 디코드하므로
+      // (proposals pid 순회, §13-1 과 같은 부류) 경로 조립 전에 형식을 거부.
+      if (!isValidId(type) || !isValidId(id))
+        return reply.code(404).send({ error: "not_found" });
       const result = await queue.enqueue(
         async () => {
           const relpath = `${type}/${id}.json`;
           const doc = readJson(storeDir, relpath);
           if (!doc) return { status: 404, body: { error: "not_found" } };
-          const rev = archiveDoc(storeDir, type, doc, {
+          const rev = purgeDoc(storeDir, type, doc, {
             author: request.user.id,
-            message: `archive ${type}/${id}`,
+            message: `delete ${type}/${id}`,
           });
           return { status: 200, body: { rev } };
         },

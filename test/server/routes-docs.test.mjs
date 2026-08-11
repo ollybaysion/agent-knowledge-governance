@@ -249,7 +249,7 @@ test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)",
   await cleanup();
 });
 
-test("DELETE archives a doc (approver only) — dropped from the index, JSON preserved; a nonexistent route is 404 not 500", async () => {
+test("DELETE removes a doc (approver only) — gone from list/API; a nonexistent route is 404 not 500", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
     { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
@@ -261,7 +261,7 @@ test("DELETE archives a doc (approver only) — dropped from the index, JSON pre
     payload: newDbSchemaDoc(),
   });
 
-  // editor cannot archive
+  // editor cannot delete
   const forbidden = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
@@ -276,12 +276,13 @@ test("DELETE archives a doc (approver only) — dropped from the index, JSON pre
   });
   assert.equal(del.statusCode, 200);
 
+  // 완전 삭제(사용자 결정 2026-07-24) — 보관 없이 바로 사라진다.
   const after = await app.inject({
     method: "GET",
     url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
-  assert.equal(after.json().json.status, "archived"); // JSON preserved, just archived
+  assert.equal(after.statusCode, 404);
 
   // a genuinely unknown route returns a clean 404, never a 500 route_misconfigured
   const unknown = await app.inject({
