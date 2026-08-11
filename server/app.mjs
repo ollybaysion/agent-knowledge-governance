@@ -40,6 +40,37 @@ const ANON_READ = process.env.AKG_ANON_READ !== "0";
 // Frozen: this object is shared across requests, so a handler must not mutate it.
 const ANON_USER = Object.freeze({ id: null, role: "viewer", anon: true });
 
+// S14 + S2: behind a reverse proxy every request arrives from the proxy's own
+// address, so the failed-auth rate limit — which keys on request.ip — would
+// treat the whole company as one client and lock everyone out over one
+// person's mistyped token. Fastify only reads X-Forwarded-For when told to,
+// and that trust has to be declared rather than assumed: on a directly
+// reachable server, trusting the header lets any client forge its address and
+// makes the rate limit unenforceable. Hence default OFF, and a deployment
+// states what sits in front of it.
+//
+//   unset / ""      → ignore X-Forwarded-For (direct exposure; the default)
+//   <n>             → trust n proxy hops. This is what a normal deployment
+//                     wants: `1` behind a single reverse proxy.
+//   <ip|cidr>[,...] → trust only these addresses
+//   true            → trust the whole header chain, i.e. take its LEFTMOST
+//                     entry as the client. Almost never right. Every common
+//                     proxy config appends to the header rather than replacing
+//                     it (nginx's $proxy_add_x_forwarded_for does), so the
+//                     leftmost entry is whatever the client sent — which hands
+//                     request.ip to the client and lets anyone both dodge the
+//                     rate limit and pin it on somebody else's address. Binding
+//                     to loopback does not help: the attacker reaches the proxy
+//                     the same way everyone else does. Use a hop count.
+function parseTrustProxy(raw) {
+  const value = (raw ?? "").trim();
+  if (value === "") return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value; // Fastify accepts an IP, a CIDR, or a comma-separated list
+}
+
 /**
  * @param {{storeDir: string, usersPath: string, schemasDir?: string}} opts
  * @returns {Promise<import("fastify").FastifyInstance>}
@@ -57,7 +88,11 @@ export async function buildApp({
   const refs = loadSchemas(schemasDir);
   const queue = createQueue();
 
-  const app = Fastify({ bodyLimit: BODY_LIMIT, logger: false });
+  const app = Fastify({
+    bodyLimit: BODY_LIMIT,
+    logger: false,
+    trustProxy: parseTrustProxy(process.env.AKG_TRUST_PROXY),
+  });
 
   app.decorate("akg", { storeDir, usersPath, refs, queue });
 
@@ -97,23 +132,6 @@ export async function buildApp({
     const cfg = request.routeOptions?.config ?? {};
     if (cfg.public) return;
 
-    const ip = request.ip;
-    if (isRateLimited(ip)) {
-      return reply.code(429).send({
-        error: "rate_limited",
-        message: "인증 실패가 너무 많습니다. 잠시 후 다시 시도하세요.",
-      });
-    }
-
-    let users;
-    try {
-      users = loadUsers(usersPath); // re-read so CLI revoke/add takes effect without a restart
-    } catch (err) {
-      return reply
-        .code(500)
-        .send({ error: "auth_store_broken", message: err.message });
-    }
-
     const authz = request.headers.authorization ?? "";
     const token = authz.startsWith("Bearer ") ? authz.slice(7) : null;
     // Only a request with NO credential at all can fall through to the
@@ -123,7 +141,34 @@ export async function buildApp({
     // probe tokens for free.
     if (!token && ANON_READ && cfg.anonOk) {
       request.user = ANON_USER;
+      // Deliberately no rate-limit check and no users.json read on this path.
+      // An anonymous request cannot produce an authentication failure, so
+      // gating it on the failure counter only means one person's typo storm
+      // takes the read-only dashboard down for everybody — which is exactly
+      // what happens behind a shared-IP reverse proxy. The counter exists to
+      // slow brute-forcing a token; a request that presents none isn't
+      // brute-forcing anything.
     } else {
+      // From here on this is an authentication attempt, so it is the thing the
+      // limit is meant to throttle. Checked before touching users.json so a
+      // rate-limited flood costs no file I/O.
+      const ip = request.ip;
+      if (isRateLimited(ip)) {
+        return reply.code(429).send({
+          error: "rate_limited",
+          message: "인증 실패가 너무 많습니다. 잠시 후 다시 시도하세요.",
+        });
+      }
+
+      let users;
+      try {
+        users = loadUsers(usersPath); // re-read so CLI revoke/add takes effect without a restart
+      } catch (err) {
+        return reply
+          .code(500)
+          .send({ error: "auth_store_broken", message: err.message });
+      }
+
       const user = token ? authenticate(users, token) : null;
       if (!user) {
         recordAuthFailure(ip);

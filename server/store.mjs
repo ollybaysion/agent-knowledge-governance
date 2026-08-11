@@ -67,18 +67,44 @@ function safeJoin(dir, ...parts) {
   return p;
 }
 
+// Every commit passes --author (the acting user), but git still needs a
+// *committer* identity, and that comes from config. Setting it on an existing
+// repo too — not only at init — is what makes a restored store work: a backup
+// brought back with `git clone` has none of the original's local config, and
+// the failure lands on the first write rather than at boot, as an opaque
+// "Please tell me who you are" inside a 500. Only filled in when absent, so an
+// operator who set a deliberate identity keeps it.
+function ensureCommitterIdentity(dir) {
+  for (const [key, value] of [
+    ["user.name", "akg-server"],
+    ["user.email", "akg-server@akg.local"],
+  ]) {
+    let current = "";
+    try {
+      // --local, not a plain --get: a plain --get also sees ~/.gitconfig, so
+      // on any host where the service account happens to have one, this would
+      // find an identity, write nothing, and let that unrelated personal
+      // identity end up as the committer of every audit-log commit.
+      current = git(dir, ["config", "--local", "--get", key]).trim();
+    } catch {
+      current = ""; // exit 1 = not set
+    }
+    if (!current) git(dir, ["config", key, value]);
+  }
+}
+
 /** Idempotent: creates+inits an empty store, or verifies an existing one is a clean git repo. */
 export function initStore(dir) {
   if (!existsSync(join(dir, ".git"))) {
     mkdirSync(dir, { recursive: true });
     git(dir, ["init", "-q"]);
-    git(dir, ["config", "user.name", "akg-server"]);
-    git(dir, ["config", "user.email", "akg-server@akg.local"]);
+    ensureCommitterIdentity(dir);
     writeFileSync(join(dir, ".gitkeep"), "");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "init store"]);
     return;
   }
+  ensureCommitterIdentity(dir);
   assertClean(dir);
 }
 
