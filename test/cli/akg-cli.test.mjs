@@ -272,7 +272,7 @@ test("cli push: a bare spec.json creates the doc, and a second run updates it", 
       specPath,
       JSON.stringify({
         ...GOLDEN_SPEC,
-        rephrasing: "센서 값이 물리 수집인지 수식 계산인지.",
+        markdown: GOLDEN_SPEC.markdown.replace("## 한 줄 설명\n\n", "## 한 줄 설명\n\n센서 값이 물리 수집인지 수식 계산인지.\n\n"),
       }),
     );
     const second = await runCli(["push", "domain-skill", specPath], {
@@ -297,8 +297,8 @@ test("cli push --dry-run: renders the skill with no token, no server, and writes
     assert.equal(r.status, 0, r.stderr);
     // The preview IS the SKILL.md the factory used to print locally.
     assert.match(r.stdout, /^---\nname: fdc-explain-sensor-origin\n/);
-    assert.match(r.stdout, /## 필요 데이터/);
-    assert.match(r.stdout, /## 조달 수단/);
+    assert.match(r.stdout, /## 도메인 지식/);
+    assert.match(r.stdout, /## 데이터/);
     assert.match(r.stderr, /DRY-RUN/);
     // Nothing about a missing token or server, because it needs neither.
     assert.doesNotMatch(r.stderr, /no token|no server URL/);
@@ -307,11 +307,48 @@ test("cli push --dry-run: renders the skill with no token, no server, and writes
   }
 });
 
+// A skill is written as md, so the natural file to push is the .md itself:
+// its basename is the skill name (the consumer's "file name is the name" rule)
+// and the text goes into body.markdown verbatim.
+test("cli push: a .md file becomes { name: <basename>, markdown } and round-trips byte-for-byte", async () => {
+  const { app, cleanup, serverUrl } = await setupServer();
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-md-"));
+  try {
+    const mdPath = join(home, "fdc-explain-sensor-origin.md");
+    writeFileSync(mdPath, GOLDEN_SPEC.markdown);
+
+    const r = await runCli(["push", "domain-skill", mdPath], { token: "ed-tok", serverUrl });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^created domain-skill\/fdc-explain-sensor-origin \(rev /);
+
+    const stored = await app.inject({
+      method: "GET",
+      url: "/api/docs/domain-skill/fdc-explain-sensor-origin",
+      headers: { authorization: "Bearer ed-tok" },
+    });
+    assert.equal(stored.statusCode, 200);
+    assert.deepEqual(stored.json().json.body, GOLDEN_SPEC);
+
+    // A section the consumer does not read fails before the network.
+    writeFileSync(join(home, "bad-skill.md"), GOLDEN_SPEC.markdown.replace("## 데이터", "## 데이타"));
+    const bad = await runCli(["push", "domain-skill", join(home, "bad-skill.md")], {
+      token: "ed-tok",
+      serverUrl: "http://127.0.0.1:1",
+    });
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, /모르는 절입니다 — "## 데이타"/);
+    assert.doesNotMatch(bad.stderr, /ECONNREFUSED|fetch failed/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
 test("cli push: an invalid spec fails on validation, before it ever calls the server", async () => {
   const home = mkdtempSync(join(tmpdir(), "akg-cli-badspec-"));
   try {
     const specPath = join(home, "spec.json");
-    // A v1 field that spec v2 removed — the exact thing "unknown keys are
+    // A key from the old JSON shape — the exact thing "unknown keys are
     // rejected" exists to catch.
     writeFileSync(
       specPath,

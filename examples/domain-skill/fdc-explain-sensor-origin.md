@@ -1,10 +1,3 @@
----
-name: fdc-explain-sensor-origin
-disable-model-invocation: true
-description: >-
-  센서 값이 어디서 오는지 — 설비에서 직접 올라오는 물리 센서인지, 다른 센서 값으로 계산되는 가상 센서인지 — 설명한다.
----
-
 # fdc-explain-sensor-origin
 
 ## 한 줄 설명

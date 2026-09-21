@@ -6,7 +6,7 @@
 // failure) — the caller needs to know the write did not happen.
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
 import { installSkills } from "../src/mirror/install-skills.mjs";
@@ -18,12 +18,13 @@ import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
   akg sync [--skills] [--skills-dir <dir>] [--server <url>] [--mirror <dir>]
-  akg push <type> <doc.json> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
+  akg push <type> <doc.json|skill.md> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
 
-  push takes a bare body (a foundry spec.json is a domain-skill body) or a
-  full envelope; it creates the document, or updates it if it already exists.
+  push takes a bare body or a full envelope; it creates the document, or
+  updates it if it already exists. A domain-skill is written as md: pass the
+  .md file and its basename becomes the skill name (body = { name, markdown }).
   --dry-run validates and prints the rendered md without writing anything.
 `;
 
@@ -81,6 +82,20 @@ function readJsonFile(path, label) {
     );
     process.exit(1);
   }
+}
+
+// A skill document is a Markdown file, not JSON (json-spec §4.4): the file's
+// basename is the skill name — the same "file name is the name" rule the
+// consumer applies to its bundled md — and the text goes in verbatim.
+function readMarkdownBody(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    process.stderr.write(`akg: cannot read document file "${path}": ${err.message}\n`);
+    process.exit(1);
+  }
+  return { name: basename(path).replace(/\.md$/i, ""), markdown: raw };
 }
 
 // §8.1: token file 0600 or AKG_TOKEN env. We don't enforce the mode here
@@ -254,7 +269,9 @@ async function runPush(positional, flags, token, serverUrl) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
-  const parsed = readJsonFile(docPath, "document file");
+  const parsed = /\.md$/i.test(docPath)
+    ? readMarkdownBody(docPath)
+    : readJsonFile(docPath, "document file");
 
   let doc;
   try {

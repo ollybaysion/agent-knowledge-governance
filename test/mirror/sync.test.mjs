@@ -74,32 +74,7 @@ function domainSkillDoc(name) {
     status: "active",
     body: {
       name,
-      argumentHint: "{id}",
-      questions: ["T-1 지금 어때?"],
-      rephrasing: "테스트 스킬 — T-1 의 현재 상태.",
-      inputs: [{ name: "id", required: true, description: "조회 키" }],
-      dependencies: [{ mcp: "agent-db-plugin" }],
-      needs: [
-        {
-          id: "state",
-          what: "현재 상태",
-          filledBy: [{ query: "row", column: "STATE" }],
-        },
-      ],
-      queries: [
-        { id: "row", kind: "sql", sql: "SELECT state FROM dual" },
-      ],
-      output: {
-        avoid: [
-          "없는 사유를 추측한다 — 사유 컬럼은 데이터에 없다",
-          "측정값을 지어낸다 — 이 스킬 범위 밖이다",
-          "코드를 구체화한다 — 라벨 이상은 모른다",
-        ],
-        examples: [
-          { ask: "전체 설명", answer: "넓은 답이다." },
-          { ask: "좁은 질문", answer: "좁은 답이다." },
-        ],
-      },
+      markdown: `# ${name}\n\n## 한 줄 설명\n\n테스트 스킬 — T-1 의 현재 상태.\n\n## 데이터\n\n### row — 상태 행\n\n\`\`\`sql\nSELECT state FROM dual\n\`\`\`\n`,
     },
   };
 }
