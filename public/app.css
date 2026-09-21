@@ -1397,6 +1397,38 @@ ol.steps > li p {
 .install-lead code {
   font-family: var(--mono);
 }
+/* 스킬 md 본문 — 대시보드는 md 를 렌더하지 않는다(소비자가 읽는 것이 곧 이 글이라 그대로 보인다) */
+.sk-md {
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--body-strong);
+  white-space: pre-wrap;
+}
+.slot-edit textarea.sk-md-edit {
+  width: 100%;
+  min-height: 24em;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 9px 11px;
+  resize: vertical;
+}
+.slot-edit textarea.sk-md-edit:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
 .install-cmd-wrap {
   position: relative;
   margin: 8px 0 6px;
@@ -1645,169 +1677,6 @@ button.pchip:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
-/* ── 필요 데이터 · 조달 수단 (spec v3) ──
- * v2 의 번호 레일이 사라진 자리다 — 순서가 의미를 잃었으므로 흐름이 아니라
- * 목록으로 읽힌다. 필요 데이터는 "무엇을 알아야 하나 ← 어디서 오나" 한 줄,
- * 조달 수단은 id 로 불리는 쿼리 카드. */
-.sk-needs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 8px 0 2px;
-}
-.sk-need {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--hairline-soft);
-}
-.sk-need:last-child {
-  border-bottom: none;
-}
-.sk-need-h {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.sk-need-id {
-  flex: none;
-  min-width: 90px;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-.sk-need-id .fx-val {
-  color: var(--primary);
-}
-.sk-need-what {
-  flex: 1 1 180px;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--ink);
-}
-.sk-when {
-  flex: 0 1 auto;
-  min-width: 0;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-}
-.sk-when-k {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-.sk-when .fx-val {
-  color: var(--warning-ink);
-}
-.sk-fills {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 3px;
-}
-.fill-arrow {
-  flex: none;
-  color: var(--muted-soft);
-}
-.sk-fills .fx {
-  flex: 1;
-  min-width: 0;
-}
-.sk-queries {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 8px 0 2px;
-}
-.sk-query-h {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.sk-query-id {
-  flex: none;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.sk-query-id .fx-val {
-  color: var(--primary);
-}
-.sk-table {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-}
-.sk-table-k {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-.sqlblock {
-  margin: 6px 0;
-}
-.fx-val.block {
-  display: block;
-  background: var(--surface-soft);
-  border: 1px solid var(--hairline-soft);
-  border-radius: 8px;
-  padding: 8px 10px;
-  white-space: pre;
-  overflow-x: auto;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-.sk-binds {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-}
-.sk-binds .fx {
-  flex: 1;
-  min-width: 0;
-}
-.sk-notes {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 4px;
-}
-.sk-questions {
-  margin: 8px 0 4px;
-  gap: 6px;
-}
-.sk-questions .sk-li {
-  align-items: baseline;
-}
-.sk-questions .fx-val {
-  font-size: 13.5px;
-  color: var(--ink);
-}
-.q-mark {
-  flex: none;
-  color: var(--muted-soft);
-  font-size: 12px;
-  line-height: 1;
-}
-.sk-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sk-li {
-  display: flex;
-  align-items: start;
-  gap: 8px;
-}
-.sk-li .fx {
-  flex: 1 1 auto;
-}
-
 /* 검토 바 */
 .skbar {
   display: flex;

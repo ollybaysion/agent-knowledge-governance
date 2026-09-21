@@ -3,8 +3,8 @@
 // `catalog-push` replaces one db-schema field; neither can CREATE a document,
 // so the only way in was the dashboard or raw curl.
 //
-// The file may be a bare body (agent-skill-foundry emits spec.json, which IS
-// a domain-skill body) or a full envelope. A bare body gets its envelope
+// The file may be a bare body (for a domain-skill the CLI builds one from a
+// .md file: { name, markdown }) or a full envelope. A bare body gets its envelope
 // derived here, using src/envelope.mjs's deriveId — the same rule the server
 // validates against, so a pushed doc agrees with a validated doc by
 // construction.

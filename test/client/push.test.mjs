@@ -1,7 +1,7 @@
 // akg CLI `push` (issue #18) — src/client/push.mjs against a REAL in-process
 // server (Phase 1's buildApp(), app.inject — no network). The domain-skill
-// cases are the point of the command: agent-skill-foundry emits spec.json and
-// this is how it reaches the hub.
+// cases are the point of the command: a skill is written as md and this is how
+// it reaches the hub (body = { name, markdown }).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -27,7 +27,7 @@ const EXAMPLE = JSON.parse(
     "utf8",
   ),
 );
-/** 체크인된 예시의 body — 공장이 내보내는 spec.json 과 같은 모양이다. */
+/** 체크인된 예시의 body — { name, markdown }, CLI 가 .md 파일에서 만드는 것과 같은 모양이다. */
 const GOLDEN_SPEC = EXAMPLE.body;
 
 async function setupServer() {
@@ -77,7 +77,7 @@ const pushTo = (app, doc, calls) =>
 
 // ---------------------------------------------------------------- envelope
 
-test("buildDocument: a bare foundry spec.json gets its envelope derived", () => {
+test("buildDocument: a bare { name, markdown } body gets its envelope derived", () => {
   const { doc, derived } = buildDocument("domain-skill", GOLDEN_SPEC);
   assert.equal(derived, true);
   assert.equal(doc.schema, "domain-skill/v1");
@@ -153,8 +153,8 @@ test("isEnvelope: only schema+body together make an envelope", () => {
 test("validateForPush: an unknown key in the body is rejected before any network call", () => {
   const { doc } = buildDocument("domain-skill", {
     ...GOLDEN_SPEC,
-    // spec v1's `description` was removed in v2 — an old spec must not pass
-    // silently just because the server would have caught it later.
+    // The old JSON shape's routing sentence — a body must not pass silently
+    // just because the server would have caught it later.
     description: "손으로 쓴 라우팅 문장",
   });
   const errors = validateForPush(doc);
@@ -162,15 +162,12 @@ test("validateForPush: an unknown key in the body is rejected before any network
   assert.match(errors.join("\n"), /description/);
 });
 
-test("validateForPush: a need pointing at no query is rejected before any network call", () => {
+test("validateForPush: a `##` section the consumer does not read is rejected before any network call", () => {
   const { doc } = buildDocument("domain-skill", {
     ...GOLDEN_SPEC,
-    needs: GOLDEN_SPEC.needs.map((need) => ({
-      ...need,
-      filledBy: need.filledBy.map((src) => ({ ...src, query: "nope" })),
-    })),
+    markdown: GOLDEN_SPEC.markdown.replace("## 데이터", "## 데이타"),
   });
-  assert.match(validateForPush(doc).join("\n"), /인 쿼리가 없습니다/);
+  assert.match(validateForPush(doc).join("\n"), /모르는 절입니다 — "## 데이타"/);
 });
 
 // ------------------------------------------------------------ create/update
@@ -214,7 +211,7 @@ test("push: pushing the same spec again updates it instead of failing", async ()
 
     const edited = buildDocument("domain-skill", {
       ...GOLDEN_SPEC,
-      rephrasing: "센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처.",
+      markdown: GOLDEN_SPEC.markdown.replace("## 한 줄 설명\n\n", "## 한 줄 설명\n\n센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처.\n\n"),
     }).doc;
     const calls = [];
     const second = await pushTo(app, edited, calls);
@@ -232,9 +229,9 @@ test("push: pushing the same spec again updates it instead of failing", async ()
       url: "/api/docs/domain-skill/fdc-explain-sensor-origin",
       headers: { authorization: "Bearer ed-tok" },
     });
-    assert.equal(
-      after.json().json.body.rephrasing,
-      "센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처.",
+    assert.match(
+      after.json().json.body.markdown,
+      /## 한 줄 설명\n\n센서 값이 물리 수집인지 수식 계산인지, 그리고 그 출처\./,
     );
   } finally {
     await cleanup();

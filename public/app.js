@@ -1613,21 +1613,18 @@ async function renderDocScreen(type, id) {
   renderInner();
 }
 
-// domain-skill: editorial reading view (prototype .skwrap), read-only in v1
+// domain-skill: the body is the author's md, stored verbatim (user decision
+// 2026-09-21) — so the view is the text and one editor for it, not a per-field
+// form. The heading structure inside the text is the consumer's schema
+// (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
+// refuses a `##` section it does not know, and the error comes back here.
 function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
-  // Only one inline editor open at a time. A dirty editor blocks opening
-  // another (flash + toast) — the same guard db-schema slots use; a clean
-  // one is reverted silently.
-  let active = null; // { revert, dirty, flash } of the open editor
 
-  // Every field edit is one whole-body PUT (spec v2 has no tiered slots — the
-  // body is the unit). mutate() applies the one change onto a clone; on success
-  // the screen reloads so the next edit sees a fresh rev.
-  async function commit(mutate) {
-    const next = structuredClone(s);
-    mutate(next);
+  // One whole-body PUT (the body is the unit — no tiered slots). On success the
+  // screen reloads so the next edit sees a fresh rev.
+  async function commit(next) {
     const r = await api(url, {
       method: "PUT",
       headers: { "if-match": rev },
@@ -1653,398 +1650,25 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return false;
   }
 
-  // A click-to-edit value. opts.kind: text | area | enum | bool. `apply(next,
-  // value)` writes the value into a body clone. Read shows the value (or a
-  // "(빈칸)" affordance); clicking swaps in the same slot-edit card db-schema
-  // slots use — one edit design language across doc types.
-  function field(value, opts, apply) {
-    const holder = el("span", { class: "fx" });
-    function read() {
-      if (active && active.revert === read) active = null;
-      const shown =
-        opts.kind === "bool"
-          ? value
-            ? "필수"
-            : "선택"
-          : (value ?? "") === ""
-            ? opts.empty || "(빈칸)"
-            : String(value);
-      const empty = opts.kind !== "bool" && (value ?? "") === "";
-      const cls =
-        "fx-val" +
-        (empty ? " empty" : "") +
-        (opts.mono ? " mono" : "") +
-        (opts.block ? " block" : "") +
-        (canEdit ? " editable" : "");
-      holder.replaceChildren(
-        canEdit
-          ? el("span", { class: cls, title: "클릭해서 편집", onclick: edit, text: shown })
-          : el("span", { class: cls, text: shown }),
-      );
+  // The one-line summary is the first paragraph under `## 한 줄 설명` — the same
+  // rule the renderer uses for the SKILL.md description.
+  function summaryOf(markdown) {
+    let inSummary = false;
+    for (const line of String(markdown || "").split(/\r?\n/)) {
+      const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+      if (h) {
+        inSummary = h[1].length === 2 && /^한 줄 설명[?？:：\s]*$/.test(h[2].trim());
+        continue;
+      }
+      if (inSummary && line.trim() !== "") return line.trim();
     }
-    function edit() {
-      // Dirty guard — same rule as db-schema slots: a half-typed edit is never
-      // dropped because another value was clicked; flash the open card instead.
-      if (active && active.revert !== read) {
-        if (active.dirty()) {
-          active.flash();
-          toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
-          return;
-        }
-        active.revert();
-      }
-      // enum: no card — the closed list unfolds in place as segment buttons
-      // and picking one commits immediately (esc/취소 to back out).
-      if (opts.kind === "enum") {
-        const seg = el(
-          "span",
-          { class: "segedit" },
-          opts.values.map((v) => {
-            const b = el("button", {
-              type: "button",
-              class: v === value ? "on" : "",
-              text: v,
-            });
-            b.addEventListener("click", async () => {
-              if (v === value) return read();
-              b.disabled = true;
-              const ok = await commit((next) => apply(next, v));
-              if (!ok) read();
-            });
-            return b;
-          }),
-        );
-        const pick = el("span", { class: "segwrap" }, [
-          seg,
-          el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: read }),
-        ]);
-        pick.addEventListener("keydown", (e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            read();
-          }
-        });
-        active = { revert: read, dirty: () => false, flash: () => {} };
-        holder.replaceChildren(pick);
-        seg.querySelector("button")?.focus();
-        return;
-      }
-      let input;
-      let getVal;
-      const oldShown =
-        opts.kind === "bool" ? (value ? "필수" : "선택") : String(value ?? "");
-      if (opts.kind === "bool") {
-        input = el("select", { class: "fld" });
-        for (const [v, label] of [
-          ["true", "필수"],
-          ["false", "선택"],
-        ]) {
-          const o = el("option", { value: v, text: label });
-          if ((v === "true") === !!value) o.selected = true;
-          input.appendChild(o);
-        }
-        getVal = () => input.value === "true";
-      } else {
-        input = el(opts.kind === "area" ? "textarea" : "input", {
-          class: "fld" + (opts.mono ? " mono" : ""),
-          spellcheck: "false",
-        });
-        if (opts.kind !== "area") input.type = "text";
-        input.value = value ?? "";
-        getVal = () => input.value;
-      }
-      const newShown = () =>
-        opts.kind === "bool" ? (getVal() ? "필수" : "선택") : String(getVal());
-      const dirty = () => newShown() !== oldShown;
-      const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
-      save.addEventListener("click", async () => {
-        save.disabled = true;
-        const ok = await commit((next) => apply(next, getVal()));
-        if (!ok) save.disabled = false;
-      });
-      // 저장 전 미리보기 — db-schema 와 같은 단어 diff.
-      const diffBody = el("div", { class: "diffbody" });
-      const refresh = () => {
-        const changed = dirty();
-        save.disabled = !changed;
-        save.title = changed ? "" : "변경 없음";
-        diffBody.replaceChildren();
-        if (!changed) {
-          diffBody.appendChild(el("span", { class: "dim", text: "아직 변경 없음" }));
-          return;
-        }
-        const wd = el("span", { class: "wd" });
-        for (const p of wordDiff(oldShown, newShown())) {
-          if (p.t === "eq") wd.appendChild(document.createTextNode(`${p.w} `));
-          else wd.appendChild(el("span", { class: p.t, text: `${p.w} ` }));
-        }
-        diffBody.appendChild(wd);
-      };
-      const grow = () => {
-        if (opts.kind !== "area") return;
-        input.style.height = "auto";
-        input.style.height = `${input.scrollHeight}px`;
-      };
-      input.addEventListener("input", () => {
-        grow();
-        refresh();
-      });
-      input.addEventListener("change", refresh);
-      const card = el("div", { class: "slot-edit" }, [
-        input,
-        el("div", { class: "editacts" }, [
-          save,
-          el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
-          el("span", { class: "kbd" }, [
-            el("b", { text: "esc" }),
-            " 취소 · ",
-            el("b", { text: opts.kind === "area" ? "⌘/Ctrl+↵" : "↵" }),
-            " 저장",
-          ]),
-        ]),
-        el("details", { class: "diffbox" }, [
-          el("summary", { text: "무엇이 바뀌나" }),
-          diffBody,
-        ]),
-      ]);
-      card.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          read();
-        } else if (
-          e.key === "Enter" &&
-          (e.metaKey || e.ctrlKey || opts.kind !== "area")
-        ) {
-          e.preventDefault();
-          if (!save.disabled) save.click();
-        }
-      });
-      active = {
-        revert: read,
-        dirty,
-        flash: () => {
-          card.classList.remove("dirtyflash");
-          void card.offsetWidth;
-          card.classList.add("dirtyflash");
-        },
-      };
-      holder.replaceChildren(card);
-      refresh();
-      grow();
-      input.focus();
-      // cursor at end, like the db-schema editor (text kinds only)
-      if (opts.kind === "area" || opts.kind === undefined)
-        input.setSelectionRange(input.value.length, input.value.length);
-    }
-    read();
-    return holder;
+    return "";
   }
 
-  // argument-hint is composed from inputs (the spec calls inputs "인자 계약의
-  // 진실원") — {name} for required, [name] for optional. Every inputs mutation
-  // recomputes it so the two can never drift.
-  const composeHint = (inputs) =>
-    (inputs || [])
-      .map((p) => (p.required ? `{${p.name}}` : `[${p.name}]`))
-      .join(" ");
-
-  // The argument-hint row IS the inputs editor: one chip per parameter
-  // ({name}/[name], tooltip = description), click a chip to edit it in place,
-  // `+` to add — no separate section, the whole contract lives on one line.
-  const paramsField = () => {
-    const holder = el("span", { class: "fx" });
-    function readRow() {
-      if (active && active.revert === readRow) active = null;
-      const row = el("span", { class: "chiprow" });
-      (s.inputs || []).forEach((inp, i) => {
-        const label = inp.required ? `{${inp.name}}` : `[${inp.name}]`;
-        row.appendChild(
-          canEdit
-            ? el("button", {
-                type: "button",
-                class: "pchip",
-                title: `${inp.description || ""} — 클릭해서 편집`,
-                text: label,
-                onclick: () => openEditor(i),
-              })
-            : el("span", { class: "pchip", title: inp.description || "", text: label }),
-        );
-      });
-      if (!(s.inputs || []).length)
-        row.appendChild(el("span", { class: "fx-val empty", text: "(입력 없음)" }));
-      if (canEdit)
-        row.appendChild(
-          el("button", {
-            type: "button",
-            class: "btn ghost sm add-btn",
-            title: "입력 파라미터 추가",
-            text: "+",
-            onclick: () => openEditor(-1),
-          }),
-        );
-      holder.replaceChildren(row);
-    }
-    // i >= 0 edits that parameter, i === -1 adds a new one. Same card either
-    // way: 이름/필수/설명 + 저장(확인)/취소(/삭제), committed as one body PUT.
-    function openEditor(i) {
-      if (active && active.revert !== readRow) {
-        if (active.dirty()) {
-          active.flash();
-          toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
-          return;
-        }
-        active.revert();
-      }
-      const cur = i >= 0 ? s.inputs[i] : null;
-      const name = el("input", {
-        class: "fld mono",
-        type: "text",
-        spellcheck: "false",
-        placeholder: "파라미터 이름 (예: snsr_id)",
-      });
-      if (cur) name.value = cur.name;
-      const req = el("select", { class: "fld" }, [
-        el("option", { value: "true", text: "필수" }),
-        el("option", { value: "false", text: "선택" }),
-      ]);
-      if (cur && !cur.required) req.value = "false";
-      const desc = el("textarea", {
-        class: "fld",
-        spellcheck: "false",
-        placeholder: "설명 (예: 조회 키)",
-      });
-      if (cur) desc.value = cur.description || "";
-      // Input-widget signal (issue #49): a machine field consumers use to put
-      // a calendar on the field. Omitted (the default) means free text.
-      const typ = el("select", { class: "fld" }, [
-        el("option", { value: "", text: "자유 텍스트 (생략)" }),
-        el("option", { value: "datetime", text: "datetime — 날짜+시각 달력" }),
-        el("option", { value: "date", text: "date — 날짜 달력" }),
-      ]);
-      if (cur && cur.type) typ.value = cur.type;
-      const growDesc = () => {
-        desc.style.height = "auto";
-        desc.style.height = `${desc.scrollHeight}px`;
-      };
-      desc.addEventListener("input", growDesc);
-      const save = el("button", {
-        type: "button",
-        class: "btn primary sm",
-        text: cur ? "저장" : "확인",
-      });
-      save.addEventListener("click", async () => {
-        const nm = name.value.trim();
-        if (!nm) {
-          toast("파라미터 이름을 입력하세요.", "error");
-          name.focus();
-          return;
-        }
-        if (!desc.value.trim()) {
-          toast("설명을 입력하세요.", "error");
-          desc.focus();
-          return;
-        }
-        save.disabled = true;
-        const entry = {
-          name: nm,
-          required: req.value === "true",
-          description: desc.value.trim(),
-        };
-        if (typ.value) entry.type = typ.value;
-        const done = await commit((n) => {
-          if (!n.inputs) n.inputs = [];
-          if (i >= 0) n.inputs[i] = entry;
-          else n.inputs.push(entry);
-          n.argumentHint = composeHint(n.inputs);
-        });
-        if (!done) save.disabled = false;
-      });
-      const acts = [
-        save,
-        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: readRow }),
-      ];
-      if (cur) {
-        const last = (s.inputs || []).length <= 1;
-        const del = el("button", {
-          type: "button",
-          class: "btn danger sm",
-          text: "삭제",
-          title: last ? "마지막 입력은 삭제할 수 없습니다" : "",
-          onclick: () =>
-            commit((n) => {
-              n.inputs.splice(i, 1);
-              n.argumentHint = composeHint(n.inputs);
-            }),
-        });
-        if (last) del.disabled = true;
-        acts.push(del);
-      }
-      acts.push(
-        el("span", { class: "kbd" }, [
-          el("b", { text: "esc" }),
-          " 취소 · ",
-          el("b", { text: "⌘/Ctrl+↵" }),
-          ` ${cur ? "저장" : "확인"}`,
-        ]),
-      );
-      const card = el("div", { class: "slot-edit" }, [
-        el("div", { class: "fieldlab", text: "이름 (name)" }),
-        name,
-        el("div", { class: "fieldlab", text: "필수 여부 (required)" }),
-        req,
-        el("div", { class: "fieldlab", text: "설명 (description)" }),
-        desc,
-        el("div", { class: "fieldlab", text: "입력 위젯 (type)" }),
-        typ,
-        el("div", { class: "editacts" }, acts),
-      ]);
-      card.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          readRow();
-        } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-          e.preventDefault();
-          if (!save.disabled) save.click();
-        }
-      });
-      active = {
-        revert: readRow,
-        dirty: () =>
-          cur
-            ? name.value.trim() !== cur.name ||
-              (req.value === "true") !== !!cur.required ||
-              desc.value.trim() !== (cur.description || "") ||
-              typ.value !== (cur.type || "")
-            : name.value.trim() !== "" || desc.value.trim() !== "" || typ.value !== "",
-        flash: () => {
-          card.classList.remove("dirtyflash");
-          void card.offsetWidth;
-          card.classList.add("dirtyflash");
-        },
-      };
-      holder.replaceChildren(card);
-      growDesc();
-      name.focus();
-    }
-    readRow();
-    return holder;
-  };
-
-  // optional scalar: clearing it removes the key (empty fails the schema's \S).
-  const setOpt = (key) => (n, v) => {
-    if (String(v).trim() === "") delete n[key];
-    else n[key] = v;
-  };
-  // optional scalar nested in an array item: n[arr][i][key].
-  const setOpt2 = (i, arr, key) => (n, v) => {
-    if (String(v).trim() === "") delete n[arr][i][key];
-    else n[arr][i][key] = v;
-  };
-
   const wrap = el("div", { class: "skwrap" }, [
-    el("p", { class: "sk-eyebrow", text: "domain-skill · 조회 절차 스킬" }),
+    el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
     el("h1", { class: "sk-title", text: s.name }),
-    el("p", { class: "sk-sub", text: (s.rephrasing || "").split("\n")[0] }),
+    el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
     el("div", { class: "sk-chips" }, [
       statusChip(),
       el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
@@ -2101,542 +1725,73 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       onclick: onToggleStatus,
     });
   }
-  const sec = (title, addBtn) => {
-    const h = el("h2", { class: "sk-h" }, [title]);
-    if (addBtn) h.appendChild(addBtn);
-    wrap.appendChild(h);
-  };
-  const addBtn = (label, onAdd) =>
-    canEdit
-      ? el("button", { type: "button", class: "btn ghost sm add-btn", onclick: () => commit(onAdd), text: label })
-      : null;
-  const delBtn = (canDel, onDel) =>
-    canEdit && canDel
-      ? el("button", { type: "button", class: "btn ghost sm del-btn", title: "삭제", onclick: () => commit(onDel), text: "✕" })
-      : null;
-  // help: 라벨 호버 시 이 필드가 무엇인지(스펙 §4.4의 정의) 설명한다.
-  const drow = (label, node, help) =>
-    el("div", { class: "drow" }, [
-      el(
-        "span",
-        help
-          ? { class: "dk has-help", text: label, title: help }
-          : { class: "dk", text: label },
-      ),
-      el("span", { class: "dv" }, node),
-    ]);
 
-  // A structured mini-form in the same slot-edit card the scalar editor uses —
-  // for a value that is a record, not a string (a filledBy pointer, a bind).
-  // Rows are {label, node, get}; the dirty guard compares against what the row
-  // held when it opened, exactly like the scalar editor's oldShown.
-  function recordEditor(holder, read, { rows, onSave, onDelete, saveLabel }) {
-    if (active && active.revert !== read) {
-      if (active.dirty()) {
-        active.flash();
-        toast("저장하지 않은 편집이 있습니다 — 저장하거나 취소한 뒤 이동하세요.");
-        return;
-      }
-      active.revert();
-    }
-    const initial = rows.map((r) => r.get());
-    const dirty = () => rows.some((r, i) => r.get() !== initial[i]);
-    const save = el("button", {
-      type: "button",
-      class: "btn primary sm",
-      text: saveLabel || "저장",
-    });
+  // ── 문서 ──────────────────────────────────────────────────────────────
+  // Read: the md as written, in a <pre> (the dashboard does not render md — the
+  // consumer does, and what it reads is exactly this text). Edit: one textarea
+  // over the whole document; 저장 = one PUT of { name, markdown }.
+  const docHolder = el("div", { class: "sk-doc" });
+  function read() {
+    const h = el("h2", { class: "sk-h" }, ["문서"]);
+    if (canEdit)
+      h.appendChild(
+        el("button", { type: "button", class: "btn ghost sm add-btn", onclick: edit, text: "편집" }),
+      );
+    docHolder.replaceChildren(
+      h,
+      (s.markdown || "").trim() === ""
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
+        : el("pre", { class: "sk-md", text: s.markdown }),
+      el("p", {
+        class: "dim",
+        text: "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.",
+      }),
+    );
+  }
+  function edit() {
+    const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
+    input.value = s.markdown || "";
+    const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+    const dirty = () => input.value !== (s.markdown || "");
+    const refresh = () => {
+      save.disabled = !dirty();
+      save.title = dirty() ? "" : "변경 없음";
+    };
     save.addEventListener("click", async () => {
-      const values = rows.map((r) => String(r.get()).trim());
-      const blank = rows.findIndex((r, i) => !values[i]);
-      if (blank >= 0) {
-        toast(`${rows[blank].label} 을(를) 입력하세요.`, "error");
-        rows[blank].node.focus();
-        return;
-      }
       save.disabled = true;
-      const ok = await onSave(values);
+      const ok = await commit({ ...s, markdown: input.value });
       if (!ok) save.disabled = false;
     });
-    const acts = [
-      save,
-      el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: read }),
-    ];
-    if (onDelete)
-      acts.push(
-        el("button", {
-          type: "button",
-          class: "btn danger sm",
-          text: "삭제",
-          onclick: () => commit(onDelete),
-        }),
-      );
-    acts.push(
-      el("span", { class: "kbd" }, [
-        el("b", { text: "esc" }),
-        " 취소 · ",
-        el("b", { text: "⌘/Ctrl+↵" }),
-        ` ${saveLabel || "저장"}`,
-      ]),
-    );
+    input.addEventListener("input", refresh);
     const card = el("div", { class: "slot-edit" }, [
-      ...rows.flatMap((r) => [el("div", { class: "fieldlab", text: r.label }), r.node]),
-      el("div", { class: "editacts" }, acts),
+      input,
+      el("div", { class: "editacts" }, [
+        save,
+        el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+        el("span", { class: "kbd" }, [
+          el("b", { text: "esc" }),
+          " 취소 · ",
+          el("b", { text: "⌘/Ctrl+↵" }),
+          " 저장",
+        ]),
+      ]),
     ]);
     card.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        if (dirty() && !confirm("저장하지 않은 편집이 있습니다. 버릴까요?")) return;
         read();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         if (!save.disabled) save.click();
       }
     });
-    active = {
-      revert: read,
-      dirty,
-      flash: () => {
-        card.classList.remove("dirtyflash");
-        void card.offsetWidth;
-        card.classList.add("dirtyflash");
-      },
-    };
-    holder.replaceChildren(card);
-    rows[0]?.node.focus();
+    docHolder.replaceChildren(el("h2", { class: "sk-h" }, ["문서 편집"]), card);
+    refresh();
+    input.focus();
   }
-
-  const textField = (value, placeholder, mono) => {
-    const input = el("input", {
-      class: "fld" + (mono ? " mono" : ""),
-      type: "text",
-      spellcheck: "false",
-      placeholder,
-    });
-    input.value = value ?? "";
-    return input;
-  };
-  const pickField = (values, value) => {
-    const sel = el("select", { class: "fld mono" });
-    for (const v of values) {
-      const o = el("option", { value: v, text: v });
-      if (v === value) o.selected = true;
-      sel.appendChild(o);
-    }
-    return sel;
-  };
-  const queryIds = () => (s.queries || []).map((q) => q.id).filter(Boolean);
-  // ids address things in v3, so a new one has to be unique on arrival — the
-  // server rejects duplicates and the reader would not know which was meant.
-  const freshId = (base, taken) => {
-    let n = 1;
-    while (taken.includes(`${base}${n}`)) n += 1;
-    return `${base}${n}`;
-  };
-
-  // ── 기본 ──────────────────────────────────────────────────────────────
-  sec("기본");
-  wrap.appendChild(
-    el("div", { class: "sk-def" }, [
-      drow(
-        "name",
-        field(s.name, { mono: true }, (n, v) => (n.name = v)),
-        "스킬 이름(kebab-case). 문서 id·SKILL.md 제목이 됩니다.",
-      ),
-      drow(
-        "argument-hint",
-        paramsField(),
-        "스킬 호출 시 표시되는 인자 목록. {이름}=필수, [이름]=선택 — 칩을 클릭해 수정하고, +로 추가합니다.",
-      ),
-      drow(
-        "anchor-table",
-        field(s.anchorTable, { mono: true }, setOpt("anchorTable")),
-        "앵커 테이블(선택). 프롬프트에 이 테이블명이 등장하면 곧바로 이 스킬로 라우팅됩니다.",
-      ),
-      drow(
-        "discipline",
-        field(s.discipline, { kind: "area" }, setOpt("discipline")),
-        "실행 규율(선택). 비워 두면 렌더러의 고정 규율 블록이 들어갑니다.",
-      ),
-    ]),
-  );
-
-  // ── 질문 ──────────────────────────────────────────────────────────────
-  // 네 칸의 앞 둘. 질문은 라우팅 신호(합성 description 이 그대로 인용)이고,
-  // rephrasing 은 그 질문을 답할 수 있는 형태로 다시 말한 것이다. 같은 질문의
-  // 다른 말투를 여러 줄로 적는다 — 한 문장으로는 사람들이 묻는 방식을 못 덮는다.
-  sec(
-    el("span", {
-      class: "has-help",
-      text: "질문",
-      title:
-        "이 스킬이 답하는 발화들. 제목이 아니라 사람이 실제로 묻는 말투로, 같은 질문의 다른 표현을 여러 줄로 적습니다 — SKILL.md 의 라우팅 문장이 이 줄들을 그대로 인용하므로, 여기 없는 말투는 라우팅에도 없습니다. 다른 질문(필요 데이터가 달라지는)이라면 그건 다른 스킬입니다.",
-    }),
-    addBtn("+ 질문 추가", (n) => n.questions.push("이렇게도 묻는다")),
-  );
-  const questionsWrap = el("div", { class: "sk-list sk-questions" });
-  (s.questions || []).forEach((q, i) => {
-    questionsWrap.appendChild(
-      el("div", { class: "sk-li" }, [
-        el("span", { class: "q-mark", text: "❝" }),
-        field(q, {}, (n, v) => (n.questions[i] = v)),
-        delBtn((s.questions || []).length > 1, (n) => n.questions.splice(i, 1)),
-      ]),
-    );
-  });
-  wrap.appendChild(questionsWrap);
-  wrap.appendChild(
-    el("div", { class: "sk-def" }, [
-      drow(
-        "rephrasing",
-        field(s.rephrasing, { kind: "area" }, (n, v) => (n.rephrasing = v)),
-        "답할 수 있는 형태로 다시 말한 것. 무엇을 가르는 질문인지, 어떤 도메인 용어로 답해야 하는지를 드러냅니다 — 없던 의도를 더하지는 않습니다. 첫 줄이 화면 상단 부제로 노출됩니다.",
-      ),
-    ]),
-  );
-
-  // ── 필요 데이터 ───────────────────────────────────────────────────────
-  // 1급 칸. 항목 하나 = 알아야 할 것 하나이고, 그 아래 화살표가 그것을 채울
-  // 조달 수단이다(여럿이면 아무거나 하나). 비어 있으면 답불가의 선언이다.
-  sec(
-    "필요 데이터",
-    addBtn("+ 항목 추가", (n) => {
-      n.needs.push({
-        id: freshId("need", (n.needs || []).map((x) => x.id)),
-        what: "알아야 할 것",
-        filledBy: [],
-      });
-    }),
-  );
-  const needsWrap = el("div", { class: "sk-needs" });
-  (s.needs || []).forEach((need, i) => {
-    // The pointers of one need, as chips: click one to re-aim it, + to add.
-    const fillsField = () => {
-      const holder = el("span", { class: "fx" });
-      function readRow() {
-        if (active && active.revert === readRow) active = null;
-        const row = el("span", { class: "chiprow" });
-        (need.filledBy || []).forEach((src, j) => {
-          const label = `${src.query}.${src.column}`;
-          row.appendChild(
-            canEdit
-              ? el("button", {
-                  type: "button",
-                  class: "pchip",
-                  title: "클릭해서 편집",
-                  text: label,
-                  onclick: () => openFill(j),
-                })
-              : el("span", { class: "pchip", text: label }),
-          );
-        });
-        if (!(need.filledBy || []).length)
-          row.appendChild(
-            el("span", {
-              class: "fx-val empty",
-              title:
-                "조달 수단이 없는 항목은 이 스킬로 알 수 없는 것 — 답불가가 문서에 적힌 상태입니다.",
-              text: "(조달 수단 없음 — 답불가)",
-            }),
-          );
-        if (canEdit)
-          row.appendChild(
-            el("button", {
-              type: "button",
-              class: "btn ghost sm add-btn",
-              title: "조달 수단 추가",
-              text: "+",
-              onclick: () => openFill(-1),
-            }),
-          );
-        holder.replaceChildren(row);
-      }
-      function openFill(j) {
-        const ids = queryIds();
-        if (!ids.length) {
-          toast("먼저 조달 수단(쿼리)을 추가하세요.", "error");
-          return;
-        }
-        const cur = j >= 0 ? need.filledBy[j] : null;
-        const query = pickField(ids, cur?.query ?? ids[0]);
-        const column = textField(cur?.column ?? "", "예: SNSR_KIND", true);
-        recordEditor(holder, readRow, {
-          saveLabel: cur ? "저장" : "확인",
-          rows: [
-            { label: "쿼리 (query)", node: query, get: () => query.value },
-            { label: "컬럼 (column)", node: column, get: () => column.value },
-          ],
-          onSave: ([q, c]) =>
-            commit((n) => {
-              const entry = { query: q, column: c };
-              if (j >= 0) n.needs[i].filledBy[j] = entry;
-              else n.needs[i].filledBy.push(entry);
-            }),
-          onDelete: cur ? (n) => n.needs[i].filledBy.splice(j, 1) : null,
-        });
-      }
-      readRow();
-      return holder;
-    };
-    needsWrap.appendChild(
-      el("div", { class: "sk-need" }, [
-        el("div", { class: "sk-need-h" }, [
-          el("span", { class: "sk-need-id" }, [
-            field(need.id, { mono: true }, (n, v) => (n.needs[i].id = v)),
-          ]),
-          el("span", { class: "sk-need-what" }, [
-            field(need.what, {}, (n, v) => (n.needs[i].what = v)),
-          ]),
-          el("span", { class: "mla" }),
-          // 조건은 항목의 성질이라 제목 줄에 둔다 — 대부분 비어 있고(항상 필요),
-          // 줄을 따로 주면 목록이 두 배로 길어진다.
-          need.when || canEdit
-            ? el("span", { class: "sk-when" }, [
-                el("span", {
-                  class: "sk-when-k has-help",
-                  text: "조건",
-                  title:
-                    "다른 필요 데이터의 값이 이 조건을 만족할 때만 이 항목이 활성입니다(예: sensor_kind = PHYSICAL). 비활성 항목은 완결 판정에서 빠지고, 그 항목만 지목한 쿼리는 실행되지 않습니다.",
-                }),
-                field(need.when, { mono: true, empty: "(항상)" }, setOpt2(i, "needs", "when")),
-              ])
-            : null,
-          delBtn((s.needs || []).length > 1, (n) => n.needs.splice(i, 1)),
-        ]),
-        el("div", { class: "sk-fills" }, [
-          el("span", { class: "fill-arrow", text: "←" }),
-          fillsField(),
-        ]),
-      ]),
-    );
-  });
-  wrap.appendChild(needsWrap);
-
-  // ── 조달 수단 ─────────────────────────────────────────────────────────
-  // 카탈로그다 — 순서에 의미가 없고, 쿼리 사이의 유일한 의존은 binds 다.
-  sec(
-    "조달 수단",
-    addBtn("+ 쿼리 추가", (n) => {
-      n.queries.push({
-        id: freshId("query", (n.queries || []).map((x) => x.id)),
-        kind: "sql",
-        sql: "SELECT 1 FROM dual",
-      });
-    }),
-  );
-  const queriesWrap = el("div", { class: "sk-queries" });
-  (s.queries || []).forEach((query, i) => {
-    // binds is the only dependency a query can declare now, so it is authored
-    // here rather than left to the JSON view (#44 의 교훈: 대시보드가 저작
-    // 표면이면 기계 필드도 FE 를 같이 낸다).
-    const bindsField = () => {
-      const holder = el("span", { class: "fx" });
-      const binds = () => query.binds || {};
-      function readRow() {
-        if (active && active.revert === readRow) active = null;
-        const row = el("span", { class: "chiprow" });
-        for (const [name, src] of Object.entries(binds())) {
-          const label = `:${name} ← ${src.from === "arg" ? src.arg : `${src.query}.${src.column}`}`;
-          row.appendChild(
-            canEdit
-              ? el("button", {
-                  type: "button",
-                  class: "pchip",
-                  title: "클릭해서 편집",
-                  text: label,
-                  onclick: () => openBind(name),
-                })
-              : el("span", { class: "pchip", text: label }),
-          );
-        }
-        if (!Object.keys(binds()).length)
-          row.appendChild(el("span", { class: "fx-val empty", text: "(바인드 없음)" }));
-        if (canEdit)
-          row.appendChild(
-            el("button", {
-              type: "button",
-              class: "btn ghost sm add-btn",
-              title: "바인드 추가",
-              text: "+",
-              onclick: () => openBind(null),
-            }),
-          );
-        holder.replaceChildren(row);
-      }
-      function openBind(name) {
-        const cur = name === null ? null : binds()[name];
-        const others = queryIds().filter((id) => id !== query.id);
-        const varName = textField(name ?? "", "예: eqp (SQL 의 :eqp)", true);
-        const from = el("select", { class: "fld" }, [
-          el("option", { value: "arg", text: "인자 (arg)" }),
-          el("option", { value: "query", text: "다른 쿼리의 결과 (query)" }),
-        ]);
-        from.value = cur?.from ?? "arg";
-        const arg = pickField(
-          (s.inputs || []).map((p) => p.name),
-          cur?.from === "arg" ? cur.arg : (s.inputs || [])[0]?.name,
-        );
-        const srcQuery = pickField(others, cur?.from === "query" ? cur.query : others[0]);
-        const column = textField(
-          cur?.from === "query" ? cur.column : "",
-          "예: EQP_ID",
-          true,
-        );
-        const argRows = [{ label: "인자 (arg)", node: arg, get: () => arg.value }];
-        const queryRows = [
-          { label: "쿼리 (query)", node: srcQuery, get: () => srcQuery.value },
-          { label: "컬럼 (column)", node: column, get: () => column.value },
-        ];
-        // The source kind picks which rows apply, so the card is rebuilt on
-        // change — one closed shape at a time, like the schema's if/then/else.
-        const open = () => {
-          const byArg = from.value === "arg";
-          if (!byArg && !others.length) {
-            toast("참조할 다른 쿼리가 없습니다.", "error");
-            from.value = "arg";
-            return;
-          }
-          recordEditor(holder, readRow, {
-            saveLabel: cur ? "저장" : "확인",
-            rows: [
-              { label: "바인드 변수 (:var)", node: varName, get: () => varName.value },
-              { label: "출처 (from)", node: from, get: () => from.value },
-              ...(byArg ? argRows : queryRows),
-            ],
-            onSave: (values) =>
-              commit((n) => {
-                const next = { ...(n.queries[i].binds || {}) };
-                if (name !== null) delete next[name];
-                next[values[0]] = byArg
-                  ? { from: "arg", arg: values[2] }
-                  : { from: "query", query: values[2], column: values[3] };
-                n.queries[i].binds = next;
-              }),
-            onDelete: cur
-              ? (n) => {
-                  delete n.queries[i].binds[name];
-                  if (!Object.keys(n.queries[i].binds).length)
-                    delete n.queries[i].binds;
-                }
-              : null,
-          });
-        };
-        from.addEventListener("change", open);
-        open();
-      }
-      readRow();
-      return holder;
-    };
-    queriesWrap.appendChild(
-      el("div", { class: "sk-query" }, [
-        el("div", { class: "sk-query-h" }, [
-          el("span", { class: "sk-query-id" }, [
-            field(query.id, { mono: true }, (n, v) => (n.queries[i].id = v)),
-          ]),
-          // 원천 테이블은 SQL 바로 위 — 이 코드블록이 무엇을 읽는지의 라벨이고,
-          // 소비자에겐 데이터 블록 제목이자 db-schema 문서를 찾는 키다(#44).
-          el("span", { class: "sk-table" }, [
-            el("span", {
-              class: "sk-table-k has-help",
-              text: "FROM",
-              title:
-                "이 쿼리가 읽는 원천 테이블(선택). SQL 의 FROM 과 일치해야 저장됩니다. 서술형 답변에서는 이 이름이 데이터 블록 제목이 되고, 컬럼 의미를 발췌할 db-schema 문서를 찾는 키로 쓰입니다.",
-            }),
-            field(query.table, { mono: true, empty: "(table)" }, setOpt2(i, "queries", "table")),
-          ]),
-          el("span", { class: "mla" }),
-          delBtn((s.queries || []).length > 1, (n) => n.queries.splice(i, 1)),
-        ]),
-        el("div", { class: "sqlblock" }, [
-          field(query.sql, { kind: "area", mono: true, block: true }, (n, v) => (n.queries[i].sql = v)),
-        ]),
-        el("div", { class: "sk-binds" }, [
-          el("span", {
-            class: "sk-table-k has-help",
-            text: "BINDS",
-            title:
-              "SQL 의 :변수를 무엇으로 채우는지. 인자에서 오거나 다른 쿼리의 결과 컬럼에서 옵니다 — 순서가 사라진 v3 에서 쿼리 사이의 유일한 의존입니다.",
-          }),
-          bindsField(),
-        ]),
-        query.notes || canEdit
-          ? el("div", { class: "sk-notes" }, [
-              field(query.notes, { kind: "area", empty: "(notes)" }, setOpt2(i, "queries", "notes")),
-            ])
-          : null,
-      ]),
-    );
-  });
-  wrap.appendChild(queriesWrap);
-
-  // ── 출력 ──────────────────────────────────────────────────────────────
-  sec("출력");
-  wrap.appendChild(
-    el("h3", { class: "sk-h3" }, [
-      "하지 말 것 (avoid)",
-      addBtn("+ 추가", (n) => n.output.avoid.push("끌리는 오추론 예시 — 그걸 금하는 데이터 사실")),
-    ]),
-  );
-  const avoidWrap = el("div", { class: "sk-list" });
-  (s.output?.avoid || []).forEach((a, i) => {
-    avoidWrap.appendChild(
-      el("div", { class: "sk-li" }, [
-        field(a, {}, (n, v) => (n.output.avoid[i] = v)),
-        delBtn((s.output?.avoid || []).length > 3, (n) => n.output.avoid.splice(i, 1)),
-      ]),
-    );
-  });
-  wrap.appendChild(avoidWrap);
-
-  wrap.appendChild(
-    el("h3", { class: "sk-h3" }, [
-      "예시 (examples)",
-      addBtn("+ 예시 추가", (n) => n.output.examples.push({ ask: "질문 예시", answer: "답변 예시" })),
-    ]),
-  );
-  const exWrap = el("div", {});
-  (s.output?.examples || []).forEach((ex, i) => {
-    exWrap.appendChild(
-      el("div", { class: "sk-item" }, [
-        el("div", { class: "sk-item-h" }, [
-          el("span", { class: "sk-item-n", text: `예시 ${i + 1}` }),
-          el("span", { class: "mla" }),
-          delBtn((s.output?.examples || []).length > 2, (n) => n.output.examples.splice(i, 1)),
-        ]),
-        el("div", { class: "sk-def" }, [
-          drow("ask", field(ex.ask, {}, (n, v) => (n.output.examples[i].ask = v))),
-          drow("answer", field(ex.answer, { kind: "area" }, (n, v) => (n.output.examples[i].answer = v))),
-        ]),
-      ]),
-    );
-  });
-  wrap.appendChild(exWrap);
-
-  // ── 의존성 ────────────────────────────────────────────────────────────
-  // Read-only by design (사용자 결정 2026-07-22): the JSON keeps carrying
-  // dependencies, but they change when the procedure changes — hand-editing
-  // them here would only let the two drift apart. Placed last: metadata for
-  // the machine, not something a reader of the procedure needs first.
-  sec("의존성");
-  const depsWrap = el("div", { class: "dep-list" });
-  (s.dependencies || []).forEach((dep) => {
-    depsWrap.appendChild(
-      el("div", { class: "dep-card" }, [
-        el("div", { class: "dep-mcp" }, [
-          el("span", { class: "dep-kind", text: "MCP" }),
-          dep.mcp,
-        ]),
-        (dep.tools || []).length
-          ? el(
-              "div",
-              { class: "dep-tools" },
-              (dep.tools || []).map((t) => el("span", { class: "toolchip", text: t })),
-            )
-          : null,
-        dep.why ? el("div", { class: "dep-why", text: dep.why }) : null,
-      ]),
-    );
-  });
-  wrap.appendChild(depsWrap);
+  read();
+  wrap.appendChild(docHolder);
 
   // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
   // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
@@ -2662,7 +1817,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         el("p", { class: "dim install-lead" }, [
           "받은 ",
           el("code", { text: "SKILL.md" }),
-          " 를 아래 위치에 넣으면 끝 — Claude Code·opencode 모두 이 경로를 읽습니다.",
+          " 를 아래 위치에 넣으면 끝 — Claude Code·opencode 모두 이 경로를 읽습니다. 내려받는 파일은 이 문서 앞에 frontmatter(name·description)만 붙인 것입니다.",
         ]),
         el("div", { class: "install-cmd-wrap" }, [
           el("pre", { class: "install-cmd", text: installCmd }),
@@ -3089,7 +2244,7 @@ function onDocClickForFlyout(e) {
 const NEW_DOC_OPTS = [
   { type: "db-schema", desc: "테이블 · 컬럼" },
   { type: "msg-format", desc: "설비 커맨드" },
-  { type: "domain-skill", desc: "조회 절차 스킬" },
+  { type: "domain-skill", desc: "스킬 문서(md)" },
 ];
 function toggleFlyout(host, btn) {
   if (document.querySelector(".nd-flyout")) {
@@ -3433,40 +2588,23 @@ function draftMsgFormat(body, onIdChange, persist, rerender) {
   return wrap;
 }
 
-// ---- domain-skill 드래프트 폼 (핵심 필드; 나머지는 저장 후 문서 화면) ----
+// ---- domain-skill 드래프트 폼 — 스킬은 md 한 장이라 붙여 넣는 칸 하나 ----
 function draftDomainSkill(body, onIdChange, persist, rerender) {
   const wrap = el("div", { class: "dfwrap" });
   wrap.append(
     dfRow(
-      "argument-hint",
+      "markdown",
       false,
-      eField(() => body.argumentHint, (v) => (body.argumentHint = v), {
-        placeholder: "예: <센서 ID>",
-        onChange: persist,
-      }),
-    ),
-    dfRow(
-      "question",
-      false,
-      // 드래프트는 대표 질문 한 줄만 받는다 — 다른 말투 추가는 저장 후 문서
-      // 화면에서(폼을 여기서 목록으로 키우면 생성 화면이 무거워진다).
-      eField(() => body.question, (v) => (body.question = v), {
-        placeholder: "질문 — 사람이 실제로 묻는 말투로",
-        onChange: persist,
-      }),
-    ),
-    dfRow(
-      "rephrasing",
-      false,
-      eField(() => body.rephrasing, (v) => (body.rephrasing = v), {
+      eField(() => body.markdown, (v) => (body.markdown = v), {
         area: true,
-        placeholder: "답할 수 있는 형태로 다시 말하면 — 무엇을 알아야 답이 되는지",
+        mono: true,
+        placeholder: "스킬 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터",
         onChange: persist,
       }),
     ),
   );
   wrap.append(
-    el("p", { class: "fhint", text: "필요 데이터(needs)·조달 수단(queries)·출력 등 나머지는 저장 후 문서 화면에서 채웁니다. 활성화하려면 전부 채워야 합니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 넷만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }
@@ -3508,16 +2646,10 @@ function finalizeDraftBody(type, body) {
       fields,
     };
   }
-  // domain-skill: 채워진 것만 + 문서 화면이 접근하는 컨테이너는 안전한 빈 값으로
+  // domain-skill: { name, markdown } — 본문이 비었으면 칸 자체를 안 보낸다
+  // (드래프트는 required 가 풀린 스키마로 검증되니 name 만으로 저장된다).
   const b = { name: body.name };
-  if (body.argumentHint) b.argumentHint = body.argumentHint;
-  b.questions = body.question ? [body.question] : [];
-  if (body.rephrasing) b.rephrasing = body.rephrasing;
-  b.inputs = [];
-  b.dependencies = [];
-  b.needs = [];
-  b.queries = [];
-  b.output = { avoid: [], examples: [] };
+  if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;
   return b;
 }
 

@@ -122,114 +122,28 @@ function checkDerivedId(doc, errors) {
   }
 }
 
-// The table a step's SQL selects from, when there is exactly one to name
-// (issue #44). A join, a set operator or a subquery has no sole FROM, so this
-// returns null and the caller steps aside instead of guessing — the same
-// discipline as leaving a binds-less step alone. Quoted literals are stripped
-// first for the same reason binds does it: a keyword inside a string is not
-// syntax.
-function soleFromTable(sql) {
-  const text = String(sql ?? "").replace(/'[^']*'/g, "''");
-  if (/\bjoin\b/i.test(text)) return null;
-  const froms = [...text.matchAll(/\bfrom\b/gi)];
-  if (froms.length !== 1) return null;
-  const clause = text
-    .slice(froms[0].index + 4)
-    .split(
-      /\b(?:where|group|order|having|fetch|offset|start|connect|union|minus|intersect|pivot)\b/i,
-    )[0];
-  // A comma is an implicit join and a paren is an inline view — neither has a
-  // single source table either.
-  if (clause.includes(",") || clause.includes("(")) return null;
-  return clause.trim().split(/\s+/)[0] || null; // the alias, if any, drops off
-}
+// The `##` sections a skill md may have — the consumer's heading schema
+// (fdc-agent-be-spring SkillMarkdownTool). akg does not parse the document any
+// further; it only refuses a section it does not know, because downstream that
+// typo would not be an error but a silently missing section (## 데이타 → no
+// data items). A trailing `?`/`:` is noise, as it is for the consumer.
+const SKILL_SECTIONS = new Set(["한 줄 설명", "언제 호출되는가", "도메인 지식", "데이터"]);
+const normalizeHeading = (title) => title.trim().replace(/[?？:：\s]+$/u, "").trim();
 
-// Case and owner prefix are noise for this comparison: the db-schema document
-// this points at is keyed by lower(table) with `owner` a plain body attribute
-// (deriveId above), so `TESTUSER.FDC_SENSOR` and `fdc_sensor` name one doc.
-const normalizeTable = (name) =>
-  String(name).replace(/"/g, "").split(".").pop().trim().toLowerCase();
-
-// The column names a SELECT hands back, lowercased — what `filledBy.column`
-// and a `from:"query"` bind are allowed to name (issue #46). Null means "do not
-// judge": a `*`, or a select-list item with no trailing identifier to read as a
-// column name (an unaliased `COUNT(*)`), leaves nothing to compare against, and
-// guessing would reject valid specs. Same discipline as soleFromTable.
-function selectColumns(sql) {
-  const text = String(sql ?? "").replace(/'[^']*'/g, "''");
-  const select = /\bselect\b/i.exec(text);
-  if (!select) return null;
-  const start = select.index + select[0].length;
-  // The FROM that closes this select list is the first one at paren depth 0 —
-  // a subquery's FROM sits deeper and must not end the scan.
-  let depth = 0;
-  let end = -1;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (depth === 0 && /^from\b/i.test(text.slice(i)) && !/[A-Za-z0-9_$#]/.test(text[i - 1] ?? " ")) {
-      end = i;
-      break;
+/** The `##` headings of a markdown text, skipping fenced code blocks. */
+export function skillSections(markdown) {
+  const out = [];
+  let fence = null;
+  for (const line of String(markdown ?? "").split(/\r?\n/)) {
+    const f = /^(`{3,}|~{3,})/.exec(line);
+    if (fence === null && f) fence = f[1];
+    else if (fence !== null && line.trim().startsWith(fence)) fence = null;
+    else if (fence === null) {
+      const h = /^##\s+(.*?)\s*#*\s*$/.exec(line);
+      if (h) out.push(h[1]);
     }
   }
-  if (end < 0) return null;
-  const items = [];
-  let item = "";
-  depth = 0;
-  for (const ch of text.slice(start, end)) {
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    if (ch === "," && depth === 0) {
-      items.push(item);
-      item = "";
-    } else item += ch;
-  }
-  items.push(item);
-  const columns = new Set();
-  for (const raw of items) {
-    const one = raw.replace(/"/g, "").trim();
-    if (!one || one === "*" || one.endsWith(".*")) return null;
-    const named = /(?:\bas\s+)?([A-Za-z_][A-Za-z0-9_$#]*)\s*$/i.exec(one);
-    if (!named) return null;
-    columns.add(named[1].toLowerCase());
-  }
-  return columns.size ? columns : null;
-}
-
-// The identifiers a `when` expression names, minus the operator words — the
-// candidates for "which need does this condition read". Values are conventionally
-// uppercase (`= PHYSICAL`) and need ids are lowercase by schema pattern, so the
-// lowercase-only match already keeps literals out of the way.
-const WHEN_OPERATORS = new Set(["and", "or", "not", "is", "in", "null", "like", "between"]);
-const whenRefs = (when) =>
-  [...String(when ?? "").matchAll(/\b[a-z][a-z0-9_]*\b/g)]
-    .map((m) => m[0])
-    .filter((word) => !WHEN_OPERATORS.has(word));
-
-/**
- * The first cycle in a directed graph, as the node path that closes it.
- * `edges` is a Map of node -> iterable of nodes. Null when acyclic.
- */
-function findCycle(edges) {
-  const state = new Map(); // 1 = on the current path, 2 = done
-  const path = [];
-  let found = null;
-  const walk = (node) => {
-    if (found) return;
-    if (state.get(node) === 1) {
-      found = [...path.slice(path.indexOf(node)), node];
-      return;
-    }
-    if (state.get(node) === 2) return;
-    state.set(node, 1);
-    path.push(node);
-    for (const next of edges.get(node) ?? []) walk(next);
-    path.pop();
-    state.set(node, 2);
-  };
-  for (const node of edges.keys()) walk(node);
-  return found;
+  return out;
 }
 
 const SEMANTIC_CHECKS = {
@@ -273,171 +187,20 @@ const SEMANTIC_CHECKS = {
       }
     }
   },
-  // spec v3 (issue #46): needs are first class and queries are the means of
-  // filling them, so what the schema cannot see is now mostly ONE question —
-  // does this pointer point at anything. Every check below is that question
-  // asked of a different arrow: filledBy → query.column, when → need,
-  // binds → input / query.column. The reference graphs must also stay acyclic,
-  // because both of them are read as "resolve that first".
+  // The body is the author's md verbatim (user decision 2026-09-21); what the
+  // schema cannot see is only whether its `##` sections are ones the consumer
+  // reads. Everything inside a section (items, fences, :vars) is the consumer's
+  // to judge — it is the one that turns the text into a skill.
   "domain-skill/v1"(doc, errors) {
     checkDerivedId(doc, errors);
-    const needs = Array.isArray(doc.body.needs) ? doc.body.needs : [];
-    const queries = Array.isArray(doc.body.queries) ? doc.body.queries : [];
-    const inputNames = new Set(
-      (Array.isArray(doc.body.inputs) ? doc.body.inputs : [])
-        .map((inp) => inp?.name)
-        .filter(Boolean),
-    );
-
-    // Ids address things now (the catalog dropped its order), so a duplicate is
-    // not a style problem: it makes every reference to that id ambiguous.
-    const queryById = new Map();
-    queries.forEach((query, i) => {
-      const id = query?.id;
-      if (typeof id !== "string") return;
-      if (queryById.has(id))
-        fail(errors, `$.body.queries[${i}].id: 중복된 쿼리 id "${id}"`);
-      else queryById.set(id, query);
-    });
-    const needIds = new Set();
-    needs.forEach((need, i) => {
-      const id = need?.id;
-      if (typeof id !== "string") return;
-      if (needIds.has(id))
-        fail(errors, `$.body.needs[${i}].id: 중복된 needs id "${id}"`);
-      else needIds.add(id);
-    });
-
-    const columnsCache = new Map();
-    const columnsOf = (query) => {
-      if (!columnsCache.has(query))
-        columnsCache.set(query, selectColumns(query?.sql));
-      return columnsCache.get(query);
-    };
-    // A column that the query does not select can never be filled, and the
-    // deterministic 채워짐 판정 would read that as "the data is missing" rather
-    // than "the spec is wrong" — the failure the column pin exists to prevent.
-    const checkColumn = (path, queryId, column) => {
-      const target = queryById.get(queryId);
-      if (!target) {
-        fail(errors, `${path}: id "${queryId}" 인 쿼리가 없습니다`);
-        return;
-      }
-      const columns = columnsOf(target);
-      if (columns && !columns.has(String(column).toLowerCase()))
+    if (typeof doc.body?.markdown !== "string") return;
+    for (const title of skillSections(doc.body.markdown)) {
+      if (!SKILL_SECTIONS.has(normalizeHeading(title)))
         fail(
           errors,
-          `${path}: 쿼리 "${queryId}" 의 SELECT 목록에 "${column}" 이 없습니다`,
+          `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${[...SKILL_SECTIONS].map((t) => `## ${t}`).join(" · ")})`,
         );
-    };
-
-    needs.forEach((need, i) => {
-      (Array.isArray(need?.filledBy) ? need.filledBy : []).forEach((src, j) => {
-        checkColumn(
-          `$.body.needs[${i}].filledBy[${j}]`,
-          src?.query,
-          src?.column,
-        );
-      });
-    });
-
-    // `when` reads another need's value, so it has to name one. Every lowercase
-    // identifier in the expression is a candidate; if none of them is a need,
-    // the condition can never be evaluated and the need would hang inactive
-    // forever (or, worse, be treated as active).
-    const whenEdges = new Map();
-    needs.forEach((need, i) => {
-      if (typeof need?.id === "string" && !whenEdges.has(need.id))
-        whenEdges.set(need.id, []);
-      if (typeof need?.when !== "string") return;
-      const refs = whenRefs(need.when).filter((word) => needIds.has(word));
-      if (refs.length === 0) {
-        fail(
-          errors,
-          `$.body.needs[${i}].when: "${need.when}" 이 참조하는 needs 가 없습니다`,
-        );
-        return;
-      }
-      if (typeof need.id === "string") whenEdges.get(need.id).push(...refs);
-    });
-    const whenCycle = findCycle(whenEdges);
-    if (whenCycle)
-      fail(errors, `$.body.needs: when 조건이 순환합니다 — ${whenCycle.join(" → ")}`);
-
-    const bindEdges = new Map();
-    queries.forEach((query, i) => {
-      if (typeof query?.id === "string" && !bindEdges.has(query.id))
-        bindEdges.set(query.id, []);
-      // queries[].table coherence (issue #44). The declared table is what the
-      // prompt synthesizer heads the data block with and what the db-schema
-      // excerpt is looked up by, so a table that disagrees with the FROM beside
-      // it aims both at the wrong document — silently, since the SQL still
-      // runs. The SQL is where that truth is already written, so it is the
-      // reference; only a single-table SELECT can be judged.
-      const table = query?.table;
-      if (typeof table === "string" && table.trim()) {
-        const from = soleFromTable(query?.sql);
-        if (from && normalizeTable(from) !== normalizeTable(table)) {
-          fail(
-            errors,
-            `$.body.queries[${i}].table: "${table}" but the sql selects from "${from}"`,
-          );
-        }
-      }
-      const binds = query?.binds;
-      if (binds === undefined || binds === null || typeof binds !== "object")
-        return;
-      for (const [name, src] of Object.entries(binds)) {
-        if (src?.from === "arg" && !inputNames.has(src.arg)) {
-          fail(
-            errors,
-            `$.body.queries[${i}].binds.${name}: no input named "${src.arg}"`,
-          );
-        }
-        if (src?.from === "query") {
-          checkColumn(
-            `$.body.queries[${i}].binds.${name}`,
-            src.query,
-            src.column,
-          );
-          if (typeof query.id === "string" && typeof src.query === "string")
-            bindEdges.get(query.id).push(src.query);
-        }
-      }
-      // The SQL's :vars and the declared binds must match exactly — a missing
-      // bind is an unexecutable query, an extra one is a claim about SQL that
-      // does not use it. Quoted literals are stripped first so a ':' inside a
-      // string (date masks etc.) is not read as a bind.
-      const sqlVars = new Set(
-        [
-          ...String(query.sql ?? "")
-            .replace(/'[^']*'/g, "''")
-            .matchAll(/:([A-Za-z][A-Za-z0-9_]*)/g),
-        ].map((m) => m[1]),
-      );
-      for (const v of sqlVars) {
-        if (!(v in binds)) {
-          fail(
-            errors,
-            `$.body.queries[${i}].binds: sql uses :${v} but it is not declared`,
-          );
-        }
-      }
-      for (const name of Object.keys(binds)) {
-        if (!sqlVars.has(name)) {
-          fail(
-            errors,
-            `$.body.queries[${i}].binds.${name}: declared but sql has no :${name}`,
-          );
-        }
-      }
-    });
-    // Order stopped being the thing that made a step reachable, so nothing
-    // structural rules out "a needs b, b needs a" any more — this check is what
-    // took over that job from `step < i`.
-    const bindCycle = findCycle(bindEdges);
-    if (bindCycle)
-      fail(errors, `$.body.queries: binds 가 순환합니다 — ${bindCycle.join(" → ")}`);
+    }
   },
 };
 
