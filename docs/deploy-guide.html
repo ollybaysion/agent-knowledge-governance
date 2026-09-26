@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>akg 구동 가이드</title>
+<style>
+/* ── 토큰 ──────────────────────────────────────────────────
+   editorial 팔레트(웜 그레이 + 테라코타 + 보조 블루). 라이트가 기본,
+   다크는 두 경로: ① OS(prefers-color-scheme) ② 뷰어 토글(:root[data-theme]).
+   토글 셀렉터는 Artifact 뷰어 계약과 동일 — 문서엔 JS가 없다. */
+:root {
+  --bg:        #EEF0F1;
+  --surface:   #F9FAFA;
+  --sunken:    #E5E9EA;
+  --ink:       #14181B;
+  --ink-2:     #47535B;
+  --ink-3:     #6E7C85;
+  --line:      #D2D8DB;
+  --line-soft: #E2E6E8;
+  --accent:    #A8451A;
+  --accent-bg: rgba(168, 69, 26, 0.09);
+  --blue:      #3F6180;
+  --blue-bg:   rgba(63, 97, 128, 0.10);
+
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+          "Malgun Gothic", "Noto Sans KR", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+  --serif: Georgia, "Times New Roman", "Apple SD Gothic Neo", serif;
+
+  --measure: 34rem;   /* 본문 산문 폭 */
+  --rail: 13.5rem;    /* 좌측 TOC 레일 폭 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #0F1417;
+    --surface:   #161D21;
+    --sunken:    #12181B;
+    --ink:       #E4E9EB;
+    --ink-2:     #A3B0B7;
+    --ink-3:     #77858D;
+    --line:      #273138;
+    --line-soft: #1E272C;
+    --accent:    #E38C55;
+    --accent-bg: rgba(227, 140, 85, 0.13);
+    --blue:      #83A9C6;
+    --blue-bg:   rgba(131, 169, 198, 0.13);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:        #0F1417;
+  --surface:   #161D21;
+  --sunken:    #12181B;
+  --ink:       #E4E9EB;
+  --ink-2:     #A3B0B7;
+  --ink-3:     #77858D;
+  --line:      #273138;
+  --line-soft: #1E272C;
+  --accent:    #E38C55;
+  --accent-bg: rgba(227, 140, 85, 0.13);
+  --blue:      #83A9C6;
+  --blue-bg:   rgba(131, 169, 198, 0.13);
+}
+
+:root[data-theme="light"] {
+  --bg:        #EEF0F1;
+  --surface:   #F9FAFA;
+  --sunken:    #E5E9EA;
+  --ink:       #14181B;
+  --ink-2:     #47535B;
+  --ink-3:     #6E7C85;
+  --line:      #D2D8DB;
+  --line-soft: #E2E6E8;
+  --accent:    #A8451A;
+  --accent-bg: rgba(168, 69, 26, 0.09);
+  --blue:      #3F6180;
+  --blue-bg:   rgba(63, 97, 128, 0.10);
+}
+
+/* ── 기본 ── */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.72;
+  -webkit-font-smoothing: antialiased;
+  word-break: keep-all;
+}
+
+.page { max-width: 66rem; margin: 0 auto; padding: 0 1.5rem 6rem; }
+
+/* ── masthead: eyebrow → h1(+.en) → standfirst → credits ── */
+.masthead { padding: 4.5rem 0 2.25rem; border-bottom: 1px solid var(--ink); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 1.75rem;
+}
+.eyebrow .mark { color: var(--accent); }
+
+h1 {
+  font-size: clamp(2.1rem, 6vw, 3.4rem);
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+  font-weight: 700;
+  margin: 0;
+  text-wrap: balance;
+}
+h1 .en {
+  display: block;
+  font-family: var(--mono);
+  font-size: clamp(0.8rem, 2vw, 1rem);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  margin-top: 1rem;
+}
+
+.standfirst {
+  max-width: var(--measure);
+  margin: 1.75rem 0 0;
+  font-size: 1.0625rem;
+  color: var(--ink-2);
+}
+
+.credits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin-top: 2.25rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+.credits a { color: var(--accent); }
+
+/* 개정 로그 — 모드 B에서 masthead 아래 접힘 블록으로 유지 */
+details.revlog {
+  margin-top: 1.5rem;
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  max-width: 44rem;
+}
+details.revlog summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+details.revlog ul { margin: 0.5rem 0 0.25rem; padding-left: 1.1rem; }
+
+/* ── shell: 정적 rail TOC + 본문 컬럼 ── */
+.shell { display: grid; grid-template-columns: 1fr; gap: 0; }
+.rail { display: none; }
+
+@media (min-width: 62rem) {
+  .shell { grid-template-columns: var(--rail) minmax(0, 1fr); gap: 3.5rem; align-items: start; }
+  .rail {
+    display: block;
+    position: sticky;
+    top: 2.5rem;
+    padding-top: 3.5rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+  }
+}
+
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.rail a {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.35rem;
+  color: var(--ink-2);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  padding-left: 0.6rem;
+}
+.rail a:hover,
+.rail a:focus-visible { color: var(--ink); border-left-color: var(--accent); }
+.rail .num { color: var(--ink-3); }
+
+/* ── 섹션: #s1… id + .sec-head(모노 번호 + h2) ── */
+section { padding-top: 3.5rem; scroll-margin-top: 2rem; }
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  margin-bottom: 1.75rem;
+}
+.sec-head .num {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  padding-top: 0.2rem;
+}
+
+h2 { font-size: 1.5rem; letter-spacing: -0.02em; font-weight: 650; margin: 0; text-wrap: balance; }
+h3 { font-size: 1.0625rem; font-weight: 650; letter-spacing: -0.01em; margin: 2rem 0 0.6rem; }
+
+p { max-width: var(--measure); margin: 0 0 1.1rem; }
+p:last-child { margin-bottom: 0; }
+.lede { font-size: 1.0625rem; color: var(--ink-2); }
+strong { font-weight: 650; color: var(--ink); }
+
+/* 인라인 코드/식별자 — 모드 A의 인라인 code도 같은 모양 */
+.k, code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 0.08em 0.36em;
+  white-space: nowrap;
+}
+pre code { background: none; border: none; padding: 0; white-space: inherit; }
+
+a { color: var(--accent); text-underline-offset: 3px; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+ul.plain { max-width: var(--measure); margin: 0 0 1.1rem; padding-left: 1.05rem; }
+ul.plain li { margin-bottom: 0.4rem; }
+ul.plain li::marker { color: var(--ink-3); }
+
+ol.plain { max-width: var(--measure); margin: 0 0 1.1rem; padding-left: 1.2rem; }
+ol.plain li { margin-bottom: 0.55rem; }
+ol.plain li::marker { color: var(--ink-3); font-family: var(--mono); font-size: 0.85em; }
+
+/* ── 코드 블록 · ASCII 다이어그램 폴백 ── */
+pre.code, pre.diagram {
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  margin: 1.15rem 0;
+  color: var(--ink-2);
+}
+pre.diagram { line-height: 1.35; }
+
+/* ── 결정 콜아웃 — 날짜·근거 필수 ── */
+.decision {
+  border-left: 2px solid var(--accent);
+  background: var(--accent-bg);
+  border-radius: 0 4px 4px 0;
+  padding: 0.9rem 1.15rem;
+  margin: 1.25rem 0;
+  max-width: 44rem;
+  font-size: 0.9375rem;
+}
+.decision .d-label {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+/* ── 인용 — serif 이탤릭 + cite (인용 전용, 결정 기록엔 .decision) ── */
+blockquote {
+  margin: 2rem 0;
+  padding: 0 0 0 1.4rem;
+  border-left: 2px solid var(--accent);
+  max-width: 38rem;
+}
+blockquote p {
+  font-family: var(--serif);
+  font-size: 1.3125rem;
+  line-height: 1.5;
+  font-style: italic;
+  color: var(--ink);
+  max-width: none;
+  margin: 0;
+  text-wrap: balance;
+}
+blockquote cite {
+  display: block;
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 0.9rem;
+}
+
+/* ── 순서 있는 단계 — 01 카운터 ── */
+.steps {
+  max-width: 44rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps li {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr;
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  counter-increment: step;
+}
+.steps li:first-child { border-top: 1px solid var(--line-soft); }
+.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--accent);
+  padding-top: 0.32rem;
+}
+.steps b { display: block; font-weight: 650; }
+.steps span { font-size: 0.9375rem; color: var(--ink-2); }
+
+/* ── 순서 없는 체크리스트 — 마크(◆·식별자)는 의미 있을 때만 ── */
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: var(--measure);
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+.rules li { display: grid; grid-template-columns: 2rem 1fr; gap: 0.75rem; font-size: 0.9375rem; }
+.rules .mark { font-family: var(--mono); color: var(--accent); font-size: 0.8125rem; padding-top: 0.12rem; }
+.rules b { display: block; }
+.rules .state {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin-left: 0.5rem;
+}
+
+/* ── 표 — 반드시 .table-scroll로 감싼다(check가 강제) ── */
+.picker {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.25rem 0;
+  font-size: 0.9375rem;
+  min-width: 34rem;
+}
+.picker th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+  padding: 0 1rem 0.6rem 0;
+}
+.picker td {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 0.75rem 1rem 0.75rem 0;
+  vertical-align: top;
+  color: var(--ink-2);
+}
+.picker td:first-child { color: var(--ink); font-weight: 650; }
+.table-scroll { overflow-x: auto; }
+
+/* ── 파생물 표기(모드 A 전용) · 문서 푸터 ── */
+footer {
+  margin-top: 4.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 2rem;
+}
+footer a { color: var(--accent); }
+footer.derived { display: block; }
+
+/* ── 인쇄 ── */
+@media print {
+  .rail { display: none; }
+  .shell { display: block; }
+  .page { max-width: none; padding: 0; }
+  body { font-size: 11pt; }
+  pre.code, pre.diagram, .table-scroll { overflow-x: visible; }
+  a { color: inherit; }
+}
+/* ═══════ 플로우 패턴 CSS:START — 여기부터 END까지 문서 <style>에 통째로 복사 ═══════ */
+.diagram {
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 1.25rem 1.25rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+.flow {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: max-content;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+/* 노드 3종: 기본(내부 컴포넌트) · io(외부 입출력, 점선) ·
+   lead(주인공, 테라코타) · gate(관문·검증, 블루) */
+.node {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.42rem 0.7rem;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.node.io { background: transparent; border-style: dashed; color: var(--ink-3); }
+.node.lead { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.node.gate { border-color: var(--blue); background: var(--blue-bg); color: var(--blue); }
+.arrow { color: var(--accent); flex: none; }
+.arrow.back { color: var(--blue); }
+/* 분기 — 한 지점에서 갈라지거나 모이는 노드 묶음 */
+.branch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-left: 1px solid var(--line);
+  padding-left: 0.55rem;
+}
+.diagram .caption {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-3);
+  margin: 0.9rem 0 0;
+  max-width: none;
+}
+/* ═══════ 플로우 패턴 CSS:END ═══════ */
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow"><span class="mark">◆</span> akg · 구동 가이드 · v0.1</p>
+    <h1>
+      node 만 있는 서버에 올리기
+      <span class="en">copy the tree, one users.json, set env, node server/main.mjs</span>
+    </h1>
+    <p class="standfirst">
+      서버에 필요한 것은 <strong>Node 20 이상과 git</strong> 둘이다. 빌드는 없다 — <span class="k">npm ci</span> 를 인터넷이 되는 머신에서
+      한 번 돌리고, 나온 디렉터리를 통째로 옮겨 <span class="k">node server/main.mjs</span> 로 띄운다.
+      npm · 컴파일러 · 네이티브 모듈 · DB 는 서버에 없어도 된다. git 만은 예외다 — 문서 저장소가 git 저장소라
+      git 이 없으면 기동 자체가 안 된다. 이 문서는 그 순서 — 설치할 것, 준비, 배치, 계정, 설정, 기동, 확인, 운영 — 를 한 장에 모은다.
+    </p>
+    <div class="credits">
+      <span>작성 · 2026-09-23</span>
+      <span>소비 절차 · <a href="consuming.md">consuming.md</a></span>
+      <span>설계 · <a href="agent-knowledge-governance-design.md">design.md §11 (S1 · S2 · S9 · S14)</a></span>
+      <span>문서 규격 · <a href="agent-knowledge-governance-json-spec.md">json-spec.md §4.4</a></span>
+    </div>
+    <details class="revlog">
+      <summary>개정 로그</summary>
+      <ul>
+        <li><b>v0.1</b> (2026-09-23) — 최초 작성. consuming.md §6 의 리허설 절차와 design.md §11 의 운영 규율을 서버 구동 관점으로 다시 묶었다. 명령과 출력은 v24 · git 2.x 에서 실측.</li>
+      </ul>
+    </details>
+  </header>
+
+  <div class="shell">
+
+    <nav class="rail" aria-label="목차">
+      <ol>
+        <li><a href="#s1"><span class="num">01</span> 한눈에</a></li>
+        <li><a href="#s2"><span class="num">02</span> 서버에 설치할 것</a></li>
+        <li><a href="#s3"><span class="num">03</span> 준비 — 인터넷 되는 곳에서</a></li>
+        <li><a href="#s4"><span class="num">04</span> 서버 배치</a></li>
+        <li><a href="#s5"><span class="num">05</span> 계정과 토큰</a></li>
+        <li><a href="#s6"><span class="num">06</span> 설정 — 환경 변수</a></li>
+        <li><a href="#s7"><span class="num">07</span> 띄우기 · 내리기</a></li>
+        <li><a href="#s8"><span class="num">08</span> 확인</a></li>
+        <li><a href="#s9"><span class="num">09</span> 운영</a></li>
+        <li><a href="#s10"><span class="num">10</span> 배포 전 체크리스트</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section id="s1">
+        <div class="sec-head"><span class="num">01</span><h2>한눈에</h2></div>
+        <p class="lede">실행 단위는 레포 디렉터리 하나다. 의존성은 <span class="k">fastify</span> 하나(딸린 패키지 41개, 약 14MB)뿐이고 네이티브 모듈이 없어
+          <span class="k">node_modules</span> 를 그대로 옮기면 어느 리눅스에서든 돈다. 데이터는 서버가 <span class="k">AKG_HOME</span> 아래에 git 저장소로 만든다.</p>
+
+        <div class="diagram" role="group" aria-label="구동 흐름">
+          <div class="flow">
+            <span class="node io">준비 머신 · Node + 인터넷</span>
+            <span class="arrow">→</span>
+            <span class="node">npm ci · npm test</span>
+            <span class="arrow">→</span>
+            <span class="node lead">akg.tar.gz (코드 + node_modules)</span>
+            <span class="arrow">→</span>
+            <span class="node">서버 · Node 20+ · git</span>
+            <span class="arrow">→</span>
+            <span class="node gate">users.json (0600)</span>
+            <span class="arrow">→</span>
+            <span class="node lead">node server/main.mjs</span>
+            <span class="arrow">→</span>
+            <span class="branch">
+              <span class="node io">BE · AKG_URL 로 읽는다</span>
+              <span class="node io">브라우저 · 대시보드</span>
+              <span class="node io">저작자 · akg push</span>
+            </span>
+          </div>
+          <p class="caption">서버로 들어오는 길은 셋 — BE 는 읽기만, 사람은 대시보드에서 읽고 고치고, 저작자는 CLI 로 md 를 올린다. 전부 같은 HTTP 포트 하나다</p>
+        </div>
+
+        <p>기동에 필요한 것은 셋이고, 없으면 서버가 뜨지 않는다(설계 §11 S1 — fail-closed).</p>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>것</th><th>어디서 오나</th><th>없으면</th></tr></thead>
+            <tbody>
+              <tr><td>git 바이너리</td><td>서버 OS 패키지</td><td><span class="k">git init: spawnSync git ENOENT</span> 로 즉시 종료</td></tr>
+              <tr><td>users.json</td><td>§05 의 CLI 가 만든다</td><td><span class="k">users.json 없이는 기동하지 않습니다(S1)</span> 로 즉시 종료</td></tr>
+              <tr><td>깨끗한 store</td><td>서버가 첫 기동에 만든다</td><td>더티 트리 · index.lock 이 있으면 기동 거부(S9)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="s2">
+        <div class="sec-head"><span class="num">02</span><h2>서버에 설치할 것</h2></div>
+        <p class="lede">필수는 Node 와 git 둘이다. 나머지는 확인용이라 없어도 서버는 뜬다.</p>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>것</th><th>필수</th><th>왜</th></tr></thead>
+            <tbody>
+              <tr><td>Node 20 이상</td><td>필수</td><td><span class="k">package.json</span> 의 <span class="k">engines</span> 가 <span class="k">&gt;=20</span>. fastify 5 가 그 아래에서 안 돈다. 실측은 v24. 배포판 패키지든 tarball 을 풀어 둔 것이든 <span class="k">node</span> 실행 파일 하나면 된다.</td></tr>
+              <tr><td>git</td><td>필수</td><td>문서 저장소(<span class="k">AKG_HOME/store</span>)가 git 저장소다. 서버가 <span class="k">git init · add · commit · log · show</span> 를 자식 프로세스로 부른다. 커밋 author 가 곧 감사 기록이라 대체 수단이 없다. 계정 설정(<span class="k">user.name</span>)은 서버가 store 안에 직접 넣으니 전역 설정은 필요 없다.</td></tr>
+              <tr><td>curl</td><td>권장</td><td><span class="k">/health</span> 와 문서 목록을 쳐 보는 데 쓴다(§08).</td></tr>
+              <tr><td>npm</td><td>불필요</td><td>서버에서 설치할 것이 없다. <span class="k">node_modules</span> 는 준비 머신에서 만들어 같이 옮긴다(§03). Node 를 tarball 로 풀었다면 npm 도 따라오지만 안 써도 된다.</td></tr>
+              <tr><td>컴파일러 · python · make</td><td>불필요</td><td>네이티브 모듈이 0개다. 빌드 단계가 없다.</td></tr>
+              <tr><td>DB · 브라우저</td><td>불필요</td><td>저장은 파일 + git 이고, 대시보드는 정적 파일 셋(<span class="k">public/</span>)을 서버가 직접 낸다. 번들러도 없다.</td></tr>
+              <tr><td>리버스 프록시</td><td>외부 노출 시</td><td>서버는 기본 <span class="k">127.0.0.1</span> 에만 묶인다. 다른 박스에서 붙게 하려면 같은 호스트의 nginx 같은 프록시가 HTTPS 를 받고 넘긴다(§09).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>설치 확인은 두 줄이다. 첫 줄의 주 버전이 20 이상이어야 한다.</p>
+        <pre class="code">node -v      # v20.x 이상 · 실측 v24.12.0
+git --version</pre>
+      </section>
+
+      <section id="s3">
+        <div class="sec-head"><span class="num">03</span><h2>준비 — 인터넷 되는 곳에서</h2></div>
+        <p class="lede"><span class="k">npm ci</span> 는 레지스트리에서 패키지를 받는다. 그래서 개발 PC 나 CI 처럼 밖이 열린 머신에서 한 번 돌리고,
+          코드와 <span class="k">node_modules</span> 를 한 아카이브로 묶는다. 서버의 Node 주 버전과 같은 Node 로 돌리면 가장 안전하지만,
+          네이티브 모듈이 없어 버전이 달라도 문제가 되지 않는다.</p>
+        <ol class="steps">
+          <li><div><b>받기</b><span>배포할 커밋을 체크아웃한다. <span class="k">git log -1</span> 의 해시를 적어 둔다 — 서버에는 <span class="k">.git</span> 을 안 가져가므로 어느 판인지는 이 메모가 유일한 기록이다.</span></div></li>
+          <li><div><b>의존성</b><span><span class="k">npm ci</span> — <span class="k">package-lock.json</span> 그대로 설치한다. devDependencies 가 없어 <span class="k">--omit=dev</span> 는 의미가 없다.</span></div></li>
+          <li><div><b>테스트</b><span><span class="k">npm test</span> — <span class="k">node --test</span> 로 전체 스위트(218). 서버 · CLI · 렌더까지 실제 소켓으로 도는 테스트라 이게 통과하면 그 Node 로 서버가 뜬다는 뜻이다.</span></div></li>
+          <li><div><b>묶기</b><span>필요한 디렉터리만 tar 로 묶는다. <span class="k">test/</span> · <span class="k">docs/</span> · <span class="k">examples/</span> 는 서버에 없어도 되지만 크기가 작아 통째로 묶어도 무방하다. <span class="k">.git</span> 과 <span class="k">.akg-data</span> 는 뺀다.</span></div></li>
+        </ol>
+        <pre class="code">git clone &lt;repo&gt; akg &amp;&amp; cd akg
+git checkout &lt;배포 커밋&gt;
+npm ci
+npm test                                   # ✔ 218 · ✖ 0
+tar czf ../akg.tar.gz \
+  --exclude=.git --exclude=.akg-data \
+  bin server src schemas public node_modules package.json package-lock.json examples
+ls -la ../akg.tar.gz                       # 수 MB</pre>
+        <p>서버에 필요한 디렉터리는 다섯이다 — <span class="k">server/</span>(HTTP 서버) · <span class="k">src/</span>(스키마 검증 · 렌더 · 클라이언트) ·
+          <span class="k">schemas/</span>(문서 타입별 JSON Schema, 서버가 기동 때 읽는다) · <span class="k">public/</span>(대시보드) · <span class="k">bin/</span>(CLI).
+          <span class="k">examples/</span> 는 §08 의 스모크에 쓸 예시 스킬 md 가 들어 있어 같이 가져가면 편하다.</p>
+      </section>
+
+      <section id="s4">
+        <div class="sec-head"><span class="num">04</span><h2>서버 배치</h2></div>
+        <p class="lede">코드와 데이터를 <strong>다른 디렉터리</strong>에 둔다. 코드는 판을 올릴 때 통째로 바꾸고, 데이터는 그대로 남아야 해서다.
+          기본값 <span class="k">AKG_HOME=./.akg-data</span> 는 현재 디렉터리 기준이라 코드 안에 데이터가 생긴다 — 항상 절대 경로로 잡는다.</p>
+        <pre class="diagram">/opt/akg/
+├── app/                        # §03 아카이브를 푼 것 — 판 교체 때 통째로 바뀐다
+│   ├── server/main.mjs         #   진입점
+│   ├── server/cli/akg-user.mjs #   계정 CLI(§05)
+│   ├── bin/akg.mjs             #   저작자 CLI(push · sync)
+│   ├── public/  schemas/  src/
+│   └── node_modules/
+├── data/                       # AKG_HOME — 백업 단위 · 판 교체와 무관
+│   ├── users.json              #   계정 · 토큰 해시 — 0600, git 밖(§05)
+│   └── store/                  #   문서 저장소 — 서버가 첫 기동에 git init 한다
+│       ├── domain-skill/&lt;id&gt;.json
+│       └── rendered/domain-skill/&lt;id&gt;/SKILL.md
+└── akg.env                     # §06 — 토큰은 안 들어가지만 600 으로</pre>
+        <pre class="code">sudo useradd -r -m -d /opt/akg -s /sbin/nologin akg
+sudo mkdir -p /opt/akg/app /opt/akg/data
+sudo tar xzf akg.tar.gz -C /opt/akg/app
+sudo chown -R akg:akg /opt/akg</pre>
+        <p><strong>전용 계정으로 돌린다.</strong> <span class="k">users.json</span> 은 소유자만 읽을 수 있어야 서버가 뜨고(S1), store 의 커밋도
+          그 계정이 남긴다. 판을 올릴 때는 <span class="k">app/</span> 만 새 아카이브로 갈고 재기동한다 — <span class="k">data/</span> 는 손대지 않는다.</p>
+      </section>
+
+      <section id="s5">
+        <div class="sec-head"><span class="num">05</span><h2>계정과 토큰</h2></div>
+        <p class="lede">인증 상태는 <span class="k">users.json</span> 파일 하나다. 서버 API 로는 못 만들고 CLI 가 파일을 직접 쓴다.
+          <strong>사용자 0명이면 서버가 안 뜬다</strong> — 첫 기동 전에 최소 한 명은 만든다.</p>
+        <p>CLI 는 <span class="k">AKG_HOME</span> 을 보지 않는다. <span class="k">AKG_USERS_PATH</span> 만 보고, 기본은 현재 디렉터리의 <span class="k">./.akg-data/users.json</span> 이다.
+          디렉터리는 만들어 주지 않으니 <span class="k">data/</span> 가 먼저 있어야 한다.</p>
+        <pre class="code">cd /opt/akg/app
+export AKG_USERS_PATH=/opt/akg/data/users.json
+sudo -u akg -E node server/cli/akg-user.mjs add editor1 editor
+# 발급됨 — id=editor1 role=editor expiresAt=2026-12-22T01:28:20.620Z
+# 토큰(다시 표시되지 않습니다): 114499e8c7baa21270abece1edb960bbe8cdbd41d6ccbfbc
+sudo -u akg -E node server/cli/akg-user.mjs list
+# editor1	editor	expiresAt=2026-12-22T01:28:20.620Z
+sudo -u akg -E node server/cli/akg-user.mjs revoke editor1</pre>
+        <p>토큰은 그 자리에서 한 번만 보인다. 파일에는 sha256 해시만 남아 잃어버리면 <span class="k">add</span> 로 다시 발급한다(같은 id 로 add 하면 덮어쓴다).
+          만료는 발급일 + 90일이고 CLI 옵션이 없다 — 연장은 재발급이다. 서버는 요청마다 파일을 다시 읽으므로 add · revoke 는 <strong>재기동 없이</strong> 바로 먹는다.</p>
+
+        <h3>역할</h3>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>역할</th><th>할 수 있는 것</th><th>누구에게</th></tr></thead>
+            <tbody>
+              <tr><td>viewer</td><td>읽기 — 문서 목록 · 문서 · 색인 · 번들. <span class="k">akg sync</span> 가 이걸로 돈다.</td><td>익명 읽기(§06 <span class="k">AKG_ANON_READ</span>)가 켜져 있으면 토큰 없이도 같은 권한이라 따로 만들 일이 드물다. BE 도 토큰 없이 읽는다.</td></tr>
+              <tr><td>editor</td><td>문서 만들기 · 고치기 — <span class="k">akg push</span>, 대시보드의 저장.</td><td>스킬 저작자. 대시보드에서 편집하려면 이 토큰으로 로그인한다.</td></tr>
+              <tr><td>approver</td><td>editor + 승격 · 삭제.</td><td>리뷰어 · 운영자.</td></tr>
+              <tr><td>agent</td><td>제안(proposal) · 배치 · 카탈로그 갱신. 사람 사다리 밖의 별도 역할.</td><td>자동화(에이전트 스킬). 문서를 직접 고치지 못하고 제안 큐로 보낸다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>인증 실패는 IP 당 5분에 20회를 넘기면 잠시 거절된다(S14). 토큰이 만료 · 회수됐는데 계속 부르는 클라이언트가 있으면 그 IP 의 정상 요청도 같이 막히니, 401 이 보이면 먼저 토큰부터 갈아 끼운다.</p>
+      </section>
+
+      <section id="s6">
+        <div class="sec-head"><span class="num">06</span><h2>설정 — 환경 변수</h2></div>
+        <p class="lede">설정은 여섯 개 환경 변수가 전부고, 파일은 없다. 서버는 <span class="k">.env</span> 를 읽지 않는다 — 셸에서 <span class="k">export</span> 하거나 systemd 의 <span class="k">EnvironmentFile</span> 로 넣는다.</p>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>변수</th><th>기본</th><th>뜻</th></tr></thead>
+            <tbody>
+              <tr><td>AKG_HOME</td><td>./.akg-data</td><td>데이터 루트. 아래 둘의 기본 경로가 여기서 나온다. <strong>절대 경로로</strong> — 상대 경로면 작업 디렉터리에 따라 다른 store 를 본다.</td></tr>
+              <tr><td>AKG_STORE_DIR</td><td>AKG_HOME/store</td><td>문서 저장소(git). 없으면 서버가 <span class="k">git init</span> 하고 <span class="k">init store</span> 커밋 하나로 시작한다. 있으면 깨끗한지 검사하고 더티면 기동 거부.</td></tr>
+              <tr><td>AKG_USERS_PATH</td><td>AKG_HOME/users.json</td><td>계정 파일. 서버와 CLI 가 같은 파일을 봐야 한다 — CLI 는 이 변수만 읽으니 둘 다 명시하는 편이 안전하다.</td></tr>
+              <tr><td>AKG_HOST</td><td>127.0.0.1</td><td>바인드 주소. 기본은 루프백 — 같은 박스의 프록시만 닿는다(S2). 프록시 없이 사내망에 바로 열려면 <span class="k">0.0.0.0</span>. 그때는 방화벽으로 범위를 좁힌다.</td></tr>
+              <tr><td>AKG_PORT</td><td>8787</td><td>수신 포트.</td></tr>
+              <tr><td>AKG_ANON_READ</td><td>1</td><td>토큰 없는 읽기 허용. 기본 켜짐이라 BE 와 브라우저가 토큰 없이 읽는다. <span class="k">0</span> 이면 읽기에도 viewer 이상 토큰이 필요하고, BE 에는 <span class="k">AKG_TOKEN</span> 을 넣어야 한다. 쓰기는 값과 무관하게 항상 토큰이다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>운영 예시 — 환경 파일</h3>
+        <pre class="code"># /opt/akg/akg.env — KEY=value 한 줄씩, export 없이
+AKG_HOME=/opt/akg/data
+AKG_STORE_DIR=/opt/akg/data/store
+AKG_USERS_PATH=/opt/akg/data/users.json
+AKG_HOST=127.0.0.1
+AKG_PORT=8787
+AKG_ANON_READ=1</pre>
+
+        <h3>클라이언트 쪽 변수</h3>
+        <p>서버가 아니라 <span class="k">bin/akg.mjs</span>(저작자 PC)와 BE 가 읽는 것들이다. 서버 환경 파일에는 안 들어간다.</p>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>변수</th><th>누가</th><th>뜻</th></tr></thead>
+            <tbody>
+              <tr><td>AKG_SERVER</td><td>akg CLI</td><td>허브 주소. 없으면 <span class="k">--server</span>, 그것도 없으면 미러의 <span class="k">meta.json</span> 에 적힌 지난번 주소.</td></tr>
+              <tr><td>AKG_TOKEN</td><td>akg CLI · BE</td><td>CLI 는 이 변수 또는 <span class="k">~/.claude/akg/token</span>(0600). push 는 토큰 없으면 <span class="k">no token</span> 으로 exit 1. BE 는 있으면 <span class="k">Authorization: Bearer</span> 로 보낸다.</td></tr>
+              <tr><td>AKG_MIRROR · AKG_SKILLS_DIR</td><td>akg CLI</td><td><span class="k">sync</span> 가 쓰는 곳. 기본 <span class="k">~/.claude/akg</span> · <span class="k">~/.claude/skills</span>.</td></tr>
+              <tr><td>AKG_URL · AKG_REFRESH_SECONDS</td><td>BE</td><td>BE 가 스킬을 읽어 오는 허브 주소와 재확인 주기(기본 300초). BE 배포 가이드 §05.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="s7">
+        <div class="sec-head"><span class="num">07</span><h2>띄우기 · 내리기</h2></div>
+        <p class="lede">세 가지 길이 있다. 처음은 포그라운드, 리허설은 nohup, 상시 운영은 systemd. 어느 길이든 명령은 <span class="k">node server/main.mjs</span> 하나다.</p>
+
+        <h3>포그라운드 — 처음 한 번은 이렇게</h3>
+        <p>기동 실패는 한 줄로 나오고 exit 1 이다(<span class="k">akg server 기동 실패: &lt;이유&gt;</span>). 성공하면 <span class="k">listening</span> 한 줄이 뜨고 그 뒤로는 요청 로그를 찍지 않는다. Ctrl-C 로 내린다.</p>
+        <pre class="code">cd /opt/akg/app
+set -a; . /opt/akg/akg.env; set +a
+sudo -u akg -E node server/main.mjs
+# akg server listening on http://127.0.0.1:8787 (store=/opt/akg/data/store)
+# 다른 셸에서
+curl -s localhost:8787/health
+# {"version":"0.1.0","storeRev":"b7a9da14…"}</pre>
+
+        <h3>nohup — 백그라운드 + PID 파일</h3>
+        <pre class="code">cd /opt/akg/app
+set -a; . /opt/akg/akg.env; set +a
+nohup node server/main.mjs &gt; /opt/akg/akg.log 2&gt;&amp;1 &amp;
+echo $! &gt; /opt/akg/akg.pid
+# 내리기 — SIGTERM 이면 바로 끝난다. 진행 중인 커밋은 큐가 직렬이라 끊기지 않는다
+kill "$(cat /opt/akg/akg.pid)"</pre>
+
+        <h3>systemd — 상시 운영</h3>
+        <p><span class="k">node</span> 는 절대 경로로 적는다. nvm · asdf 로 깐 Node 는 <span class="k">/usr/bin/node</span> 에 없고 서비스 계정의 셸 초기화도 안 타므로 <span class="k">which node</span> 결과를 그대로 넣는다.</p>
+        <pre class="code"># /etc/systemd/system/akg.service
+[Unit]
+Description=akg knowledge hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=akg
+WorkingDirectory=/opt/akg/app
+EnvironmentFile=/opt/akg/akg.env
+ExecStart=/usr/bin/node /opt/akg/app/server/main.mjs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</pre>
+        <pre class="code">sudo systemctl daemon-reload
+sudo systemctl enable --now akg
+systemctl status akg
+journalctl -u akg -f                      # 기동 줄과 기동 실패 사유만 나온다</pre>
+      </section>
+
+      <section id="s8">
+        <div class="sec-head"><span class="num">08</span><h2>확인</h2></div>
+        <p class="lede">떴다는 것과 문서가 오간다는 것은 다르다. 헬스 다음에 들어오는 길 셋 — 대시보드 · CLI · BE — 을 각각 본다.</p>
+        <ol class="steps">
+          <li><div><b>살아 있나</b><span><span class="k">curl -s localhost:8787/health</span> → <span class="k">{"version":…,"storeRev":…}</span>. <span class="k">storeRev</span> 는 store 의 HEAD 커밋이다 — 문서를 올릴 때마다 바뀐다.</span></div></li>
+          <li><div><b>대시보드</b><span>브라우저로 <span class="k">http://&lt;host&gt;:8787/</span>. 읽기는 로그인 없이 되고(익명 읽기 기본), 오른쪽 위 <span class="k">로그인</span> 에 §05 의 토큰을 붙여 넣으면 편집이 열린다. 프록시 뒤라면 프록시 주소로.</span></div></li>
+          <li><div><b>CLI 로 스킬 하나</b><span>저작자 PC 든 서버든 <span class="k">bin/akg.mjs</span> 가 있는 곳에서 예시 md 를 올린다. 같은 파일을 두 번 올리면 두 번째는 <span class="k">updated</span> 로 나온다 — 멱등이다.</span></div></li>
+          <li><div><b>BE 가 읽나</b><span>BE 의 <span class="k">AKG_URL</span> 을 이 주소로 두고 <span class="k">POST /admin/reload</span> → <span class="k">outcome</span> 이 <span class="k">fetched</span>, <span class="k">GET /api/fdc/v1/skills</span> 에 이름이 보이면 끝까지 붙은 것이다.</span></div></li>
+        </ol>
+        <pre class="code">cd /opt/akg/app
+AKG_TOKEN=&lt;editor 토큰&gt; AKG_SERVER=http://127.0.0.1:8787 \
+  node bin/akg.mjs push domain-skill examples/domain-skill/fdc-explain-sensor-origin.md
+# created domain-skill/fdc-explain-sensor-origin (rev b89ab332…)
+curl -s 'localhost:8787/api/docs?type=domain-skill'
+# {"docs":[{"type":"domain-skill","id":"fdc-explain-sensor-origin","status":"active",…}]}
+curl -s localhost:8787/api/docs/domain-skill/fdc-explain-sensor-origin | head -c 200
+# {"json":{"schema":"domain-skill/v1","id":"fdc-explain-sensor-origin",…"body":{"name":…,"markdown":"# fdc-explain…
+git -C /opt/akg/data/store log --format='%h %an %s'
+# b89ab33 editor1 create domain-skill/fdc-explain-sensor-origin
+# b7a9da1 akg-server init store</pre>
+        <p>스킬 md 가 허브에는 올라갔는데 BE 가 <span class="k">akg 스킬 &lt;id&gt; 수용 불가 — 제외</span> 를 찍으면 md 양식 문제다. 허브는 <span class="k">##</span> 절 이름만 보고(허용: 한 줄 설명 · 언제 호출되는가 · 도메인 지식 · 데이터), BE 는 그 위에 <span class="k">## 데이터</span> 항목의 <span class="k">### id — 제목</span> 규칙까지 본다. 규격은 json-spec.md §4.4, BE 의 사유는 로그 <span class="k">제외:</span> 뒤에 그대로 나온다.</p>
+
+        <h3>안 뜰 때</h3>
+        <div class="table-scroll">
+          <table class="picker">
+            <thead><tr><th>증상</th><th>원인</th><th>조치</th></tr></thead>
+            <tbody>
+              <tr><td>git init: spawnSync git ENOENT</td><td>git 이 없거나 PATH 에 없다</td><td>git 설치. systemd 면 유닛의 PATH 가 <span class="k">/usr/bin</span> 을 포함하는지.</td></tr>
+              <tr><td>users.json 없음 — … 기동하지 않습니다(S1)</td><td>계정 파일이 없다 · 경로가 다르다</td><td>§05 로 만든다. 서버의 <span class="k">AKG_USERS_PATH</span> 와 CLI 의 것이 같은 파일인지.</td></tr>
+              <tr><td>…의 권한이 664입니다 — 0600이어야 합니다</td><td>파일을 손으로 복사 · 편집해 권한이 풀렸다</td><td><span class="k">chmod 600</span>, 소유자는 서비스 계정.</td></tr>
+              <tr><td>사용자가 0명입니다 — 기동 거부(S1)</td><td>전부 revoke 했다</td><td><span class="k">add</span> 로 한 명 이상.</td></tr>
+              <tr><td>store 더티 · index.lock 으로 기동 거부</td><td>크래시 잔해, 또는 누가 store 를 손으로 만졌다</td><td><span class="k">git -C store status</span> 로 보고 정리한다. 서버 말고는 아무도 store 를 쓰지 않는다는 전제(S9).</td></tr>
+              <tr><td>EADDRINUSE</td><td>포트 충돌</td><td><span class="k">AKG_PORT</span> 를 바꾸거나 점유 프로세스를 내린다.</td></tr>
+              <tr><td>다른 박스에서 connection refused</td><td>루프백에만 묶여 있다</td><td>프록시를 앞에 두거나 <span class="k">AKG_HOST=0.0.0.0</span>.</td></tr>
+              <tr><td>401</td><td>토큰 오타 · 만료(90일) · 회수 · <span class="k">AKG_ANON_READ=0</span> 인데 토큰 없음</td><td><span class="k">akg-user.mjs list</span> 로 만료를 보고 재발급. 20회 넘게 틀렸으면 5분 뒤에.</td></tr>
+              <tr><td>akg: no token</td><td>CLI 에 토큰이 없다</td><td><span class="k">AKG_TOKEN</span> 또는 <span class="k">~/.claude/akg/token</span>(0600).</td></tr>
+              <tr><td>push 가 400 · 스키마 오류</td><td>md 의 <span class="k">##</span> 절 이름이 넷 밖이다</td><td>메시지에 어느 절인지 나온다. json-spec.md §4.4.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="s9">
+        <div class="sec-head"><span class="num">09</span><h2>운영</h2></div>
+        <h3>로그와 감사</h3>
+        <p>서버는 요청 로그를 남기지 않는다(fastify logger 꺼짐). 누가 무엇을 바꿨는지는 <strong>store 의 git 이력</strong>이 답이다 —
+          커밋 author 가 토큰의 사용자 id 고, 대시보드의 <span class="k">감사</span> 화면과 <span class="k">GET /api/audit</span> 이 같은 이력을 보여 준다.
+          <span class="k">git -C /opt/akg/data/store log</span> 로 직접 봐도 된다. 읽기만 한다 — 쓰면 S9 에 걸려 다음 기동이 거부된다.</p>
+        <h3>백업 · 복구</h3>
+        <p>백업 단위는 <span class="k">AKG_HOME</span> 디렉터리 하나다. store 는 git 저장소라 <span class="k">git clone</span> 이나 <span class="k">git bundle</span> 로도 되고, <span class="k">users.json</span> 은 git 밖이라 파일째 같이 챙긴다.
+          복구는 서버를 내리고 디렉터리를 되돌린 뒤 <span class="k">git status</span> 가 깨끗한지 보고 다시 띄운다.</p>
+        <h3>판 올리기 · 되돌리기</h3>
+        <p><span class="k">app/</span> 을 새 아카이브로 갈고 재기동한다. <span class="k">data/</span> 는 그대로다. 이전 아카이브를 옆에 두면 되돌리기도 디렉터리 하나 바꾸고 재기동이다.
+          문서 스키마가 바뀌는 판(예: domain-skill 의 md 전환)은 옛 문서가 새 서버에서 거절될 수 있다 — 그 판의 changelog(json-spec.md 첫머리)를 먼저 본다.</p>
+        <h3>설정 변경</h3>
+        <p>환경 변수는 기동 때 한 번 읽는다 — 바꾸면 재기동이다. 예외는 계정 — <span class="k">users.json</span> 은 요청마다 읽어 add · revoke 가 바로 먹는다. 문서는 API 로만 바뀌고 재기동과 무관하다.</p>
+        <h3>보안 — 있는 것과 없는 것</h3>
+        <ul class="plain">
+          <li>쓰기는 전부 토큰(S1). 토큰은 해시로만 저장, 90일 만료, IP 당 실패 20회/5분 제한(S14).</li>
+          <li>읽기는 기본 익명 허용. 문서가 프롬프트 주입 통로가 되는 위협(S3)은 쓰기 쪽 방어라 읽기 개방과 무관하지만, 사내망 밖에 열지는 않는다.</li>
+          <li>바인딩은 루프백(S2). 외부 노출은 같은 호스트의 HTTPS 리버스 프록시가 맡고, 앱 포트 직접 접속은 방화벽으로 막는다. 프록시가 넘기는 <span class="k">X-Forwarded-*</span> 를 서버가 믿지는 않는다 — 요청 IP 는 소켓 기준이라 프록시 뒤에서는 실패 제한이 프록시 IP 하나로 묶인다.</li>
+          <li>모든 응답에 strict CSP(<span class="k">default-src 'self'</span>)와 nosniff. 대시보드는 인라인 스크립트가 없다.</li>
+          <li>요청 본문 512KB 상한(S13). id 는 파일명이 되므로 소문자 · 숫자 · <span class="k">_ . -</span> 만(S11).</li>
+          <li>HTTPS · SSO · 다중 인스턴스는 서버 안에 없다. 인스턴스는 하나만 — 실패 카운터와 쓰기 큐가 프로세스 안에 있다.</li>
+        </ul>
+      </section>
+
+      <section id="s10">
+        <div class="sec-head"><span class="num">10</span><h2>배포 전 체크리스트</h2></div>
+        <ul class="rules">
+          <li><span class="mark">C1</span><div><b>node -v 가 20 이상 · git --version 이 답한다</b><span>둘 다 서비스 계정의 PATH 에서. systemd 유닛의 <span class="k">ExecStart</span> 는 node 절대 경로.</span></div></li>
+          <li><span class="mark">C2</span><div><b>아카이브에 node_modules 가 들어 있다</b><span>서버에서 <span class="k">ls app/node_modules/fastify</span>. npm 은 서버에서 안 돈다.</span></div></li>
+          <li><span class="mark">C3</span><div><b>AKG_HOME 은 절대 경로, app/ 밖</b><span>판 교체가 데이터를 지우지 않게.</span></div></li>
+          <li><span class="mark">C4</span><div><b>users.json 이 있고 600 이고 서비스 계정 소유</b><span><span class="k">akg-user.mjs list</span> 에 한 명 이상. 서버와 CLI 의 <span class="k">AKG_USERS_PATH</span> 가 같은 파일.</span></div></li>
+          <li><span class="mark">C5</span><div><b>editor 토큰을 저작자에게, 원문은 어디에도 저장하지 않았다</b><span>파일에는 해시뿐. 만료일(90일)을 달력에.</span></div></li>
+          <li><span class="mark">C6</span><div><b>AKG_HOST 가 계획과 맞다</b><span>프록시 뒤면 127.0.0.1, 아니면 0.0.0.0 + 방화벽.</span></div></li>
+          <li><span class="mark">C7</span><div><b>/health · 대시보드 · push 한 번 · BE reload</b><span>§08 의 네 단계. store 에 커밋이 두 개(init store · create …) 보이면 쓰기 경로까지 산 것.</span></div></li>
+          <li><span class="mark">C8</span><div><b>BE 의 AKG_URL 은 오리진만</b><span><span class="k">http://&lt;host&gt;:8787</span>. 경로를 붙이지 않는다.</span></div></li>
+        </ul>
+      </section>
+
+      <footer>
+        <span>akg 구동 가이드 · v0.1</span>
+        <span>짝 문서 · <a href="consuming.md">consuming.md</a> · <a href="agent-knowledge-governance-design.md">design.md</a> · <a href="agent-knowledge-governance-json-spec.md">json-spec.md</a></span>
+      </footer>
+
+    </main>
+  </div>
+</div>
+
+</body>
+</html>
