@@ -11,7 +11,7 @@ const THEME_KEY = "akg_theme";
 let currentUser = null; // {id, role}
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill"];
+const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual"];
 const TIER_LABEL = {
   scaffold: "빈칸",
   inferred: "추정",
@@ -28,6 +28,8 @@ const TYPE_LABEL = {
   "db-schema": "db-schema",
   "msg-format": "msg-format",
   "domain-skill": "domain-skill",
+  "screen-map": "screen-map",
+  manual: "manual",
 };
 
 // ---------- DOM helper ----------
@@ -132,8 +134,10 @@ async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   const token = getToken();
   if (token) headers.authorization = `Bearer ${token}`;
-  let body = opts.body;
-  if (body !== undefined) {
+  // opts.raw = bytes sent as they are (a capture upload); the caller sets
+  // the content-type. Otherwise opts.body goes as JSON.
+  let body = opts.raw ?? opts.body;
+  if (opts.raw === undefined && body !== undefined) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(body);
   }
@@ -535,9 +539,7 @@ async function renderOverview() {
   for (const d of all) typeCounts[d.type] = (typeCounts[d.type] || 0) + 1;
   const chipDefs = [
     ["all", `전체 ${typeCounts.all || 0}`],
-    ["db-schema", `db-schema ${typeCounts["db-schema"] || 0}`],
-    ["msg-format", `msg-format ${typeCounts["msg-format"] || 0}`],
-    ["domain-skill", `domain-skill ${typeCounts["domain-skill"] || 0}`],
+    ...DOC_TYPES.map((t) => [t, `${TYPE_LABEL[t]} ${typeCounts[t] || 0}`]),
   ];
   const chips = chipDefs.map(([t, label], i) =>
     el(
@@ -1270,8 +1272,9 @@ async function renderDocScreen(type, id) {
   const slotByAddr = (addr) => slots.find((s) => s.address === addr);
 
   function renderInner() {
-    if (type === "domain-skill") {
-      const skill = renderSkillView(
+    const view = BODY_VIEWS[type];
+    if (view) {
+      const skill = view(
         doc,
         rev,
         md,
@@ -1616,6 +1619,68 @@ async function renderDocScreen(type, id) {
   renderInner();
 }
 
+// The header row the body views share: status chip (an approver's toggle),
+// rev, keywords, and the approver's JSON split.
+function viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen) {
+  return el("div", { class: "sk-chips" }, [
+    statusChip(doc, onToggleStatus),
+    el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
+    ...keywordChips(doc.keywords || []),
+    onToggleJson
+      ? el(
+          "button",
+          {
+            type: "button",
+            class: `btn ghost sm json-view${jsonOpen ? " on" : ""}`,
+            "aria-pressed": jsonOpen ? "true" : "false",
+            title: "문서를 좌우로 갈라 원본 store JSON 을 함께 봅니다(승인자 전용).",
+            onclick: onToggleJson,
+          },
+          "JSON",
+        )
+      : null,
+  ]);
+}
+
+// One chip does both jobs: shows the status (raw enum, uppercase) and — for
+// an approver — toggles it on click. The tooltip carries what the state
+// means AND what clicking will do, so no second button is needed.
+function statusChip(doc, onToggleStatus) {
+  const meaning =
+    {
+      active: "LLM 세션에 주입되는 문서입니다. 문서 단위 전역 스위치 — 모든 사용자에게 동일합니다.",
+      inactive: "주입이 꺼진 문서입니다 — 대시보드에서 열람·편집만 됩니다.",
+      archived: "폐기된 문서입니다 — 기록으로만 남습니다.",
+    }[doc.status] ?? "";
+  const nextHint =
+    doc.status === "active"
+      ? " 클릭하면 주입을 끕니다(INACTIVE)."
+      : doc.status === "inactive"
+        ? " 클릭하면 주입을 켭니다(ACTIVE)."
+        : "";
+  const label = (doc.status || "").toUpperCase();
+  if (!onToggleStatus)
+    return el("span", { class: `chip st-${doc.status}`, text: label, title: meaning });
+  return el("button", {
+    type: "button",
+    class: `chip st-${doc.status} st-toggle`,
+    text: label,
+    title: meaning + nextHint,
+    onclick: onToggleStatus,
+  });
+}
+
+// db-schema 뷰와 같은 배너 — 비활성이 실제로 무엇을 의미하는지 본문 자리에서 설명.
+function inactiveBar(doc) {
+  if (doc.status !== "inactive") return null;
+  return el("div", { class: "offbar" }, [
+    el("b", { text: "비활성 문서입니다. " }),
+    el("span", {
+      text: "여기서는 그대로 읽을 수 있지만 미러로 나가지 않아 세션에 주입되지 않습니다. 주입 예산은 한 턴에 문서 2개뿐이므로, 상시 주입할 가치가 있을 때만 활성으로 바꾸세요.",
+    }),
+  ]);
+}
+
 // domain-skill: the body is the author's md, stored verbatim (user decision
 // 2026-09-21) — so the view is the text and one editor for it, not a per-field
 // form. The heading structure inside the text is the consumer's schema
@@ -1672,62 +1737,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
     el("h1", { class: "sk-title", text: s.name }),
     el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
-    el("div", { class: "sk-chips" }, [
-      statusChip(),
-      el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
-      ...keywordChips(doc.keywords || []),
-      onToggleJson
-        ? el(
-            "button",
-            {
-              type: "button",
-              class: `btn ghost sm json-view${jsonOpen ? " on" : ""}`,
-              "aria-pressed": jsonOpen ? "true" : "false",
-              title: "문서를 좌우로 갈라 원본 store JSON 을 함께 봅니다(승인자 전용).",
-              onclick: onToggleJson,
-            },
-            "JSON",
-          )
-        : null,
-    ]),
-    // db-schema 뷰와 같은 배너 — 비활성이 실제로 무엇을 의미하는지 본문 자리에서 설명.
-    doc.status === "inactive"
-      ? el("div", { class: "offbar" }, [
-          el("b", { text: "비활성 문서입니다. " }),
-          el("span", {
-            text: "여기서는 그대로 읽을 수 있지만 미러로 나가지 않아 세션에 주입되지 않습니다. 주입 예산은 한 턴에 문서 2개뿐이므로, 상시 주입할 가치가 있을 때만 활성으로 바꾸세요.",
-          }),
-        ])
-      : null,
+    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    inactiveBar(doc),
   ]);
-
-  // One chip does both jobs: shows the status (raw enum, uppercase) and — for
-  // an approver — toggles it on click. The tooltip carries what the state
-  // means AND what clicking will do, so no second button is needed.
-  function statusChip() {
-    const meaning =
-      {
-        active: "LLM 세션에 주입되는 문서입니다. 문서 단위 전역 스위치 — 모든 사용자에게 동일합니다.",
-        inactive: "주입이 꺼진 문서입니다 — 대시보드에서 열람·편집만 됩니다.",
-        archived: "폐기된 문서입니다 — 기록으로만 남습니다.",
-      }[doc.status] ?? "";
-    const nextHint =
-      doc.status === "active"
-        ? " 클릭하면 주입을 끕니다(INACTIVE)."
-        : doc.status === "inactive"
-          ? " 클릭하면 주입을 켭니다(ACTIVE)."
-          : "";
-    const label = (doc.status || "").toUpperCase();
-    if (!onToggleStatus)
-      return el("span", { class: `chip st-${doc.status}`, text: label, title: meaning });
-    return el("button", {
-      type: "button",
-      class: `chip st-${doc.status} st-toggle`,
-      text: label,
-      title: meaning + nextHint,
-      onclick: onToggleStatus,
-    });
-  }
 
   // ── 문서 ──────────────────────────────────────────────────────────────
   // Read: the md as written, in a <pre> (the dashboard does not render md — the
@@ -1848,6 +1860,251 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
 
   return wrap;
 }
+
+// screen-map: one screen of the capture classifier's closed list. Read-only
+// here — what it adds to this dashboard is being a link target (a manual's
+// rel:"screen").
+function renderScreenMapView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+  const b = doc.body;
+  const cols = b.expectedColumns || {};
+  const listOrNone = (items) =>
+    items && items.length
+      ? el("ul", { class: "sm-list" }, items.map((t) => el("li", { text: t })))
+      : el("p", { class: "dim", text: "없음" });
+  return el("div", { class: "skwrap" }, [
+    el("p", { class: "sk-eyebrow", text: "screen-map · 화면" }),
+    el("h1", { class: "sk-title", text: b.name }),
+    el("p", { class: "sk-sub", text: [b.program, ...(b.menuPath || [])].filter(Boolean).join(" › ") }),
+    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    inactiveBar(doc),
+    el("h2", { class: "sk-h", text: "보이는 모습" }),
+    listOrNone(b.hints),
+    el("h2", { class: "sk-h", text: "표에 있어야 할 컬럼" }),
+    el("p", { class: "dim", text: `필수 ${(cols.required || []).join(" · ") || "없음"} / 선택 ${(cols.optional || []).join(" · ") || "없음"}` }),
+  ]);
+}
+
+// manual: steps on one screen, each a line of text and a capture. The screen
+// is the envelope's rel:"screen" link (edited in 연결 below); the captures sit
+// in the asset store under their sha256, uploaded one row at a time.
+const CAPTURE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const CAPTURE_LIMIT = 2 * 1024 * 1024;
+
+function captureImg(step, cls) {
+  return el("img", {
+    class: cls,
+    src: `/api/assets/${step.asset}`,
+    width: step.width,
+    height: step.height,
+    alt: step.text || "캡처",
+    loading: "lazy",
+    // A capture the store lacks (an inactive manual may name one) shows as
+    // a labelled gap instead of the browser's broken-image icon.
+    onerror: (e) =>
+      e.currentTarget.replaceWith(
+        el("p", { class: "mn-nocap dim", text: `캡처를 불러오지 못했습니다 (${step.asset.slice(0, 8)})` }),
+      ),
+  });
+}
+
+async function uploadCapture(file) {
+  if (!CAPTURE_TYPES.includes(file.type))
+    return { error: "PNG · JPEG · WebP 이미지만 올릴 수 있습니다." };
+  if (file.size > CAPTURE_LIMIT) return { error: "캡처는 2MB 까지 올릴 수 있습니다." };
+  const r = await api("/api/assets", {
+    method: "POST",
+    headers: { "content-type": file.type },
+    raw: file,
+  });
+  if (r.ok) return { step: { asset: r.data.sha256, width: r.data.width, height: r.data.height } };
+  if (r.status === 403) return { error: "editor 이상 권한이 필요합니다." };
+  if (r.status === 413) return { error: "캡처는 2MB 까지 올릴 수 있습니다." };
+  if (r.status === 400 || r.status === 415)
+    return { error: "이미지를 읽지 못했습니다 — PNG · JPEG · WebP 인지 확인하세요." };
+  return { error: `올리기 실패 (${r.status || "네트워크"})` };
+}
+
+function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+  const b = doc.body;
+  const steps = b.steps || [];
+  const screen = (doc.links || []).find((l) => l.rel === "screen");
+
+  const wrap = el("div", { class: "skwrap" }, [
+    el("p", { class: "sk-eyebrow", text: "manual · 화면 매뉴얼" }),
+    el("h1", { class: "sk-title", text: b.title || "(제목 없음)" }),
+    screen
+      ? el("p", { class: "sk-sub" }, [
+          "화면 ",
+          el("a", { href: `#/doc/${screen.type}/${encodeURIComponent(screen.id)}`, text: screen.id }),
+        ])
+      : el("p", {
+          class: "sk-sub warn",
+          text: "화면 연결이 없습니다 — 아래 연결에서 관계 screen 으로 screen-map 문서를 고르세요. 활성화하려면 꼭 하나 있어야 합니다.",
+        }),
+    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    inactiveBar(doc),
+  ]);
+
+  const holder = el("div", {});
+  function read() {
+    const h = el("h2", { class: "sk-h" }, [`단계 ${steps.length}`]);
+    if (canEdit)
+      h.appendChild(
+        el("button", { type: "button", class: "btn ghost sm add-btn", onclick: edit, text: "편집" }),
+      );
+    holder.replaceChildren(
+      h,
+      steps.length
+        ? el(
+            "ol",
+            { class: "mn-steps" },
+            steps.map((s, i) =>
+              el("li", { class: "mn-step" }, [
+                el("p", { class: "mn-text" }, [el("b", { class: "mono", text: `${i + 1}.` }), " ", s.text || ""]),
+                s.asset
+                  ? captureImg(s, "mn-cap")
+                  : el("p", { class: "mn-nocap dim", text: "캡처 없음" }),
+              ]),
+            ),
+          )
+        : el("p", { class: "dim", text: "아직 단계가 없습니다 — 편집을 눌러 단계와 캡처를 넣으세요." }),
+    );
+  }
+
+  function edit() {
+    const draft = {
+      title: b.title || "",
+      steps: steps.map((s) => ({ ...s })),
+    };
+    const titleInp = el("input", { class: "fld", type: "text", "aria-label": "제목", placeholder: "제목 (예: SPC 관리 한계 설정)" });
+    titleInp.value = draft.title;
+    titleInp.addEventListener("input", () => (draft.title = titleInp.value));
+    const rowsEl = el("div", { class: "mn-rows" });
+
+    function move(i, d) {
+      const j = i + d;
+      if (j < 0 || j >= draft.steps.length) return;
+      [draft.steps[i], draft.steps[j]] = [draft.steps[j], draft.steps[i]];
+      paint();
+    }
+    function row(s, i) {
+      const text = el("textarea", { class: "fld", rows: 2, "aria-label": `${i + 1}단계 설명`, placeholder: "한 동작을 한 줄로 (예: 상단 메뉴 [설정]을 누른다.)" });
+      text.value = s.text || "";
+      text.addEventListener("input", () => (s.text = text.value));
+      const file = el("input", { type: "file", accept: CAPTURE_TYPES.join(","), hidden: true });
+      const upBtn = el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        text: s.asset ? "캡처 바꾸기" : "캡처 올리기",
+        onclick: () => file.click(),
+      });
+      file.addEventListener("change", async () => {
+        const f = file.files[0];
+        if (!f) return;
+        upBtn.disabled = true;
+        upBtn.textContent = "올리는 중…";
+        const res = await uploadCapture(f);
+        if (res.error) toast(res.error, "error");
+        else Object.assign(s, res.step);
+        paint();
+      });
+      return el("div", { class: "mn-row" }, [
+        el("b", { class: "mono mn-n", text: `${i + 1}` }),
+        el("div", { class: "mn-row-main" }, [
+          text,
+          el("div", { class: "mn-row-cap" }, [
+            s.asset ? captureImg(s, "mn-thumb") : el("span", { class: "dim", text: "캡처 없음" }),
+            s.asset ? el("span", { class: "dim mono", text: `${s.width}×${s.height} · ${s.asset.slice(0, 8)}` }) : null,
+            upBtn,
+            file,
+          ]),
+        ]),
+        el("div", { class: "mn-row-acts" }, [
+          el("button", { type: "button", class: "btn ghost sm", text: "↑", title: "위로", "aria-label": `${i + 1}단계 위로`, disabled: i === 0, onclick: () => move(i, -1) }),
+          el("button", { type: "button", class: "btn ghost sm", text: "↓", title: "아래로", "aria-label": `${i + 1}단계 아래로`, disabled: i === draft.steps.length - 1, onclick: () => move(i, 1) }),
+          el("button", {
+            type: "button",
+            class: "btn ghost sm",
+            text: "삭제",
+            onclick: () => {
+              draft.steps.splice(i, 1);
+              paint();
+            },
+          }),
+        ]),
+      ]);
+    }
+    function paint() {
+      rowsEl.replaceChildren(
+        ...(draft.steps.length
+          ? draft.steps.map(row)
+          : [el("p", { class: "dim", text: "단계가 없습니다 — [+ 단계 추가] 로 시작하세요." })]),
+      );
+    }
+
+    const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      const body = {
+        title: draft.title.trim(),
+        steps: draft.steps.map((s) => ({
+          // one line per step (schema): a pasted newline becomes a space
+          text: (s.text || "").replace(/\s*\n\s*/g, " ").trim(),
+          ...(s.asset ? { asset: s.asset, width: s.width, height: s.height } : {}),
+        })),
+      };
+      const r = await api(`/api/docs/manual/${encodeURIComponent(doc.id)}`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body,
+      });
+      save.disabled = false;
+      if (r.ok) {
+        toast("저장했습니다", "ok");
+        reload();
+        return;
+      }
+      const d = r.data || {};
+      if (r.status === 409) toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
+      else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
+      else toast(`저장 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`, "error");
+    });
+
+    holder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["단계 편집"]),
+      el("div", { class: "slot-edit" }, [
+        titleInp,
+        rowsEl,
+        el("div", { class: "editacts" }, [
+          el("button", {
+            type: "button",
+            class: "btn ghost sm",
+            text: "+ 단계 추가",
+            onclick: () => {
+              draft.steps.push({ text: "" });
+              paint();
+            },
+          }),
+          save,
+          el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+        ]),
+      ]),
+    );
+    paint();
+  }
+
+  read();
+  wrap.appendChild(holder);
+  return wrap;
+}
+
+// Types whose doc screen is a body view of its own (the rest share the
+// slot-table screen). Each returns the element the links card is appended to.
+const BODY_VIEWS = {
+  "domain-skill": renderSkillView,
+  "screen-map": renderScreenMapView,
+  manual: renderManualView,
+};
 
 // ================= 연결 (envelope links[]) =================
 // What this doc points at (stored) and what points at it (computed by the
@@ -2385,6 +2642,7 @@ function deriveDraftId(type, body) {
       : "";
   if (type === "domain-skill")
     return body.name ? String(body.name).toLowerCase() : "";
+  if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
   return "";
 }
 
@@ -2415,6 +2673,7 @@ const NEW_DOC_OPTS = [
   { type: "db-schema", desc: "테이블 · 컬럼" },
   { type: "msg-format", desc: "설비 커맨드" },
   { type: "domain-skill", desc: "스킬 문서(md)" },
+  { type: "manual", desc: "화면 매뉴얼(캡처)" },
 ];
 function toggleFlyout(host, btn) {
   if (document.querySelector(".nd-flyout")) {
@@ -2479,6 +2738,14 @@ function idSourceField(type, body, onIdChange) {
       upper: true,
       title: true,
       placeholder: "커맨드명 클릭해서 입력 (예: CMD_START_LOT)",
+      onChange: onIdChange,
+    });
+  // A manual's id is written, not derived: the body has only a prose title.
+  if (type === "manual")
+    return eField(() => body.id, (v) => (body.id = v ? v.toLowerCase() : v), {
+      mono: true,
+      title: true,
+      placeholder: "매뉴얼 id 클릭해서 입력 (예: spc-chart-limit-setup)",
       onChange: onIdChange,
     });
   return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
@@ -2556,7 +2823,9 @@ function renderDraftScreen(type, localId) {
       ? draftDbSchema(body, onIdChange, persist, rerender)
       : type === "msg-format"
         ? draftMsgFormat(body, onIdChange, persist, rerender)
-        : draftDomainSkill(body, onIdChange, persist, rerender);
+        : type === "manual"
+          ? draftManual(body, persist)
+          : draftDomainSkill(body, onIdChange, persist, rerender);
 
   section.replaceChildren(head, note, fields);
   updateSave();
@@ -2780,6 +3049,21 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
 }
 
 // ---- 저장: 드래프트 → inactive 문서 POST ----
+function draftManual(body, persist) {
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "제목",
+      true,
+      eField(() => body.title, (v) => (body.title = v), {
+        placeholder: "매뉴얼 제목 (예: SPC 관리 한계 설정)",
+        onChange: persist,
+      }),
+    ),
+    el("p", { class: "fhint", text: "단계와 캡처, 화면 연결(관계 screen)은 저장 후 문서 화면에서 넣습니다. 활성화하려면 화면 연결 하나와 단계마다 캡처가 있어야 합니다." }),
+  );
+  return wrap;
+}
 function finalizeDraftBody(type, body) {
   if (type === "db-schema") {
     const columns = (body.columns || [])
@@ -2816,6 +3100,7 @@ function finalizeDraftBody(type, body) {
       fields,
     };
   }
+  if (type === "manual") return body.title ? { title: body.title } : {};
   // domain-skill: { name, markdown } — 본문이 비었으면 칸 자체를 안 보낸다
   // (드래프트는 required 가 풀린 스키마로 검증되니 name 만으로 저장된다).
   const b = { name: body.name };
