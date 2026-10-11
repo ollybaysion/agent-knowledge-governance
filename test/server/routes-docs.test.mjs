@@ -641,3 +641,82 @@ test("manual: a draft saves without screen or captures; activation needs one rel
     await cleanup();
   }
 });
+
+test("role: the domain-skill list carries role (absent = main); PUT role changes it under If-Match, skills only", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  const h = auth("edtok");
+  const skill = (name, markdown, extra = {}) => ({
+    schema: "domain-skill/v1",
+    id: name,
+    keywords: [{ kw: name, inject: "full" }],
+    status: "active",
+    ...extra,
+    body: { name, markdown },
+  });
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/domain-skill", headers: h, payload: skill("m", "# m\n\n## 데이터\n\nx\n") });
+    const sub = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skill("k", "# k\n\n## 도메인 지식\n\n지식.\n", { role: "sub" }),
+    });
+    assert.equal(sub.statusCode, 201, sub.body);
+    const noKnowledge = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skill("bad", "# bad\n\n## 데이터\n\nx\n", { role: "sub" }),
+    });
+    assert.equal(noKnowledge.statusCode, 400);
+
+    const list = (await app.inject({ method: "GET", url: "/api/docs?type=domain-skill" })).json().docs;
+    assert.deepEqual(
+      list.map((d) => [d.id, d.role]).sort(),
+      [["k", "sub"], ["m", "main"]],
+    );
+
+    const url = "/api/docs/domain-skill/m/role";
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/m" })).json();
+    assert.equal((await app.inject({ method: "PUT", url, headers: h, payload: { role: "sub" } })).statusCode, 428);
+    assert.equal(
+      (await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "x" } })).statusCode,
+      400,
+    );
+    // m has no 도메인 지식, so it cannot become a sub.
+    const toSub = await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
+    assert.equal(toSub.statusCode, 400);
+
+    const kRev = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/k" })).json().rev;
+    const toMain = await app.inject({
+      method: "PUT",
+      url: "/api/docs/domain-skill/k/role",
+      headers: { ...h, "if-match": kRev },
+      payload: { role: "main" },
+    });
+    assert.equal(toMain.statusCode, 200, toMain.body);
+    assert.deepEqual(Object.keys(toMain.json().json), ["schema", "id", "keywords", "status", "role", "body"]);
+    const stale = await app.inject({
+      method: "PUT",
+      url: "/api/docs/domain-skill/k/role",
+      headers: { ...h, "if-match": kRev },
+      payload: { role: "sub" },
+    });
+    assert.equal(stale.statusCode, 409);
+
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const xRev = (await app.inject({ method: "GET", url: "/api/docs/db-schema/x" })).json().rev;
+    const other = await app.inject({
+      method: "PUT",
+      url: "/api/docs/db-schema/x/role",
+      headers: { ...h, "if-match": xRev },
+      payload: { role: "main" },
+    });
+    assert.equal(other.statusCode, 400);
+    assert.equal(other.json().error, "role_not_allowed");
+  } finally {
+    await cleanup();
+  }
+});

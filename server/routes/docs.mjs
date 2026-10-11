@@ -87,6 +87,8 @@ export function registerDocsRoutes(app) {
             tiers,
             keywords: doc.keywords,
             links: doc.links ?? [],
+            // what an agent list filters on; absent reads as main
+            ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
           });
         }
@@ -526,6 +528,54 @@ export function registerDocsRoutes(app) {
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `links ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // A domain-skill's role (main | sub), the one envelope key besides links an
+  // editor changes after creation. Same If-Match rule as links.
+  app.put(
+    "/api/docs/:type/:id/role",
+    { config: { roles: ["editor"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (type !== "domain-skill")
+        return reply.code(400).send({ error: "role_not_allowed" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const role = request.body?.role;
+      if (role !== "main" && role !== "sub")
+        return reply.code(400).send({ error: "invalid_role" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return {
+              status: 409,
+              body: { error: "unknown_base_rev", currentRev, current: doc },
+            };
+
+          // role sits after status, before links and body.
+          const { schema, id: did, keywords, status, role: _old, ...rest } = doc;
+          const newDoc = { schema, id: did, keywords, status, role, ...rest };
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length)
+            return {
+              status: 400,
+              body: { error: "validation_failed", details: errors },
+            };
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `role ${type}/${id} → ${role}`,
           });
           return { status: 200, body: { rev, json: newDoc } };
         },
