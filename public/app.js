@@ -1852,6 +1852,11 @@ function roleChip(doc, rev, canEdit, reload) {
   });
 }
 
+// 409 data_id_conflict: the data ids another skill already has.
+function dataIdConflictText(d) {
+  return (d.conflicts || []).map((c) => `데이터 id "${c.id}" 가 ${c.doc} 과 겹칩니다`).join(" · ");
+}
+
 // domain-skill: the body is the author's md, stored verbatim (user decision
 // 2026-09-21) — so the view is the text and one editor for it, not a per-field
 // form. The heading structure inside the text is the consumer's schema
@@ -1874,7 +1879,8 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       reload();
       return true;
     }
-    if (r.status === 409)
+    if ((r.data || {}).error === "data_id_conflict") toast(dataIdConflictText(r.data), "error");
+    else if (r.status === 409)
       toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
     else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
     else {
@@ -3525,6 +3531,10 @@ async function saveDraft(type, localId, body) {
     toast("저장했습니다 — 비활성 문서입니다. 이어서 채우고 완성되면 활성화하세요.");
     await renderDocTree();
     location.hash = `#/doc/${type}/${encodeURIComponent(id)}`;
+    return;
+  }
+  if ((r.data || {}).error === "data_id_conflict") {
+    toast(dataIdConflictText(r.data), "error");
     return;
   }
   if (r.status === 409) {

@@ -16,7 +16,7 @@
 // document can change between submit and adopt — a column disappears, someone
 // else's edit lands — so a proposal that rehearsed cleanly can still fail for
 // real later. Submit's job is only to keep already-doomed proposals out.
-import { validateForStore } from "../src/envelope.mjs";
+import { dataIdConflicts, validateForStore } from "../src/envelope.mjs";
 import { setSlot } from "./slots.mjs";
 
 /**
@@ -36,10 +36,11 @@ export function checkSlotValues(slots) {
 
 /**
  * Apply `slots` to a copy of `currentDoc` and validate the result.
+ * `dataIdOwners` is the store lookup the data id check needs.
  *
  * @returns {{ok: true, doc: object} | {ok: false, status: number, body: object}}
  */
-export function applySlots(currentDoc, slots, refs, { by, at }) {
+export function applySlots(currentDoc, slots, refs, { by, at, dataIdOwners }) {
   const bad = checkSlotValues(slots);
   if (bad) return { ok: false, status: 400, body: bad };
 
@@ -76,6 +77,13 @@ export function applySlots(currentDoc, slots, refs, { by, at }) {
       ok: false,
       status: 400,
       body: { error: "validation_failed", details: errors },
+    };
+  const conflicts = dataIdConflicts(doc, dataIdOwners);
+  if (conflicts.length)
+    return {
+      ok: false,
+      status: 409,
+      body: { error: "data_id_conflict", conflicts },
     };
   return { ok: true, doc };
 }
