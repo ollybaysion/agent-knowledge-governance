@@ -52,6 +52,8 @@ const ALLOWED_TYPE_DIRS = new Set([
   "msg-format",
   "domain",
   "domain-skill",
+  "manual",
+  "voc",
   // Same reasoning as "domain": listed before the server emits it, so that
   // turning it on server-side does not require every client to upgrade first.
   "unclassified",

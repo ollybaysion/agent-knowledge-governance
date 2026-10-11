@@ -11,7 +11,7 @@ const THEME_KEY = "akg_theme";
 let currentUser = null; // {id, role}
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual"];
+const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual", "voc"];
 const TIER_LABEL = {
   scaffold: "빈칸",
   inferred: "추정",
@@ -30,6 +30,7 @@ const TYPE_LABEL = {
   "domain-skill": "domain-skill",
   "screen-map": "screen-map",
   manual: "manual",
+  voc: "voc",
 };
 
 // ---------- DOM helper ----------
@@ -2106,6 +2107,87 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   return wrap;
 }
 
+// voc: one md note, read whole and edited whole (no section structure). Its
+// [[ ]] are drawn as links like a skill's; 저장 = one PUT of { name, markdown }.
+function renderVocView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
+  const b = doc.body;
+  const holder = el("div", { class: "sk-doc" });
+  function read() {
+    holder.replaceChildren(
+      el("h2", { class: "sk-h" }, [
+        "문서",
+        canEdit
+          ? el("button", { type: "button", class: "btn ghost sm add-btn", onclick: edit, text: "편집" })
+          : null,
+      ]),
+      (b.markdown || "").trim() === ""
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 VOC md 를 붙여 넣으세요." })
+        : wikiText(el("pre", { class: "sk-md" }), b.markdown, wikis),
+    );
+  }
+  function edit() {
+    const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
+    input.value = b.markdown || "";
+    const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+    const dirty = () => input.value !== (b.markdown || "");
+    const refresh = () => {
+      save.disabled = !dirty();
+      save.title = dirty() ? "" : "변경 없음";
+    };
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      const r = await api(`/api/docs/voc/${encodeURIComponent(doc.id)}`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body: { ...b, markdown: input.value },
+      });
+      if (r.ok) {
+        toast("저장했습니다", "ok");
+        reload();
+        return;
+      }
+      save.disabled = false;
+      const d = r.data || {};
+      toast(
+        r.status === 409
+          ? "다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요."
+          : `저장 실패 (${r.status})${d.message ? " — " + d.message : ""}${d.details ? " — " + d.details.join(" · ") : ""}`,
+        "error",
+      );
+    });
+    input.addEventListener("input", refresh);
+    const card = el("div", { class: "slot-edit" }, [
+      input,
+      el("div", { class: "editacts" }, [
+        save,
+        el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+        el("span", { class: "kbd" }, [el("b", { text: "esc" }), " 취소 · ", el("b", { text: "⌘/Ctrl+↵" }), " 저장"]),
+      ]),
+    ]);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (dirty() && !confirm("저장하지 않은 편집이 있습니다. 버릴까요?")) return;
+        read();
+      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (!save.disabled) save.click();
+      }
+    });
+    holder.replaceChildren(el("h2", { class: "sk-h" }, ["문서 편집"]), card);
+    refresh();
+    input.focus();
+  }
+  read();
+  return el("div", { class: "skwrap" }, [
+    el("p", { class: "sk-eyebrow", text: "voc · VOC(md)" }),
+    el("h1", { class: "sk-title", text: b.name }),
+    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    inactiveBar(doc),
+    holder,
+  ]);
+}
+
 // screen-map: one screen of the capture classifier's closed list. Read-only
 // here — what it adds to this dashboard is being a link target (a manual's
 // rel:"screen").
@@ -2351,6 +2433,7 @@ function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
 // slot-table screen). Each returns the element the links card is appended to.
 const BODY_VIEWS = {
   "domain-skill": renderSkillView,
+  voc: renderVocView,
   "screen-map": renderScreenMapView,
   manual: renderManualView,
 };
@@ -2913,6 +2996,7 @@ function deriveDraftId(type, body) {
   if (type === "domain-skill")
     return body.name ? String(body.name).toLowerCase() : "";
   if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
+  if (type === "voc") return body.name ? String(body.name).toLowerCase() : "";
   return "";
 }
 
@@ -2944,6 +3028,7 @@ const NEW_DOC_OPTS = [
   { type: "msg-format", desc: "설비 커맨드" },
   { type: "domain-skill", desc: "스킬 문서(md)" },
   { type: "manual", desc: "화면 매뉴얼(캡처)" },
+  { type: "voc", desc: "VOC(md)" },
 ];
 function toggleFlyout(host, btn) {
   if (document.querySelector(".nd-flyout")) {
@@ -3021,7 +3106,10 @@ function idSourceField(type, body, onIdChange) {
   return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
     mono: true,
     title: true,
-    placeholder: "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+    placeholder:
+      type === "voc"
+        ? "VOC 이름 클릭해서 입력 (예: line-a-rf-power-drift)"
+        : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
   });
 }
@@ -3095,7 +3183,9 @@ function renderDraftScreen(type, localId) {
         ? draftMsgFormat(body, onIdChange, persist, rerender)
         : type === "manual"
           ? draftManual(body, persist)
-          : draftDomainSkill(body, onIdChange, persist, rerender);
+          : type === "voc"
+            ? draftVoc(body, persist)
+            : draftDomainSkill(body, onIdChange, persist, rerender);
 
   section.replaceChildren(head, note, fields);
   updateSave();
@@ -3349,6 +3439,23 @@ function draftManual(body, persist) {
   );
   return wrap;
 }
+function draftVoc(body, persist) {
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "markdown",
+      false,
+      eField(() => body.markdown, (v) => (body.markdown = v), {
+        area: true,
+        mono: true,
+        placeholder: "VOC md 를 여기에 — # 이름 으로 시작해 받은 말과 정리를 자유롭게. [[문서 id]] 는 연결이 됩니다.",
+        onChange: persist,
+      }),
+    ),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 활성화하려면 본문이 있어야 합니다." }),
+  );
+  return wrap;
+}
 function finalizeDraftBody(type, body) {
   if (type === "db-schema") {
     const columns = (body.columns || [])
@@ -3386,6 +3493,11 @@ function finalizeDraftBody(type, body) {
     };
   }
   if (type === "manual") return body.title ? { title: body.title } : {};
+  if (type === "voc") {
+    const b = { name: body.name };
+    if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;
+    return b;
+  }
   // domain-skill: { name, markdown } — 본문이 비었으면 칸 자체를 안 보낸다
   // (드래프트는 required 가 풀린 스키마로 검증되니 name 만으로 저장된다).
   const b = { name: body.name };

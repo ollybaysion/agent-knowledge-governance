@@ -35,11 +35,13 @@ const DOC_TYPES = [
   "domain-skill",
   "screen-map",
   "manual",
+  "voc",
 ];
 
 function mdRelPath(type, doc) {
   if (type === "domain-skill")
     return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
+  if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
   return `rendered/${type}/docs/${doc.id}.md`;
 }
 

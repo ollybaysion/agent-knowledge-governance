@@ -21,6 +21,7 @@ import { renderMsgFormatMd } from "../src/render/msg-format.mjs";
 import { migrateMsgFormatMd } from "../src/migrate/msg-format.mjs";
 import { renderDomainSkillMd, skillSummary } from "../src/render/domain-skill.mjs";
 import { renderManualMd } from "../src/render/manual.mjs";
+import { renderVocMd } from "../src/render/voc.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "schemas"));
@@ -261,4 +262,11 @@ test("domain-skill: the sub example renders byte-identically to its golden", () 
   assert.deepEqual(validateDocument(doc, refs), []);
   const expected = readFileSync(join(__dirname, "fixtures", "domain-skill-sub-golden-SKILL.md"), "utf8");
   assert.equal(renderDomainSkillMd(doc), expected);
+});
+
+// A VOC renders to its text as written — no frontmatter, nothing added.
+test("voc: the example renders byte-identically to its golden", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs), []);
+  assert.equal(renderVocMd(doc), readFileSync(join(__dirname, "fixtures", "voc-golden-VOC.md"), "utf8"));
 });

@@ -106,6 +106,34 @@ test("unclassified is accepted ahead of the server emitting it — no client rel
   await cleanup();
 });
 
+// Regression: the server renders active manuals to rendered/manual/ (#55),
+// and a mirror that did not list the folder refused every bundle from then on.
+// voc renders to rendered/voc/ the same way.
+test("manual and voc — types the server renders — are accepted", async () => {
+  const { app, storeDir, cleanup } = await setupServer();
+  commitFiles(storeDir, {
+    author: "renoir",
+    message: "an active manual is rendered",
+    writes: [
+      { relpath: "rendered/manual/docs/m.md", content: "# m\n" },
+      { relpath: "rendered/manual/index.json", content: "[]\n" },
+      { relpath: "rendered/voc/v/VOC.md", content: "# v\n" },
+    ],
+  });
+  const mirrorDir = join(mkdtempSync(join(tmpdir(), "akg-layout-mirror-")), "akg");
+
+  const result = await syncMirror({
+    serverUrl: "http://x",
+    token: "vtok",
+    mirrorDir,
+    fetchImpl: fetchImplFromApp(app, "vtok"),
+  });
+  assert.equal(result.changed, true);
+  assert.ok(existsSync(join(mirrorDir, "manual", "docs", "m.md")));
+  assert.ok(existsSync(join(mirrorDir, "voc", "v", "VOC.md")));
+  await cleanup();
+});
+
 // The unit test above proves the throw; this proves the CLI actually turns it
 // into a non-zero exit, which is the part that was broken.
 //

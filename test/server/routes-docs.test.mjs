@@ -858,3 +858,34 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
     await cleanup();
   }
 });
+
+test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as written, listed with its title, [[ ]] linked", async () => {
+  const { app, home, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const markdown = "# v\n\n## 받은 말\n\n표 [[db-schema/x]] 가 이상하다.\n";
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/docs/voc",
+      headers: h,
+      payload: {
+        schema: "voc/v1",
+        id: "v",
+        keywords: [{ kw: "v", inject: "pointer" }],
+        status: "active",
+        body: { name: "v", markdown },
+      },
+    });
+    assert.equal(r.statusCode, 201, r.body);
+    assert.deepEqual(r.json().json.links, [link("db-schema", "x")]);
+    assert.equal(readFileSync(join(home, "store", "rendered", "voc", "v", "VOC.md"), "utf8"), markdown);
+
+    const md = await app.inject({ method: "GET", url: "/api/docs/voc/v?format=md" });
+    assert.equal(md.body, markdown);
+    const list = (await app.inject({ method: "GET", url: "/api/docs?type=voc" })).json().docs;
+    assert.deepEqual(list.map((d) => [d.id, d.title, "role" in d]), [["v", "v", false]]);
+  } finally {
+    await cleanup();
+  }
+});

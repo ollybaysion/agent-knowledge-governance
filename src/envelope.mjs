@@ -26,6 +26,7 @@ const SCHEMA_FILES = {
   "fab-line/v1": "fab-line/v1.schema.json",
   "screen-map/v1": "screen-map/v1.schema.json",
   "manual/v1": "manual/v1.schema.json",
+  "voc/v1": "voc/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -102,6 +103,7 @@ export function deriveId(schema, body) {
         ? body.command.toLowerCase().replace(/_/g, "-")
         : null;
     case "domain-skill/v1":
+    case "voc/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -127,6 +129,7 @@ const ID_SOURCE = {
   "db-schema/v1": () => "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
+  "voc/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
@@ -185,6 +188,10 @@ const SEMANTIC_CHECKS = {
     checkDerivedId(doc, errors);
   },
   "fab-line/v1"(doc, errors) {
+    checkDerivedId(doc, errors);
+  },
+  // A VOC is free md: no section rule, only the id.
+  "voc/v1"(doc, errors) {
     checkDerivedId(doc, errors);
   },
   "screen-map/v1"(doc, errors) {
