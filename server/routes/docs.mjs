@@ -20,6 +20,7 @@ import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
+import { backlinksOf, missingLinkTargets, resolveLinks } from "../links.mjs";
 
 const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map"];
 
@@ -76,6 +77,7 @@ export function registerDocsRoutes(app) {
             status: doc.status,
             tiers,
             keywords: doc.keywords,
+            links: doc.links ?? [],
             rev: revOfPath(storeDir, `${t}/${id}.json`),
           });
         }
@@ -115,6 +117,8 @@ export function registerDocsRoutes(app) {
         rev,
         tiers: bodySchema ? tierSummary(bodySchema, doc.body) : {},
         slots,
+        links: resolveLinks(storeDir, doc.links),
+        backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
       };
     },
   );
@@ -158,6 +162,9 @@ export function registerDocsRoutes(app) {
         return reply
           .code(400)
           .send({ error: "validation_failed", details: errors });
+      const missing = missingLinkTargets(storeDir, doc.links);
+      if (missing.length)
+        return reply.code(400).send({ error: "unknown_link_target", missing });
 
       const relpath = `${type}/${doc.id}.json`;
       const result = await queue.enqueue(
@@ -345,6 +352,11 @@ export function registerDocsRoutes(app) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
           continue;
         }
+        const missing = missingLinkTargets(storeDir, doc.links);
+        if (missing.length) {
+          rejected.push({ ...at, error: "unknown_link_target", missing });
+          continue;
+        }
         docs.push(doc);
       }
 
@@ -449,6 +461,64 @@ export function registerDocsRoutes(app) {
             status: current ? 200 : 201,
             body: { rev, json: doc, orphans, created: !current },
           };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // The envelope's links[] as a whole. PUT /api/docs/:type/:id carries a body
+  // only, so the edges get their own write — same If-Match rule as
+  // activate: a stale rev is a 409, not a merge.
+  app.put(
+    "/api/docs/:type/:id/links",
+    { config: { roles: ["editor"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!refs[`${type}/v1`])
+        return reply.code(400).send({ error: "unknown_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const links = request.body?.links;
+      if (!Array.isArray(links))
+        return reply.code(400).send({ error: "links_required" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return {
+              status: 409,
+              body: { error: "unknown_base_rev", currentRev, current: doc },
+            };
+
+          // links sits before body, the order json-spec §2 lists the keys in.
+          const { links: _old, body, ...head } = doc;
+          const newDoc = links.length
+            ? { ...head, links, body }
+            : { ...head, body };
+          const errors = validateForStore(newDoc, refs);
+          if (errors.length)
+            return {
+              status: 400,
+              body: { error: "validation_failed", details: errors },
+            };
+          const missing = missingLinkTargets(storeDir, links);
+          if (missing.length)
+            return {
+              status: 400,
+              body: { error: "unknown_link_target", missing },
+            };
+
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `links ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
         },
         { priority: priorityOf(request.user) },
       );

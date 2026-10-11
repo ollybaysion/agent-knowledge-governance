@@ -13,6 +13,7 @@ const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 
 const SCHEMA_FILES = {
   "common/tiered-value.v1": "common/tiered-value.v1.schema.json",
+  "common/link.v1": "common/link.v1.schema.json",
   "db-schema/v1": "db-schema/v1.schema.json",
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
@@ -43,8 +44,9 @@ const KEYWORD_SCHEMA = {
   },
 };
 
-// json-spec §2 — the 5 keys fixed for every type EXCEPT unclassified
+// json-spec §2 — the keys fixed for every type EXCEPT unclassified
 // (§1.4: envelope with body dropped, validated by its own schema file).
+// `links` is the one optional key.
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -58,6 +60,9 @@ const ENVELOPE_SCHEMA = {
     // mirror or an injection slot. Bulk imports land here (issue #7).
     status: { type: "string", enum: ["active", "inactive", "archived"] },
     body: { type: "object" },
+    // Forward edges to other stored documents. Whether each target exists is
+    // a store question, so the write routes check it (server/links.mjs).
+    links: { type: "array", items: { $ref: "common/link.v1" } },
   },
 };
 
@@ -144,6 +149,21 @@ export function skillSections(markdown) {
     }
   }
   return out;
+}
+
+/** A document may not point at itself, nor carry the same edge twice. */
+function checkLinks(doc, errors) {
+  if (!Array.isArray(doc.links)) return;
+  const type = doc.schema.split("/")[0];
+  const seen = new Set();
+  doc.links.forEach((link, i) => {
+    if (link.type === type && link.id === doc.id)
+      fail(errors, `$.links[${i}]: 자기 자신을 가리킬 수 없습니다`);
+    const key = `${link.type}/${link.id}#${link.rel}`;
+    if (seen.has(key))
+      fail(errors, `$.links[${i}]: 같은 연결이 두 번 있습니다 — ${key}`);
+    seen.add(key);
+  });
 }
 
 const SEMANTIC_CHECKS = {
@@ -279,6 +299,7 @@ export function validateDocument(doc, refs, { draft = false } = {}) {
     );
   }
   if (errors.length === 0) {
+    checkLinks(doc, errors);
     if (draft) {
       // A draft skips the completeness/coherence checks a finished doc must
       // pass, but the id must still name the document — the store filename and
