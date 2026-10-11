@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,6 +44,18 @@ test("GET /app.js and /app.css are served publicly with the right content types"
   const css = await app.inject({ method: "GET", url: "/app.css" });
   assert.equal(css.statusCode, 200);
   assert.match(css.headers["content-type"], /css/);
+  await cleanup();
+});
+
+test("GET /skill-sections.mjs serves the validator's own splitter, byte for byte, publicly", async () => {
+  const { app, cleanup } = await setup();
+  const res = await app.inject({ method: "GET", url: "/skill-sections.mjs" });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /javascript/);
+  assert.equal(
+    res.body,
+    readFileSync(new URL("../../src/skill-sections.mjs", import.meta.url), "utf8"),
+  );
   await cleanup();
 });
 
