@@ -1,0 +1,20 @@
+{
+  "schema": "manual/v1",
+  "id": "spc-chart-limit-setup",
+  "keywords": [
+    { "kw": "spc limit", "inject": "pointer" },
+    { "kw": "spc ucl", "inject": "pointer" }
+  ],
+  "status": "active",
+  "links": [{ "type": "screen-map", "id": "spc-chart-config", "rel": "screen" }],
+  "body": {
+    "title": "SPC 관리 한계 설정",
+    "steps": [
+      { "text": "상단 메뉴 [설정] › [차트 관리]를 누른다.", "asset": "1e43630a76e53467bbf709ea112baad8f79699dab9978a4aa96904aded454ed6", "width": 1280, "height": 720 },
+      { "text": "목록에서 RF_POWER_CH1 행을 고르고 [편집]을 누른다.", "asset": "890f9fac685d2b87746810599d9b6c773a4059794cea0002ab5c997555c30656", "width": 1280, "height": 720 },
+      { "text": "편집 창에서 [관리 한계] 탭을 연다.", "asset": "3cf0c684fbd8f467cfbc44032316787cb509b22adf521219ce1c276c1bc12a84", "width": 1280, "height": 720 },
+      { "text": "UCL(상한) 칸에 새 값(1560)을 넣는다.", "asset": "82c29137e80209c80025d78b413dd09b631a95ef8b4990d62c1250c189d54d1c", "width": 1280, "height": 720 },
+      { "text": "[저장]을 누른다. 저장 알림이 뜨면 새 데이터부터 적용된다.", "asset": "41d039bf2ba6a859cdf1ef7f1d9bca9c672f80aab0a23d664928ad0aa5e265f0", "width": 1280, "height": 720 }
+    ]
+  }
+}

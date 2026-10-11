@@ -24,6 +24,7 @@ import { registerProposalsRoutes } from "./routes/proposals.mjs";
 import { registerAuditRoutes } from "./routes/audit.mjs";
 import { registerMiscRoutes } from "./routes/misc.mjs";
 import { registerDashboardRoutes } from "./routes/dashboard.mjs";
+import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -149,6 +150,7 @@ export async function buildApp({
   registerDashboardRoutes(app);
   registerMiscRoutes(app);
   registerDocsRoutes(app);
+  registerAssetsRoutes(app);
   registerPromoteRoutes(app);
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
@@ -163,6 +165,13 @@ export async function buildApp({
   // to send fewer documents — measured, ~200 db-schema docs fit in 512 KiB.
   app.setErrorHandler((err, request, reply) => {
     if (err.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+      // The capture upload has its own, larger limit and nothing to split.
+      if (request.routeOptions?.url === "/api/assets")
+        return reply.code(413).send({
+          error: "payload_too_large",
+          limitBytes: ASSET_LIMIT,
+          message: "캡처는 2MB 까지 올릴 수 있습니다.",
+        });
       return reply.code(413).send({
         error: "payload_too_large",
         limitBytes: BODY_LIMIT,

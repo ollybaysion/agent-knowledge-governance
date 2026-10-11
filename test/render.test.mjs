@@ -1,5 +1,6 @@
-// Render/migrate round-trip tests using hand-authored inline fixtures. The one
-// file fixture is test/fixtures/domain-skill-golden-SKILL.md — the stamped
+// Render/migrate round-trip tests using hand-authored inline fixtures. The file
+// fixtures are test/fixtures/manual-golden.md (the example manual's md) and
+// test/fixtures/domain-skill-golden-SKILL.md — the stamped
 // SKILL.md of the example skill md, which pins the whole document against
 // accidental drift (json-spec §4.4). It used to be named for foundry and
 // described as a copy of foundry's golden output; foundry ships no renderer and
@@ -19,6 +20,7 @@ import { migrateDbSchemaMd } from "../src/migrate/db-schema.mjs";
 import { renderMsgFormatMd } from "../src/render/msg-format.mjs";
 import { migrateMsgFormatMd } from "../src/migrate/msg-format.mjs";
 import { renderDomainSkillMd, skillSummary } from "../src/render/domain-skill.mjs";
+import { renderManualMd } from "../src/render/manual.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "schemas"));
@@ -236,4 +238,18 @@ test("domain-skill: the description is the 한 줄 설명 paragraph, or the name
   assert.equal(skillSummary("# a\n\n## 데이터\n\n한 줄 설명 절이 없다.\n"), null);
   const doc = { body: { name: "no-summary", markdown: "# no-summary\n\n## 데이터\n" } };
   assert.match(renderDomainSkillMd(doc), /^---\nname: no-summary\ndisable-model-invocation: true\ndescription: >-\n  no-summary\n---\n/);
+});
+
+// Title, the screen from the rel:"screen" link, then one numbered line per
+// step ending in the capture's sha256 prefix.
+test("manual: the example renders byte-identically to the checked-in golden", () => {
+  const doc = JSON.parse(
+    readFileSync(
+      join(__dirname, "..", "examples", "manual", "spc-chart-limit-setup.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(validateDocument(doc, refs), []);
+  const expected = readFileSync(join(__dirname, "fixtures", "manual-golden.md"), "utf8");
+  assert.equal(renderManualMd(doc), expected);
 });

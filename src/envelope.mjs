@@ -19,6 +19,7 @@ const SCHEMA_FILES = {
   "domain-skill/v1": "domain-skill/v1.schema.json",
   "fab-line/v1": "fab-line/v1.schema.json",
   "screen-map/v1": "screen-map/v1.schema.json",
+  "manual/v1": "manual/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -106,6 +107,11 @@ export function deriveId(schema, body) {
       return null;
   }
 }
+
+// Types whose id is written into the envelope by the author rather than
+// derived — the body has no identifier-shaped field to derive it from (a
+// manual's title is prose). The envelope pattern is the only rule on the id.
+const AUTHORED_ID = new Set(["manual/v1"]);
 
 /** How deriveId got its answer, for error messages that name the source field. */
 const ID_SOURCE = {
@@ -207,6 +213,26 @@ const SEMANTIC_CHECKS = {
       }
     }
   },
+  // The screen a manual operates is its one rel:"screen" link, and a capture
+  // the asset store lacks would reach the consumer as a broken image — so both
+  // are activation conditions. Whether an asset exists is a store question:
+  // the server passes `assetExists`, an offline caller (push --dry-run) does
+  // not and skips that half.
+  "manual/v1"(doc, errors, { assetExists } = {}) {
+    const screens = (doc.links ?? []).filter((l) => l.rel === "screen");
+    if (screens.length !== 1)
+      fail(
+        errors,
+        `$.links: 매뉴얼은 rel "screen" 연결이 꼭 하나 있어야 합니다 (지금 ${screens.length}개)`,
+      );
+    else if (screens[0].type !== "screen-map")
+      fail(errors, `$.links: rel "screen" 은 screen-map 문서를 가리켜야 합니다 (지금 ${screens[0].type})`);
+    if (!assetExists) return;
+    doc.body.steps.forEach((step, i) => {
+      if (!assetExists(step.asset))
+        fail(errors, `$.body.steps[${i}].asset: 캡처가 저장소에 없습니다 — ${step.asset}`);
+    });
+  },
   // The body is the author's md verbatim (user decision 2026-09-21); what the
   // schema cannot see is only whether its `##` sections are ones the consumer
   // reads. Everything inside a section (items, fences, :vars) is the consumer's
@@ -272,10 +298,12 @@ function relaxedOf(schema) {
  * Validate a full document (envelope + body, or unclassified's flat meta).
  * @param {object} doc
  * @param {object} refs from loadSchemas()
- * @param {{draft?: boolean}} [opts] draft = relaxed body (inactive drafts, see relaxSchema)
+ * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean}} [opts]
+ *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists = the
+ *   store lookup the manual check needs (omitted offline)
  * @returns {string[]} empty when valid
  */
-export function validateDocument(doc, refs, { draft = false } = {}) {
+export function validateDocument(doc, refs, { draft = false, assetExists } = {}) {
   const errors = [];
   if (!doc || typeof doc !== "object" || typeof doc.schema !== "string") {
     return ['$: missing or invalid "schema" field'];
@@ -305,8 +333,9 @@ export function validateDocument(doc, refs, { draft = false } = {}) {
       // pass, but the id must still name the document — the store filename and
       // every later edit key off it. A body with no name has no id to save
       // under, so it is rejected here (the dashboard blocks 저장 for the same
-      // reason).
+      // reason). An authored id has nothing to be compared against.
       const want = deriveId(doc.schema, doc.body);
+      if (AUTHORED_ID.has(doc.schema)) return errors;
       if (want === null)
         fail(
           errors,
@@ -318,7 +347,7 @@ export function validateDocument(doc, refs, { draft = false } = {}) {
           `$.id: expected "${want}" (${ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body"}), got "${doc.id}"`,
         );
     } else {
-      SEMANTIC_CHECKS[doc.schema]?.(doc, errors);
+      SEMANTIC_CHECKS[doc.schema]?.(doc, errors, { assetExists });
     }
   }
   return errors;
@@ -328,8 +357,11 @@ export function validateDocument(doc, refs, { draft = false } = {}) {
 // draft (relaxed — build it up over time), an active one must be complete. This
 // single rule is shared by every write route, and the activate route relies on
 // it as the completeness gate — flipping a doc to active re-runs the full schema.
-export function validateForStore(doc, refs) {
-  return validateDocument(doc, refs, { draft: doc.status === "inactive" });
+export function validateForStore(doc, refs, { assetExists } = {}) {
+  return validateDocument(doc, refs, {
+    draft: doc.status === "inactive",
+    assetExists,
+  });
 }
 
 export function assertValidDocument(doc, refs, label = doc?.id ?? "document") {

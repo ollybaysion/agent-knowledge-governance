@@ -230,6 +230,31 @@ export function commitFiles(
   return rev;
 }
 
+// Captures live beside the documents, content-addressed: store/assets/<sha256>
+// holds the bytes, store/assets/<sha256>.json the metadata. Same git store, so
+// an upload shows in the same `git log` as the edits that use it.
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+export function isSha256(value) {
+  return typeof value === "string" && SHA256_RE.test(value);
+}
+
+/** Relative paths of one asset's two files. Throws on anything but a sha256 hex. */
+export function assetPaths(sha256) {
+  if (!isSha256(sha256))
+    throw new StoreError(`유효하지 않은 sha256: ${JSON.stringify(sha256)}`, 400);
+  return { bytes: `assets/${sha256}`, meta: `assets/${sha256}.json` };
+}
+
+export function hasAsset(dir, sha256) {
+  return isSha256(sha256) && existsSync(safeJoin(dir, assetPaths(sha256).bytes));
+}
+
+export function readAssetBytes(dir, sha256) {
+  const p = safeJoin(dir, assetPaths(sha256).bytes);
+  return existsSync(p) ? readFileSync(p) : null;
+}
+
 export function relPathOf(dir, absPath) {
   return relative(dir, absPath);
 }

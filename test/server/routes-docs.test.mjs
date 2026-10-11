@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
 import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { pngBytes } from "../fixtures/images.mjs";
 
 function freshHome() {
   return mkdtempSync(join(tmpdir(), "akg-docs-route-test-"));
@@ -559,6 +561,82 @@ test("PUT links: If-Match required and checked; sets, checks targets, and an emp
     });
     assert.equal(cleared.statusCode, 200, cleared.body);
     assert.equal("links" in cleared.json().json, false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("manual: a draft saves without screen or captures; activation needs one rel:screen link to a screen-map and every capture in the store", async () => {
+  const { app, home, cleanup } = await setup([
+    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+  ]);
+  const h = auth("aptok");
+  try {
+    const png = pngBytes(1280, 720);
+    const sha = createHash("sha256").update(png).digest("hex");
+    await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("spc-chart-config") });
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+
+    const draft = await app.inject({
+      method: "POST",
+      url: "/api/docs/manual",
+      headers: h,
+      payload: {
+        schema: "manual/v1",
+        id: "spc-chart-limit-setup",
+        keywords: [{ kw: "spc limit", inject: "pointer" }],
+        status: "inactive",
+        body: { title: "SPC 관리 한계 설정", steps: [{ text: "[설정]을 누른다.", asset: sha, width: 1280, height: 720 }] },
+      },
+    });
+    assert.equal(draft.statusCode, 201, draft.body);
+
+    const url = "/api/docs/manual/spc-chart-limit-setup";
+    const activate = async () => {
+      const { rev } = (await app.inject({ method: "GET", url })).json();
+      return app.inject({ method: "POST", url: `${url}/activate`, headers: { ...h, "if-match": rev } });
+    };
+    const setLinks = async (links) => {
+      const { rev } = (await app.inject({ method: "GET", url })).json();
+      const r = await app.inject({ method: "PUT", url: `${url}/links`, headers: { ...h, "if-match": rev }, payload: { links } });
+      assert.equal(r.statusCode, 200, r.body);
+    };
+
+    const noScreen = await activate();
+    assert.equal(noScreen.statusCode, 400);
+    assert.ok(noScreen.json().details.some((d) => d.includes('rel "screen"')));
+
+    await setLinks([link("db-schema", "x", "screen")]);
+    const wrongType = await activate();
+    assert.equal(wrongType.statusCode, 400);
+    assert.ok(wrongType.json().details.some((d) => d.includes("screen-map")));
+
+    await setLinks([link("screen-map", "spc-chart-config", "screen")]);
+    const noCapture = await activate();
+    assert.equal(noCapture.statusCode, 400);
+    assert.ok(noCapture.json().details.some((d) => d.includes("캡처가 저장소에 없습니다")));
+
+    const up = await app.inject({
+      method: "POST",
+      url: "/api/assets",
+      headers: { ...h, "content-type": "image/png" },
+      payload: png,
+    });
+    assert.equal(up.statusCode, 201, up.body);
+    const ok = await activate();
+    assert.equal(ok.statusCode, 200, ok.body);
+
+    const md = readFileSync(join(home, "store", "rendered", "manual", "docs", "spc-chart-limit-setup.md"), "utf8");
+    assert.equal(md, `# SPC 관리 한계 설정\n\n화면: spc-chart-config\n\n1. [설정]을 누른다. (${sha.slice(0, 8)})\n`);
+    const index = JSON.parse(readFileSync(join(home, "store", "rendered", "manual", "index.json"), "utf8"));
+    assert.deepEqual(index, [
+      { keywords: ["spc limit"], path: "docs/spc-chart-limit-setup.md", precision: 0.5, links: [link("screen-map", "spc-chart-config", "screen")] },
+    ]);
+
+    // An active manual keeps its screen: dropping the link is refused.
+    const { rev } = (await app.inject({ method: "GET", url })).json();
+    const drop = await app.inject({ method: "PUT", url: `${url}/links`, headers: { ...h, "if-match": rev }, payload: { links: [] } });
+    assert.equal(drop.statusCode, 400);
   } finally {
     await cleanup();
   }

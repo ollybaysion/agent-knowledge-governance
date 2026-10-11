@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manual/v1",
+  "title": "manual/v1 body",
+  "description": "A screen manual: the steps a person takes on one screen, each with a capture. The screen is not a body field but the envelope's one links[] entry with rel \"screen\" (a screen-map document); activation requires it. A capture is named by the sha256 of its bytes in the asset store (store/assets/<sha256>), and an active manual may only name captures that are there. The id is authored in the envelope — a title is prose, not an identifier.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "steps"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "What the manual achieves, as people would ask for it. Rendered as the md heading, so one line and no leading markdown block marker.",
+      "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "asset", "width", "height"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "One action, as one line.",
+            "pattern": "^[^\\n]*\\S[^\\n]*$"
+          },
+          "asset": {
+            "type": "string",
+            "description": "sha256 (lowercase hex) of the capture in the asset store.",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}
