@@ -497,3 +497,29 @@ test("domain-skill: both shipped examples validate — a main (role absent) and 
     assert.deepEqual(validateDocument(doc, refs), [], name);
   }
 });
+
+function vocDoc(markdown, extra = {}) {
+  return {
+    schema: "voc/v1",
+    id: "v",
+    keywords: [{ kw: "v", inject: "pointer" }],
+    status: "active",
+    ...extra,
+    body: { name: "v", markdown },
+  };
+}
+
+test("voc: free md — any ## section is fine, the id is body.name, the text must not be blank", () => {
+  assert.deepEqual(validateDocument(vocDoc("# v\n\n## 아무 절\n\n본문.\n"), refs), []);
+  assert.ok(validateDocument({ ...vocDoc("# v\n"), id: "w" }, refs).some((e) => e.includes('expected "v"')));
+  assert.ok(validateDocument(vocDoc("  \n"), refs).some((e) => e.includes("$.body.markdown")));
+});
+
+test("voc: role is not a voc key", () => {
+  assert.ok(validateDocument(vocDoc("# v\n", { role: "main" }), refs).some((e) => e.includes("role 은 domain-skill 에만")));
+});
+
+test("voc: the shipped example validates", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs), []);
+});

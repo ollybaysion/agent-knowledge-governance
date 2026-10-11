@@ -108,7 +108,8 @@ test("unclassified is accepted ahead of the server emitting it — no client rel
 
 // Regression: the server renders active manuals to rendered/manual/ (#55),
 // and a mirror that did not list the folder refused every bundle from then on.
-test("manual — a type the server renders — is accepted", async () => {
+// voc renders to rendered/voc/ the same way.
+test("manual and voc — types the server renders — are accepted", async () => {
   const { app, storeDir, cleanup } = await setupServer();
   commitFiles(storeDir, {
     author: "renoir",
@@ -116,6 +117,7 @@ test("manual — a type the server renders — is accepted", async () => {
     writes: [
       { relpath: "rendered/manual/docs/m.md", content: "# m\n" },
       { relpath: "rendered/manual/index.json", content: "[]\n" },
+      { relpath: "rendered/voc/v/VOC.md", content: "# v\n" },
     ],
   });
   const mirrorDir = join(mkdtempSync(join(tmpdir(), "akg-layout-mirror-")), "akg");
@@ -128,6 +130,7 @@ test("manual — a type the server renders — is accepted", async () => {
   });
   assert.equal(result.changed, true);
   assert.ok(existsSync(join(mirrorDir, "manual", "docs", "m.md")));
+  assert.ok(existsSync(join(mirrorDir, "voc", "v", "VOC.md")));
   await cleanup();
 });
 

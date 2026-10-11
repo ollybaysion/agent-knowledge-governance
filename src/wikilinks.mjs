@@ -60,7 +60,8 @@ export function parseWikilinks(texts) {
 /** The body texts a type's `[[ ]]` are read from. */
 export function wikiTexts(type, body) {
   // A malformed body yields no text; the schema reports it.
-  if (type === "domain-skill") return typeof body?.markdown === "string" ? [body.markdown] : [];
+  if (type === "domain-skill" || type === "voc")
+    return typeof body?.markdown === "string" ? [body.markdown] : [];
   if (type === "manual")
     return Array.isArray(body?.steps)
       ? body.steps.map((s) => s?.text).filter((t) => typeof t === "string")
