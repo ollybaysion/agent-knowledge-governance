@@ -5,7 +5,7 @@
 import { docMdPath, renderDocMd, rendersToMd } from "../src/render/index.mjs";
 import { commitFiles, listIds, readJson } from "./store.mjs";
 
-const INDEXED_TYPES = new Set(["db-schema", "msg-format"]);
+const INDEXED_TYPES = new Set(["db-schema", "msg-format", "manual"]);
 
 const stableJson = (obj) => JSON.stringify(obj, null, 2) + "\n";
 

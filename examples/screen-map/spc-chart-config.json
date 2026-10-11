@@ -1,0 +1,16 @@
+{
+  "schema": "screen-map/v1",
+  "id": "spc-chart-config",
+  "keywords": [{ "kw": "spc-chart-config", "inject": "pointer" }],
+  "status": "active",
+  "body": {
+    "id": "spc-chart-config",
+    "name": "차트 관리",
+    "program": "SPC Monitor",
+    "menuPath": ["설정", "차트 관리"],
+    "hints": [
+      "왼쪽에 차트(파라미터) 목록 표가 있고 행마다 [편집] 버튼이 있다",
+      "편집 창에 관리 한계 · 규격 한계 탭이 나뉘어 있다"
+    ]
+  }
+}

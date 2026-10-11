@@ -6,6 +6,7 @@
 import { renderDbSchemaMd } from "./db-schema.mjs";
 import { renderMsgFormatMd } from "./msg-format.mjs";
 import { renderDomainSkillMd } from "./domain-skill.mjs";
+import { renderManualMd } from "./manual.mjs";
 
 // domain-skill renders to rendered/domain-skill/<name>/SKILL.md (json-spec
 // §4.4) and is distributed via `akg sync --skills`, not the keyword-docs
@@ -14,6 +15,7 @@ import { renderDomainSkillMd } from "./domain-skill.mjs";
 const RENDERERS = {
   "db-schema/v1": renderDbSchemaMd,
   "msg-format/v1": renderMsgFormatMd,
+  "manual/v1": renderManualMd,
 };
 
 function rendererFor(type, doc) {

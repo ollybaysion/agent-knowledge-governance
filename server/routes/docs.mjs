@@ -9,6 +9,7 @@ import {
   listIds,
   commitFiles,
   isValidId,
+  hasAsset,
 } from "../store.mjs";
 import {
   persistDoc,
@@ -22,7 +23,13 @@ import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
 import { backlinksOf, missingLinkTargets, resolveLinks } from "../links.mjs";
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map"];
+const DOC_TYPES = [
+  "db-schema",
+  "msg-format",
+  "domain-skill",
+  "screen-map",
+  "manual",
+];
 
 function mdRelPath(type, doc) {
   if (type === "domain-skill")
@@ -54,6 +61,8 @@ function priorityOf(user) {
 
 export function registerDocsRoutes(app) {
   const { storeDir, refs, queue } = app.akg;
+  // What the validator needs from the store (a manual's captures).
+  const inStore = { assetExists: (sha256) => hasAsset(storeDir, sha256) };
 
   app.get(
     "/api/docs",
@@ -157,7 +166,7 @@ export function registerDocsRoutes(app) {
         throw err;
       }
       const doc = { ...submitted, body: resolvedBody };
-      const errors = validateForStore(doc, refs);
+      const errors = validateForStore(doc, refs, inStore);
       if (errors.length)
         return reply
           .code(400)
@@ -271,7 +280,7 @@ export function registerDocsRoutes(app) {
           }
 
           const newDoc = { ...currentDoc, body: mergedBody };
-          const errors = validateForStore(newDoc, refs);
+          const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
@@ -347,7 +356,7 @@ export function registerDocsRoutes(app) {
           throw err;
         }
         const doc = { ...raw, status: "inactive", body };
-        const errors = validateForStore(doc, refs);
+        const errors = validateForStore(doc, refs, inStore);
         if (errors.length) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
           continue;
@@ -446,7 +455,7 @@ export function registerDocsRoutes(app) {
                 status: "inactive",
                 body,
               };
-          const errors = validateForStore(doc, refs);
+          const errors = validateForStore(doc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
@@ -501,7 +510,7 @@ export function registerDocsRoutes(app) {
           const newDoc = links.length
             ? { ...head, links, body }
             : { ...head, body };
-          const errors = validateForStore(newDoc, refs);
+          const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
@@ -566,7 +575,7 @@ export function registerDocsRoutes(app) {
             ...doc,
             body: { ...doc.body, catalog: newCatalog, columnDescs },
           };
-          const errors = validateForStore(newDoc, refs);
+          const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
@@ -630,7 +639,7 @@ export function registerDocsRoutes(app) {
               };
 
             const newDoc = { ...doc, status: target };
-            const errors = validateForStore(newDoc, refs);
+            const errors = validateForStore(newDoc, refs, inStore);
             if (errors.length)
               return {
                 status: 400,
