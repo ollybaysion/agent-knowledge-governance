@@ -27,6 +27,14 @@
       </nav>
       <div id="meta">
         <span id="meta-store"></span>
+        <button
+          type="button"
+          id="layout-toggle"
+          aria-pressed="false"
+          title="3단: 목록 | 문서 | 연결. 화면 폭 1100px 미만에서는 2단으로 보입니다."
+        >
+          3단 보기
+        </button>
         <button type="button" id="theme-toggle">다크 모드</button>
       </div>
     </header>
@@ -54,6 +62,17 @@
 
     <div class="layout" hidden id="app-layout">
       <aside aria-label="문서 트리" class="sidebar">
+        <div id="doc-search">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="문서 찾기 — id · 키워드 · 제목"
+            aria-label="문서 찾기"
+            autocomplete="off"
+          />
+          <div id="search-chips" role="group" aria-label="타입으로 거르기"></div>
+        </div>
+        <div id="search-results" hidden></div>
         <div id="doc-tree"></div>
         <div id="tree-actions"></div>
       </aside>
@@ -195,6 +214,7 @@
         <!-- 감사 -->
         <section id="audit"></section>
       </main>
+      <aside aria-label="연결된 문서" id="doc-rail"></aside>
     </div>
 
     <div id="toast" role="status" aria-live="polite"></div>
