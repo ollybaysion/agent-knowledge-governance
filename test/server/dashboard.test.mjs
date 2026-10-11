@@ -35,7 +35,7 @@ test("GET / serves the dashboard shell, publicly, with a strict CSP header", asy
   await cleanup();
 });
 
-test("GET /app.js and /app.css are served publicly with the right content types", async () => {
+test("GET /app.js, /app.css and /search.mjs are served publicly with the right content types", async () => {
   const { app, cleanup } = await setup();
   const js = await app.inject({ method: "GET", url: "/app.js" });
   assert.equal(js.statusCode, 200);
@@ -44,6 +44,10 @@ test("GET /app.js and /app.css are served publicly with the right content types"
   const css = await app.inject({ method: "GET", url: "/app.css" });
   assert.equal(css.statusCode, 200);
   assert.match(css.headers["content-type"], /css/);
+
+  const search = await app.inject({ method: "GET", url: "/search.mjs" });
+  assert.equal(search.statusCode, 200);
+  assert.match(search.headers["content-type"], /javascript/);
   await cleanup();
 });
 

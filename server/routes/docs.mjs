@@ -55,6 +55,13 @@ function docMd(storeDir, type, doc) {
   }
 }
 
+// The name people know a document by, for the dashboard's search: a manual's
+// title, a screen's name, a skill's name, a table, a command.
+function titleOf(doc) {
+  const b = doc.body ?? {};
+  return b.title ?? b.name ?? b.table ?? b.command ?? null;
+}
+
 function priorityOf(user) {
   return user.role === "agent" ? "agent" : "human";
 }
@@ -87,6 +94,7 @@ export function registerDocsRoutes(app) {
             tiers,
             keywords: doc.keywords,
             links: doc.links ?? [],
+            title: titleOf(doc),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
           });
         }

@@ -19,6 +19,7 @@ const FILES = {
     path: "skill-sections.mjs",
     type: "text/javascript; charset=utf-8",
   },
+  "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
 };
 
 export function registerDashboardRoutes(app) {

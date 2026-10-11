@@ -421,6 +421,9 @@ test("links: forward edges land in the list, the index and the read; the target 
 
     const list = await app.inject({ method: "GET", url: "/api/docs?type=db-schema" });
     assert.deepEqual(list.json().docs[0].links, [link("screen-map", "spc-chart-config")]);
+    assert.equal(list.json().docs[0].title, "X");
+    const screens = await app.inject({ method: "GET", url: "/api/docs?type=screen-map" });
+    assert.equal(screens.json().docs[0].title, "화면 spc-chart-config");
 
     const index = JSON.parse(
       readFileSync(join(home, "store", "rendered", "db-schema", "index.json"), "utf8"),
