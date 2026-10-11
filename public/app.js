@@ -2019,7 +2019,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       return el("div", { class: "sk-sec" }, [
         head,
         sec.body.trim() === ""
-          ? el("p", { class: "dim", text: "비어 있습니다 — 비어 있는 절은 저장된 md 에 들어가지 않습니다." })
+          ? el("p", { class: "dim", text: "비어 있습니다" })
           : wikiText(el("pre", { class: "sk-md" }), sec.body, wikis),
       ]);
     });
