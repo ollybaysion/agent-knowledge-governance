@@ -11,6 +11,7 @@ const FILES = {
   "/": { path: "index.html", type: "text/html; charset=utf-8" },
   "/app.js": { path: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { path: "app.css", type: "text/css; charset=utf-8" },
+  "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
 };
 
 export function registerDashboardRoutes(app) {
