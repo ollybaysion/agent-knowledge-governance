@@ -1,6 +1,7 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
-import { validateForStore } from "../../src/envelope.mjs";
+import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
+import { skillDataIds } from "../../src/skill-data-ids.mjs";
 import {
   readJson,
   readText,
@@ -28,6 +29,7 @@ import {
   resolveLinks,
   resolveWikilinks,
 } from "../links.mjs";
+import { dataIdOwners } from "../data-ids.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -76,8 +78,19 @@ function priorityOf(user) {
 
 export function registerDocsRoutes(app) {
   const { storeDir, refs, queue } = app.akg;
-  // What the validator needs from the store (a manual's captures).
-  const inStore = { assetExists: (sha256) => hasAsset(storeDir, sha256) };
+  // What the validator needs from the store (a manual's captures, the data
+  // ids other skills hold).
+  const inStore = {
+    assetExists: (sha256) => hasAsset(storeDir, sha256),
+    dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
+  };
+  // Run inside the queue, like already_exists: the other side is in the store.
+  const dataIdConflict = (doc) => {
+    const conflicts = dataIdConflicts(doc, inStore.dataIdOwners);
+    return conflicts.length
+      ? { status: 409, body: { error: "data_id_conflict", conflicts } }
+      : null;
+  };
 
   app.get(
     "/api/docs",
@@ -204,6 +217,8 @@ export function registerDocsRoutes(app) {
         async () => {
           if (readJson(storeDir, relpath))
             return { status: 409, body: { error: "already_exists" } };
+          const conflict = dataIdConflict(doc);
+          if (conflict) return conflict;
           const rev = persistDoc(storeDir, type, doc, {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
@@ -316,6 +331,8 @@ export function registerDocsRoutes(app) {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
+          const conflict = dataIdConflict(newDoc);
+          if (conflict) return conflict;
 
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
@@ -423,6 +440,22 @@ export function registerDocsRoutes(app) {
               status: 409,
               body: { error: "already_exists", ids: existing },
             };
+          // Against the store and against the batch entries before it.
+          if (type === "domain-skill") {
+            const taken = inStore.dataIdOwners(null);
+            const conflicts = [];
+            for (const doc of docs) {
+              for (const c of dataIdConflicts(doc, () => taken))
+                conflicts.push({ ...c, source: doc.id });
+              for (const { id } of skillDataIds(doc.body.markdown))
+                if (!taken.has(id)) taken.set(id, doc.id);
+            }
+            if (conflicts.length)
+              return {
+                status: 409,
+                body: { error: "data_id_conflict", conflicts },
+              };
+          }
 
           // docWrites recompiles the index per document, so N documents mean N
           // writes to the same index path. Keyed by relpath, last wins — which
@@ -500,6 +533,8 @@ export function registerDocsRoutes(app) {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
+          const conflict = dataIdConflict(doc);
+          if (conflict) return conflict;
 
           const rev = persistDoc(storeDir, type, doc, {
             author: request.user.id,

@@ -11,6 +11,7 @@ import {
 } from "../store.mjs";
 import { docWrites } from "../render-store.mjs";
 import { applySlots, checkSlotValues } from "../proposal-apply.mjs";
+import { dataIdOwners } from "../data-ids.mjs";
 
 function priorityOf(user) {
   return user.role === "agent" ? "agent" : "human";
@@ -18,6 +19,7 @@ function priorityOf(user) {
 
 export function registerProposalsRoutes(app) {
   const { storeDir, refs, queue } = app.akg;
+  const owners = (selfId) => dataIdOwners(storeDir, selfId);
 
   app.post(
     "/api/proposals",
@@ -46,6 +48,7 @@ export function registerProposalsRoutes(app) {
         ? applySlots(currentDoc, slots, refs, {
             by: `adopt:${request.user.id}`,
             at: new Date().toISOString(),
+            dataIdOwners: owners,
           })
         : (() => {
             const bad = checkSlotValues(slots);
@@ -151,6 +154,7 @@ export function registerProposalsRoutes(app) {
           const applied = applySlots(currentDoc, slotsToApply, refs, {
             by: `adopt:${request.user.id}`,
             at: now,
+            dataIdOwners: owners,
           });
           if (!applied.ok)
             return { status: applied.status, body: applied.body };

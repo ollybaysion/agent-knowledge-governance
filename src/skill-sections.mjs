@@ -22,19 +22,21 @@ export const normalizeHeading = (title) =>
 export const isSkillSection = (title) => KEYS.has(normalizeHeading(title));
 
 /**
- * Each line with the `##` heading it opens (null otherwise). A `##` inside a
- * fenced code block (``` or ~~~) is text, not a heading.
+ * Each line with the `##` heading it opens (null otherwise), and whether it
+ * belongs to a fenced code block (``` or ~~~, the fence lines included). A
+ * `##` inside a fence is text, not a heading.
  */
-function scan(markdown) {
+export function scan(markdown) {
   const out = [];
   let fence = null;
   for (const line of String(markdown ?? "").split(/\r?\n/)) {
     const f = /^(`{3,}|~{3,})/.exec(line);
     let heading = null;
+    const fenced = fence !== null || f !== null;
     if (fence === null && f) fence = f[1];
     else if (fence !== null && line.trim().startsWith(fence)) fence = null;
     else if (fence === null) heading = /^##\s+(.*?)\s*#*\s*$/.exec(line)?.[1] ?? null;
-    out.push({ line, heading });
+    out.push({ line, heading, fenced });
   }
   return out;
 }

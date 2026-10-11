@@ -13,6 +13,7 @@ import {
   SKILL_SECTIONS,
   skillSections,
 } from "./skill-sections.mjs";
+import { skillDataIds } from "./skill-data-ids.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -166,6 +167,46 @@ function checkLinks(doc, errors) {
   });
 }
 
+const DATA_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/** A skill's data item ids: ascii identifiers, each once in the document. */
+function checkSkillDataIds(doc, errors) {
+  const markdown = doc.body?.markdown;
+  if (typeof markdown !== "string") return;
+  const lines = markdown.split(/\r?\n/);
+  const seen = new Set();
+  const repeated = new Set();
+  for (const { id, line } of skillDataIds(markdown)) {
+    if (!DATA_ID.test(id))
+      fail(
+        errors,
+        `$.body.markdown: 데이터 항목 id 는 ascii 식별자([A-Za-z][A-Za-z0-9_]*)여야 합니다 — "${lines[line - 1].trim()}"`,
+      );
+    else if (seen.has(id)) repeated.add(id);
+    else seen.add(id);
+  }
+  for (const id of repeated)
+    fail(errors, `$.body.markdown: 데이터 항목 id 가 겹칩니다 — ${id}`);
+}
+
+/**
+ * The data ids a skill shares with other stored skills — the consumer keeps
+ * the first and silently drops the rest, so a write must not create one.
+ * Kept apart from validateDocument's errors: a conflict is a 409 (the store
+ * has the other side), not a 400 about this document alone.
+ * @param {object} doc
+ * @param {(selfId: string) => Map<string, string>} [dataIdOwners] data id →
+ *   the stored skill that has it, `selfId` and archived ones left out
+ * @returns {{id: string, doc: string}[]}
+ */
+export function dataIdConflicts(doc, dataIdOwners) {
+  if (doc?.schema !== "domain-skill/v1" || !dataIdOwners) return [];
+  const ids = new Set(skillDataIds(doc.body?.markdown).map((d) => d.id));
+  if (ids.size === 0) return [];
+  const owners = dataIdOwners(doc.id);
+  return [...ids].filter((id) => owners.has(id)).map((id) => ({ id, doc: owners.get(id) }));
+}
+
 const SEMANTIC_CHECKS = {
   "db-schema/v1"(doc, errors) {
     const { catalog, columnDescs } = doc.body;
@@ -239,6 +280,7 @@ const SEMANTIC_CHECKS = {
   // text into a skill.
   "domain-skill/v1"(doc, errors) {
     checkDerivedId(doc, errors);
+    checkSkillDataIds(doc, errors);
     if (typeof doc.body?.markdown !== "string") return;
     const titles = skillSections(doc.body.markdown);
     // A sub is knowledge a main reads, so 도메인 지식 is the one section it
@@ -341,6 +383,8 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
       // under, so it is rejected here (the dashboard blocks 저장 for the same
       // reason). An authored id has nothing to be compared against.
       const want = deriveId(doc.schema, doc.body);
+      // A data id is a key the moment the skill exists, draft or not.
+      if (doc.schema === "domain-skill/v1") checkSkillDataIds(doc, errors);
       if (AUTHORED_ID.has(doc.schema)) return errors;
       if (want === null)
         fail(

@@ -4,11 +4,17 @@
 // direct coverage independent of those fixtures.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadSchemas, validateDocument } from "../src/envelope.mjs";
+import {
+  dataIdConflicts,
+  loadSchemas,
+  validateDocument,
+  validateForStore,
+} from "../src/envelope.mjs";
+import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { validate } from "../src/validate.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -260,9 +266,56 @@ test("domain-skill semantic: a trailing ? or : on a section title is noise, and 
   assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: md }), refs), []);
 });
 
-test("domain-skill semantic: deeper headings (###, ####) are the author's — only `##` is judged", () => {
-  const md = SKILL_MD() + "\n### 아무 이름 — 제목\n\n#### 더 깊은 것\n\n산문.\n";
+test("domain-skill semantic: outside ## 데이터, deeper headings (###, ####) are the author's", () => {
+  const md = SKILL_MD().replace("## 데이터", "### 아무 이름 — 제목\n\n#### 더 깊은 것\n\n산문.\n\n## 데이터");
   assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: md }), refs), []);
+});
+
+test("domain-skill data ids: an id that is not an ascii identifier is rejected, naming the line — active and draft alike", () => {
+  const md = SKILL_MD().replace("### row — 상태 행", "### 상태 행 — 행");
+  for (const status of ["active", "inactive"]) {
+    const errors = validateForStore({ ...skillDoc({ name: "x", markdown: md }), status }, refs);
+    assert.deepEqual(errors, [
+      '$.body.markdown: 데이터 항목 id 는 ascii 식별자([A-Za-z][A-Za-z0-9_]*)여야 합니다 — "### 상태 행 — 행"',
+    ], status);
+  }
+  const digit = SKILL_MD().replace("### row — 상태 행", "### 1row — 행");
+  assert.equal(validateDocument(skillDoc({ name: "x", markdown: digit }), refs).length, 1);
+});
+
+test("domain-skill data ids: the same id twice in one document is rejected — active and draft alike", () => {
+  const md = SKILL_MD().replace("### row — 상태 행", "### id - 다시");
+  for (const status of ["active", "inactive"])
+    assert.deepEqual(
+      validateForStore({ ...skillDoc({ name: "x", markdown: md }), status }, refs),
+      ["$.body.markdown: 데이터 항목 id 가 겹칩니다 — id"],
+      status,
+    );
+});
+
+test("dataIdConflicts: the ids another skill holds, by the lookup the store gives (self left out by it)", () => {
+  const asked = [];
+  const owners = (selfId) => {
+    asked.push(selfId);
+    return new Map([["row", "other-skill"], ["zzz", "third"]]);
+  };
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners), [{ id: "row", doc: "other-skill" }]);
+  assert.deepEqual(asked, ["x"]);
+  assert.deepEqual(dataIdConflicts(skillDoc(), undefined), []);
+  assert.deepEqual(dataIdConflicts(minimalDbSchemaDoc(), owners), []);
+});
+
+test("domain-skill: the shipped examples share no data id", () => {
+  const dir = join(__dirname, "..", "examples", "domain-skill");
+  const owners = new Map();
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
+    const doc = JSON.parse(readFileSync(join(dir, file), "utf8"));
+    for (const { id } of skillDataIds(doc.body.markdown)) {
+      assert.ok(!owners.has(id), `${id}: ${owners.get(id)} · ${doc.id}`);
+      owners.set(id, doc.id);
+    }
+  }
+  assert.ok(owners.size > 0);
 });
 
 test("whitespace-only strings are rejected by the \\S pattern", () => {
