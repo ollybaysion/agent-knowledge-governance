@@ -20,6 +20,13 @@ const FILES = {
     type: "text/javascript; charset=utf-8",
   },
   "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
+  // The server's own [[ ]] parser, so the page reads the brackets the way the
+  // links were made. Served from src/ rather than copied into public/.
+  "/wikilinks.mjs": {
+    dir: SRC_DIR,
+    path: "wikilinks.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
 };
 
 export function registerDashboardRoutes(app) {

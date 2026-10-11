@@ -63,6 +63,15 @@ test("GET /skill-sections.mjs serves the validator's own splitter, byte for byte
   await cleanup();
 });
 
+test("GET /wikilinks.mjs serves the server's own [[ ]] parser, byte for byte, publicly", async () => {
+  const { app, cleanup } = await setup();
+  const res = await app.inject({ method: "GET", url: "/wikilinks.mjs" });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /javascript/);
+  assert.equal(res.body, readFileSync(new URL("../../src/wikilinks.mjs", import.meta.url), "utf8"));
+  await cleanup();
+});
+
 test("GET /api/me echoes id/role without leaking tokenHash", async () => {
   const { app, cleanup } = await setup();
   // Without a token this now answers as the anonymous viewer — that response is

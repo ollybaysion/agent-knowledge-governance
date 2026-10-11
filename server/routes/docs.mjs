@@ -21,7 +21,13 @@ import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
-import { backlinksOf, missingLinkTargets, resolveLinks } from "../links.mjs";
+import {
+  backlinksOf,
+  mergeBodyLinks,
+  missingLinkTargets,
+  resolveLinks,
+  resolveWikilinks,
+} from "../links.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -136,6 +142,7 @@ export function registerDocsRoutes(app) {
         slots,
         links: resolveLinks(storeDir, doc.links),
         backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
+        wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
       };
     },
   );
@@ -173,7 +180,12 @@ export function registerDocsRoutes(app) {
             .send({ error: "edit_rejected", message: err.message });
         throw err;
       }
-      const doc = { ...submitted, body: resolvedBody };
+      const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+        ...submitted,
+        body: resolvedBody,
+      });
+      if (merged.error) return reply.code(400).send(merged.error);
+      const doc = merged.doc;
       const errors = validateForStore(doc, refs, inStore);
       if (errors.length)
         return reply
@@ -287,7 +299,13 @@ export function registerDocsRoutes(app) {
             }
           }
 
-          const newDoc = { ...currentDoc, body: mergedBody };
+          // [[ ]] the edit added or dropped move links[] with it.
+          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, currentDoc, {
+            ...currentDoc,
+            body: mergedBody,
+          });
+          if (merged.error) return { status: 400, body: merged.error };
+          const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
@@ -363,7 +381,16 @@ export function registerDocsRoutes(app) {
           }
           throw err;
         }
-        const doc = { ...raw, status: "inactive", body };
+        const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+          ...raw,
+          status: "inactive",
+          body,
+        });
+        if (merged.error) {
+          rejected.push({ ...at, ...merged.error });
+          continue;
+        }
+        const doc = merged.doc;
         const errors = validateForStore(doc, refs, inStore);
         if (errors.length) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
@@ -513,18 +540,18 @@ export function registerDocsRoutes(app) {
               body: { error: "unknown_base_rev", currentRev, current: doc },
             };
 
-          // links sits before body, the order json-spec §2 lists the keys in.
-          const { links: _old, body, ...head } = doc;
-          const newDoc = links.length
-            ? { ...head, links, body }
-            : { ...head, body };
+          // The body's [[ ]] stay linked whatever the list says: they are
+          // removed by editing the body, not here.
+          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, doc, doc, links);
+          if (merged.error) return { status: 400, body: merged.error };
+          const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
-          const missing = missingLinkTargets(storeDir, links);
+          const missing = missingLinkTargets(storeDir, newDoc.links);
           if (missing.length)
             return {
               status: 400,
