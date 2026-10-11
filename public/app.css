@@ -2914,3 +2914,103 @@ textarea.df-inp {
   margin: 0;
   padding-left: 20px;
 }
+
+/* 문서 찾기 — 사이드바 위 입력 한 칸 + 타입 칩, 결과는 트리 자리에 타입별 묶음 */
+#doc-search {
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+}
+#search-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+#search-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+#search-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+button.search-chip {
+  font: inherit;
+  font-size: 10.5px;
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+  color: var(--muted);
+}
+button.search-chip.on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.search-title {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#search-results .doc-item {
+  flex-wrap: wrap;
+}
+.search-empty {
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* 2단 · 3단 — 3단이면 문서 화면 오른쪽에 연결 단. 1100px 미만은 늘 2단. */
+#layout-toggle {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 1px 10px;
+  cursor: pointer;
+  margin-right: 6px;
+}
+#layout-toggle:hover,
+#layout-toggle[aria-pressed="true"] {
+  color: var(--body-strong);
+}
+.layout > aside#doc-rail {
+  display: none;
+  width: 280px;
+  border-right: 0;
+  border-left: 1px solid var(--hairline);
+  padding: 14px 14px 20px;
+}
+.layout.three.on-doc > aside#doc-rail {
+  display: block;
+}
+#doc-rail .links-col {
+  margin-top: 16px;
+}
+.rail-sum {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.rail-title {
+  margin: 2px 0 4px;
+  font-size: 15px;
+  color: var(--ink);
+  word-break: break-word;
+}
+@media (max-width: 1099px) {
+  .layout.three.on-doc > aside#doc-rail,
+  #layout-toggle {
+    display: none;
+  }
+}

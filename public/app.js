@@ -343,6 +343,8 @@ function consumeUrlToken() {
 function go(screen) {
   for (const s of document.querySelectorAll("main > section"))
     s.classList.toggle("on", s.id === screen);
+  // The 3단 rail belongs to the document screen only.
+  $("app-layout").classList.toggle("on-doc", screen === "doc");
   for (const b of document.querySelectorAll("nav button"))
     b.classList.toggle("on", b.dataset.go === screen);
   window.scrollTo(0, 0);
@@ -392,6 +394,7 @@ async function renderDocTree() {
   const tree = $("doc-tree");
   tree.replaceChildren();
   let pendingTotal = 0;
+  const pool = [];
   for (const type of DOC_TYPES) {
     const res = await api(`/api/docs?type=${type}`);
     // Inactive documents belong in the tree: they are readable by design and
@@ -400,6 +403,7 @@ async function renderDocTree() {
     const docs = (res.ok ? res.data.docs : []).filter(
       (d) => d.status !== "archived",
     );
+    pool.push(...docs.map((d) => ({ ...d, type })));
     // Local drafts (started but not saved) show in the tree immediately —
     // titled "(빈 문서)", "(빈 문서2)"… as they pile up — so every just-added
     // document is visible before it ever reaches the server. Named ones show
@@ -489,10 +493,13 @@ async function renderDocTree() {
     ]);
     tree.appendChild(grp);
   }
+  searchPool = pool;
   highlightTree();
+  runSearch();
   return pendingTotal;
 }
 function highlightTree() {
+  highlightResults();
   const draftHash = location.hash.match(/^#\/draft\/[\w-]+\/([\w-]+)/);
   for (const b of $("doc-tree").querySelectorAll(".doc-item")) {
     if (b.classList.contains("draft-item")) {
@@ -507,6 +514,148 @@ function highlightTree() {
       lastDoc && b.dataset.type === lastDoc.type && b.dataset.id === lastDoc.id,
     );
   }
+}
+
+// ---------- 문서 찾기 (사람용, 브라우저에서 거름) ----------
+// The tree's own list envelopes are the corpus: no request per keystroke.
+// While a query or a type chip is set, results replace the tree.
+let searchPool = [];
+const searchState = { q: "", types: new Set() };
+const searchLib = import("/search.mjs").catch(() => null);
+
+function renderSearchChips() {
+  $("search-chips").replaceChildren(
+    ...DOC_TYPES.map((t) =>
+      el("button", {
+        type: "button",
+        class: `chip search-chip${searchState.types.has(t) ? " on" : ""}`,
+        "aria-pressed": searchState.types.has(t) ? "true" : "false",
+        text: TYPE_LABEL[t],
+        onclick: () => {
+          if (searchState.types.has(t)) searchState.types.delete(t);
+          else searchState.types.add(t);
+          renderSearchChips();
+          runSearch();
+        },
+      }),
+    ),
+  );
+}
+
+async function runSearch() {
+  const lib = await searchLib;
+  const out = $("search-results");
+  const active = searchState.q.trim() !== "" || searchState.types.size > 0;
+  $("doc-tree").hidden = active;
+  out.hidden = !active;
+  if (!active) return;
+  if (!lib) {
+    out.replaceChildren(el("p", { class: "dim search-empty", text: "검색을 불러오지 못했습니다." }));
+    return;
+  }
+  const groups = lib.searchDocs(searchPool, {
+    q: searchState.q,
+    types: [...searchState.types],
+    order: DOC_TYPES,
+  });
+  out.replaceChildren(
+    ...(groups.length
+      ? groups.map((g) =>
+          el("div", { class: "grp" }, [
+            el("div", { class: "grp-h" }, [` ${TYPE_LABEL[g.type]} `, el("span", { class: "cnt", text: String(g.docs.length) })]),
+            el(
+              "div",
+              { class: "grp-items" },
+              g.docs.map((d) =>
+                el(
+                  "button",
+                  {
+                    type: "button",
+                    class: d.status === "inactive" ? "doc-item off" : "doc-item",
+                    "data-type": g.type,
+                    "data-id": d.id,
+                    onclick: () => (location.hash = `#/doc/${g.type}/${encodeURIComponent(d.id)}`),
+                  },
+                  [
+                    el("span", { class: "nm", text: d.id }),
+                    d.title && d.title.toLowerCase() !== d.id
+                      ? el("span", { class: "search-title", text: d.title })
+                      : null,
+                  ],
+                ),
+              ),
+            ),
+          ]),
+        )
+      : [el("p", { class: "dim search-empty", text: "찾는 문서가 없습니다." })]),
+  );
+  highlightResults();
+}
+function highlightResults() {
+  for (const b of $("search-results").querySelectorAll(".doc-item"))
+    b.classList.toggle("on", !!lastDoc && b.dataset.type === lastDoc.type && b.dataset.id === lastDoc.id);
+}
+$("search-input").addEventListener("input", (e) => {
+  searchState.q = e.currentTarget.value;
+  runSearch();
+});
+$("search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.currentTarget.value) {
+    e.currentTarget.value = "";
+    searchState.q = "";
+    runSearch();
+  }
+});
+
+// ---------- 2단 · 3단 보기 ----------
+// 2단 = 목록 | 문서, 3단 = 목록 | 문서 | 연결. The choice is per browser;
+// below 1100px the third column is not drawn (CSS), whatever the choice.
+const LAYOUT_KEY = "akg_layout";
+function applyLayout(layout) {
+  const three = layout === "3";
+  $("app-layout").classList.toggle("three", three);
+  $("layout-toggle").setAttribute("aria-pressed", String(three));
+  $("layout-toggle").textContent = three ? "2단 보기" : "3단 보기";
+}
+function savedLayout() {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "3" ? "3" : "2";
+  } catch {
+    return "2";
+  }
+}
+$("layout-toggle").addEventListener("click", () => {
+  const next = $("app-layout").classList.contains("three") ? "2" : "3";
+  try {
+    localStorage.setItem(LAYOUT_KEY, next);
+  } catch {
+    /* private mode: the choice lasts this page only */
+  }
+  applyLayout(next);
+});
+
+// The third column: what the open document is, and what it is connected to.
+// Following a link changes the middle column; this one follows because the
+// document screen redraws it.
+function renderRail(type, id, data) {
+  const rail = $("doc-rail");
+  if (!data) {
+    rail.replaceChildren();
+    return;
+  }
+  const doc = data.json;
+  const b = doc.body || {};
+  const title = b.title ?? b.name ?? b.table ?? b.command ?? id;
+  rail.replaceChildren(
+    el("div", { class: "rail-sum" }, [
+      el("p", { class: "sk-eyebrow", text: TYPE_LABEL[type] ?? type }),
+      el("h2", { class: "rail-title", text: title }),
+      title.toLowerCase() !== id ? el("p", { class: "mono dim", text: id }) : null,
+      el("div", { class: "chiprow" }, [statusBadge(doc.status), ...keywordChips(doc.keywords || [])]),
+    ]),
+    linkList("이 문서가 가리키는 문서", data.links || []),
+    linkList("이 문서를 가리키는 문서", data.backlinks || []),
+  );
 }
 
 // ================= 개요 =================
@@ -682,6 +831,7 @@ async function renderDocScreen(type, id) {
   section.replaceChildren(el("p", { class: "loading", text: "불러오는 중…" }));
   const res = await api(`/api/docs/${type}/${encodeURIComponent(id)}`);
   if (!res.ok) {
+    renderRail(type, id, null);
     section.replaceChildren(
       el("p", {
         class: "error",
@@ -692,6 +842,7 @@ async function renderDocScreen(type, id) {
   }
   lastDoc = { type, id };
   highlightTree();
+  renderRail(type, id, res.data);
   editingAddr = null;
   // doc/rev are reassigned in place after a clean save so the screen can
   // repaint optimistically instead of re-fetching the whole document.
@@ -2185,6 +2336,25 @@ const BODY_VIEWS = {
 };
 
 // ================= 연결 (envelope links[]) =================
+function linkItem(link) {
+  return el("li", { class: "link-item" }, [
+    el("span", { class: "chip", text: link.rel }),
+    el("a", {
+      href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
+      text: `${link.type}/${link.id}`,
+    }),
+    link.status && link.status !== "active" ? statusBadge(link.status) : null,
+  ]);
+}
+function linkList(title, links) {
+  return el("div", { class: "links-col" }, [
+    el("h3", { text: title }),
+    links.length
+      ? el("ul", { class: "links-list" }, links.map(linkItem))
+      : el("p", { class: "dim", text: "없음" }),
+  ]);
+}
+
 // What this doc points at (stored) and what points at it (computed by the
 // server on read). Built once per document screen so an open editor survives
 // the slot repaints around it; getRev reads the screen's current rev.
@@ -2201,24 +2371,6 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     return targetsOf.get(t);
   }
 
-  function item(link) {
-    return el("li", { class: "link-item" }, [
-      el("span", { class: "chip", text: link.rel }),
-      el("a", {
-        href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
-        text: `${link.type}/${link.id}`,
-      }),
-      link.status && link.status !== "active" ? statusBadge(link.status) : null,
-    ]);
-  }
-  function list(title, links) {
-    return el("div", { class: "links-col" }, [
-      el("h3", { text: title }),
-      links.length
-        ? el("ul", { class: "links-list" }, links.map(item))
-        : el("p", { class: "dim", text: "없음" }),
-    ]);
-  }
 
   function read() {
     const h = el("h2", { class: "sk-h" }, ["연결"]);
@@ -2229,8 +2381,8 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     wrap.replaceChildren(
       h,
       el("div", { class: "links-cols" }, [
-        list("이 문서가 가리키는 문서", data.links || []),
-        list("이 문서를 가리키는 문서", data.backlinks || []),
+        linkList("이 문서가 가리키는 문서", data.links || []),
+        linkList("이 문서를 가리키는 문서", data.backlinks || []),
       ]),
     );
   }
@@ -3231,6 +3383,8 @@ function enterApp() {
 }
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
+  applyLayout(savedLayout());
+  renderSearchChips();
   const token = consumeUrlToken() || getToken();
   // With a token, log in as that user. Without one, try anonymous first — the
   // login screen is now an opt-in action, not the front gate. It only appears
