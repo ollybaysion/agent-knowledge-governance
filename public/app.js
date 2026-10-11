@@ -1747,65 +1747,44 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   ]);
 
   // ── 문서 ──────────────────────────────────────────────────────────────
-  // Read: the md as written, in a <pre> (the dashboard does not render md — the
-  // consumer does, and what it reads is exactly this text). Edit: one textarea
-  // per `##` section, or the whole md in one; either way 저장 = one PUT of
-  // { name, markdown }, so the stored document is one md as before.
+  // Read: one block per `##` section (heading + its text as written — the
+  // dashboard does not render md, the consumer does). Each block has its own
+  // 편집, which turns that block alone into a textarea; 전체 md 편집 opens the
+  // whole text. A md the section splitter refuses is read and edited whole.
+  // Every save is one PUT of { name, markdown }, so the stored document is one
+  // md as before.
   const docHolder = el("div", { class: "sk-doc" });
-  function read() {
-    const h = el("h2", { class: "sk-h" }, ["문서"]);
-    if (canEdit)
-      h.appendChild(
-        el("button", { type: "button", class: "btn ghost sm add-btn", onclick: () => edit(), text: "편집" }),
-      );
-    docHolder.replaceChildren(
-      h,
-      (s.markdown || "").trim() === ""
-        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
-        : el("pre", { class: "sk-md", text: s.markdown }),
-      el("p", {
-        class: "dim",
-        text: "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.",
-      }),
-    );
-  }
+  const HINT =
+    "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.";
 
-  // Opens the section editor when the md splits cleanly, the whole-md editor
-  // otherwise (with the reason). `text` carries an unsaved edit across a switch.
-  async function edit(mode = "sections", text = s.markdown || "") {
+  async function read() {
     const lib = await skillSectionsLib;
-    if (mode === "sections" && lib) {
-      try {
-        return editSections(lib, lib.splitSkill(text), text);
-      } catch (e) {
-        if (!(e instanceof lib.SkillSplitError)) throw e;
-        return editWhole(lib, text, `절 단위로 나눌 수 없어 전체 md 로 엽니다 — ${e.message}`);
-      }
+    if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
+    try {
+      readSections(lib, lib.splitSkill(s.markdown || ""), null);
+    } catch (e) {
+      if (!(e instanceof lib.SkillSplitError)) throw e;
+      readWhole(`절 단위로 나눌 수 없어 전체 md 로 보입니다 — ${e.message}`);
     }
-    return editWhole(lib, text, lib ? null : "절 편집기를 불러오지 못해 전체 md 로 엽니다.");
   }
 
-  // The parts both editors share: 저장 · 취소 · mode switch, esc / ⌘↵.
-  function editCard(title, body, { current, switchLabel, onSwitch }) {
+  // An inline editor: 저장 · 취소 · esc · ⌘↵. `value()` is the md to save.
+  function editor(input, { dirty, value }) {
     const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
-    const dirty = () => current() !== (s.markdown || "");
     const refresh = () => {
       save.disabled = !dirty();
       save.title = dirty() ? "" : "변경 없음";
     };
     save.addEventListener("click", async () => {
       save.disabled = true;
-      const ok = await commit({ ...s, markdown: current() });
+      const ok = await commit({ ...s, markdown: value() });
       if (!ok) save.disabled = false;
     });
     const card = el("div", { class: "slot-edit" }, [
-      ...body,
+      input,
       el("div", { class: "editacts" }, [
         save,
         el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
-        onSwitch
-          ? el("button", { type: "button", class: "btn ghost sm", onclick: onSwitch, text: switchLabel })
-          : null,
         el("span", { class: "kbd" }, [
           el("b", { text: "esc" }),
           " 취소 · ",
@@ -1814,7 +1793,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         ]),
       ]),
     ]);
-    card.addEventListener("input", refresh);
+    input.addEventListener("input", refresh);
     card.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1825,71 +1804,84 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         if (!save.disabled) save.click();
       }
     });
-    docHolder.replaceChildren(el("h2", { class: "sk-h" }, [title]), card);
     refresh();
     return card;
   }
 
-  // `# 이름` stays read-only on top; each section is its own textarea under a
-  // fixed heading. An emptied section drops out of the saved md.
-  function editSections(lib, split, original) {
+  const editBtn = (label, onclick, disabled) =>
+    canEdit
+      ? el("button", { type: "button", class: "btn ghost sm add-btn", text: label, disabled, onclick })
+      : null;
+
+  // `editing` = the key of the one section open in a textarea, or null. While
+  // one is open every other 편집 is off — one edit at a time.
+  function readSections(lib, split, editing) {
     const name = split.title ?? s.name;
-    const areas = split.sections.map((sec) => {
-      const ta = el("textarea", {
-        class: "fld mono sk-sec-edit",
-        spellcheck: "false",
-        rows: Math.min(24, Math.max(3, sec.body.split("\n").length + 1)),
-        "aria-label": `## ${sec.heading}`,
-      });
-      ta.value = sec.body;
-      return { sec, ta };
+    const blocks = split.sections.map((sec) => {
+      const head = el("div", { class: "sk-sec-head" }, [
+        el("h3", { class: "sk-sec-h mono", text: `## ${sec.heading}` }),
+        editing === sec.key
+          ? null
+          : editBtn("편집", () => readSections(lib, split, sec.key), editing !== null),
+      ]);
+      if (editing === sec.key) {
+        const ta = el("textarea", {
+          class: "fld mono sk-sec-edit",
+          spellcheck: "false",
+          rows: Math.min(24, Math.max(3, sec.body.split("\n").length + 1)),
+          "aria-label": `## ${sec.heading}`,
+        });
+        ta.value = sec.body;
+        queueMicrotask(() => ta.focus());
+        return el("div", { class: "sk-sec editing" }, [
+          head,
+          editor(ta, {
+            dirty: () => ta.value !== sec.body,
+            // Unchanged gives back the md as it was (any section order).
+            value: () =>
+              ta.value === sec.body
+                ? s.markdown || ""
+                : lib.joinSkill(
+                    name,
+                    split.sections.map((x) => (x.key === sec.key ? { ...x, body: ta.value } : x)),
+                  ),
+          }),
+        ]);
+      }
+      return el("div", { class: "sk-sec" }, [
+        head,
+        sec.body.trim() === ""
+          ? el("p", { class: "dim", text: "비어 있습니다 — 비어 있는 절은 저장된 md 에 들어가지 않습니다." })
+          : el("pre", { class: "sk-md", text: sec.body }),
+      ]);
     });
-    // Unchanged textareas give back the md as it was, even when its section
-    // order is not the standard one — so opening and saving is never a change.
-    const current = () =>
-      areas.every(({ sec, ta }) => ta.value === sec.body)
-        ? original
-        : lib.joinSkill(name, areas.map(({ sec, ta }) => ({ ...sec, body: ta.value })));
-    const card = editCard(
-      "문서 편집 · 절 단위",
-      [
-        el("p", { class: "sk-sec-title mono", text: `# ${name}` }),
-        ...areas.flatMap(({ sec, ta }) => [
-          el("h3", { class: "sk-sec-h mono", text: `## ${sec.heading}` }),
-          ta,
-        ]),
-      ],
-      { current, switchLabel: "전체 md 로", onSwitch: () => edit("whole", current()) },
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서", editBtn("전체 md 편집", editWhole, editing !== null)]),
+      el("p", { class: "sk-sec-title mono", text: `# ${name}` }),
+      ...blocks,
+      el("p", { class: "dim", text: HINT }),
     );
-    areas[0].ta.focus();
-    return card;
   }
 
-  function editWhole(lib, text, note) {
+  function readWhole(note) {
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서", editBtn("편집", editWhole, false)]),
+      note ? el("p", { class: "dim", text: note }) : null,
+      (s.markdown || "").trim() === ""
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
+        : el("pre", { class: "sk-md", text: s.markdown }),
+      el("p", { class: "dim", text: HINT }),
+    );
+  }
+
+  function editWhole() {
     const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
-    input.value = text;
-    const card = editCard(
-      "문서 편집 · 전체 md",
-      [note ? el("p", { class: "dim", text: note }) : null, input],
-      {
-        current: () => input.value,
-        switchLabel: "절 단위로",
-        onSwitch: lib ? () => switchToSections(lib, input.value) : null,
-      },
+    input.value = s.markdown || "";
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서 편집 · 전체 md"]),
+      editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value }),
     );
     input.focus();
-    return card;
-  }
-
-  function switchToSections(lib, text) {
-    try {
-      lib.splitSkill(text);
-    } catch (e) {
-      if (!(e instanceof lib.SkillSplitError)) throw e;
-      toast(`절 단위로 나눌 수 없습니다 — ${e.message}`, "error");
-      return;
-    }
-    edit("sections", text);
   }
   read();
   wrap.appendChild(docHolder);
