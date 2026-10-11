@@ -518,34 +518,15 @@ function highlightTree() {
 
 // ---------- 문서 찾기 (사람용, 브라우저에서 거름) ----------
 // The tree's own list envelopes are the corpus: no request per keystroke.
-// While a query or a type chip is set, results replace the tree.
+// While there is a query, results replace the tree, grouped by type.
 let searchPool = [];
-const searchState = { q: "", types: new Set() };
+const searchState = { q: "" };
 const searchLib = import("/search.mjs").catch(() => null);
-
-function renderSearchChips() {
-  $("search-chips").replaceChildren(
-    ...DOC_TYPES.map((t) =>
-      el("button", {
-        type: "button",
-        class: `chip search-chip${searchState.types.has(t) ? " on" : ""}`,
-        "aria-pressed": searchState.types.has(t) ? "true" : "false",
-        text: TYPE_LABEL[t],
-        onclick: () => {
-          if (searchState.types.has(t)) searchState.types.delete(t);
-          else searchState.types.add(t);
-          renderSearchChips();
-          runSearch();
-        },
-      }),
-    ),
-  );
-}
 
 async function runSearch() {
   const lib = await searchLib;
   const out = $("search-results");
-  const active = searchState.q.trim() !== "" || searchState.types.size > 0;
+  const active = searchState.q.trim() !== "";
   $("doc-tree").hidden = active;
   out.hidden = !active;
   if (!active) return;
@@ -553,11 +534,7 @@ async function runSearch() {
     out.replaceChildren(el("p", { class: "dim search-empty", text: "검색을 불러오지 못했습니다." }));
     return;
   }
-  const groups = lib.searchDocs(searchPool, {
-    q: searchState.q,
-    types: [...searchState.types],
-    order: DOC_TYPES,
-  });
+  const groups = lib.searchDocs(searchPool, { q: searchState.q, order: DOC_TYPES });
   out.replaceChildren(
     ...(groups.length
       ? groups.map((g) =>
@@ -3384,7 +3361,6 @@ function enterApp() {
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   applyLayout(savedLayout());
-  renderSearchChips();
   const token = consumeUrlToken() || getToken();
   // With a token, log in as that user. Without one, try anonymous first — the
   // login screen is now an opt-in action, not the front gate. It only appears

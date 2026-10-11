@@ -2915,7 +2915,7 @@ textarea.df-inp {
   padding-left: 20px;
 }
 
-/* 문서 찾기 — 사이드바 위 입력 한 칸 + 타입 칩, 결과는 트리 자리에 타입별 묶음 */
+/* 문서 찾기 — 사이드바 위 입력 한 칸, 결과는 트리 자리에 타입별 묶음 */
 #doc-search {
   padding: 6px 4px 8px;
   border-bottom: 1px solid var(--hairline);
@@ -2935,23 +2935,6 @@ textarea.df-inp {
   outline: 2px solid var(--primary);
   outline-offset: 0;
   border-color: transparent;
-}
-#search-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-button.search-chip {
-  font: inherit;
-  font-size: 10.5px;
-  border: 1px solid var(--hairline);
-  cursor: pointer;
-  color: var(--muted);
-}
-button.search-chip.on {
-  border-color: var(--primary);
-  color: var(--primary);
 }
 .search-title {
   display: block;
