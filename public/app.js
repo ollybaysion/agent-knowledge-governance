@@ -343,8 +343,6 @@ function consumeUrlToken() {
 function go(screen) {
   for (const s of document.querySelectorAll("main > section"))
     s.classList.toggle("on", s.id === screen);
-  // The 3단 rail belongs to the document screen only.
-  $("app-layout").classList.toggle("on-doc", screen === "doc");
   for (const b of document.querySelectorAll("nav button"))
     b.classList.toggle("on", b.dataset.go === screen);
   window.scrollTo(0, 0);
@@ -584,57 +582,6 @@ $("search-input").addEventListener("keydown", (e) => {
   }
 });
 
-// ---------- 2단 · 3단 보기 ----------
-// 2단 = 목록 | 문서, 3단 = 목록 | 문서 | 연결. The choice is per browser;
-// below 1100px the third column is not drawn (CSS), whatever the choice.
-const LAYOUT_KEY = "akg_layout";
-function applyLayout(layout) {
-  const three = layout === "3";
-  $("app-layout").classList.toggle("three", three);
-  $("layout-toggle").setAttribute("aria-pressed", String(three));
-  $("layout-toggle").textContent = three ? "2단 보기" : "3단 보기";
-}
-function savedLayout() {
-  try {
-    return localStorage.getItem(LAYOUT_KEY) === "3" ? "3" : "2";
-  } catch {
-    return "2";
-  }
-}
-$("layout-toggle").addEventListener("click", () => {
-  const next = $("app-layout").classList.contains("three") ? "2" : "3";
-  try {
-    localStorage.setItem(LAYOUT_KEY, next);
-  } catch {
-    /* private mode: the choice lasts this page only */
-  }
-  applyLayout(next);
-});
-
-// The third column: what the open document is, and what it is connected to.
-// Following a link changes the middle column; this one follows because the
-// document screen redraws it.
-function renderRail(type, id, data) {
-  const rail = $("doc-rail");
-  if (!data) {
-    rail.replaceChildren();
-    return;
-  }
-  const doc = data.json;
-  const b = doc.body || {};
-  const title = b.title ?? b.name ?? b.table ?? b.command ?? id;
-  rail.replaceChildren(
-    el("div", { class: "rail-sum" }, [
-      el("p", { class: "sk-eyebrow", text: TYPE_LABEL[type] ?? type }),
-      el("h2", { class: "rail-title", text: title }),
-      title.toLowerCase() !== id ? el("p", { class: "mono dim", text: id }) : null,
-      el("div", { class: "chiprow" }, [statusBadge(doc.status), ...keywordChips(doc.keywords || [])]),
-    ]),
-    linkList("이 문서가 가리키는 문서", data.links || []),
-    linkList("이 문서를 가리키는 문서", data.backlinks || []),
-  );
-}
-
 // ================= 개요 =================
 async function renderOverview() {
   const all = [];
@@ -808,7 +755,6 @@ async function renderDocScreen(type, id) {
   section.replaceChildren(el("p", { class: "loading", text: "불러오는 중…" }));
   const res = await api(`/api/docs/${type}/${encodeURIComponent(id)}`);
   if (!res.ok) {
-    renderRail(type, id, null);
     section.replaceChildren(
       el("p", {
         class: "error",
@@ -819,7 +765,6 @@ async function renderDocScreen(type, id) {
   }
   lastDoc = { type, id };
   highlightTree();
-  renderRail(type, id, res.data);
   editingAddr = null;
   // doc/rev are reassigned in place after a clean save so the screen can
   // repaint optimistically instead of re-fetching the whole document.
@@ -2313,25 +2258,6 @@ const BODY_VIEWS = {
 };
 
 // ================= 연결 (envelope links[]) =================
-function linkItem(link) {
-  return el("li", { class: "link-item" }, [
-    el("span", { class: "chip", text: link.rel }),
-    el("a", {
-      href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
-      text: `${link.type}/${link.id}`,
-    }),
-    link.status && link.status !== "active" ? statusBadge(link.status) : null,
-  ]);
-}
-function linkList(title, links) {
-  return el("div", { class: "links-col" }, [
-    el("h3", { text: title }),
-    links.length
-      ? el("ul", { class: "links-list" }, links.map(linkItem))
-      : el("p", { class: "dim", text: "없음" }),
-  ]);
-}
-
 // What this doc points at (stored) and what points at it (computed by the
 // server on read). Built once per document screen so an open editor survives
 // the slot repaints around it; getRev reads the screen's current rev.
@@ -2348,6 +2274,24 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     return targetsOf.get(t);
   }
 
+  function item(link) {
+    return el("li", { class: "link-item" }, [
+      el("span", { class: "chip", text: link.rel }),
+      el("a", {
+        href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
+        text: `${link.type}/${link.id}`,
+      }),
+      link.status && link.status !== "active" ? statusBadge(link.status) : null,
+    ]);
+  }
+  function list(title, links) {
+    return el("div", { class: "links-col" }, [
+      el("h3", { text: title }),
+      links.length
+        ? el("ul", { class: "links-list" }, links.map(item))
+        : el("p", { class: "dim", text: "없음" }),
+    ]);
+  }
 
   function read() {
     const h = el("h2", { class: "sk-h" }, ["연결"]);
@@ -2358,8 +2302,8 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     wrap.replaceChildren(
       h,
       el("div", { class: "links-cols" }, [
-        linkList("이 문서가 가리키는 문서", data.links || []),
-        linkList("이 문서를 가리키는 문서", data.backlinks || []),
+        list("이 문서가 가리키는 문서", data.links || []),
+        list("이 문서를 가리키는 문서", data.backlinks || []),
       ]),
     );
   }
@@ -3360,7 +3304,6 @@ function enterApp() {
 }
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
-  applyLayout(savedLayout());
   const token = consumeUrlToken() || getToken();
   // With a token, log in as that user. Without one, try anonymous first — the
   // login screen is now an opt-in action, not the front gate. It only appears
