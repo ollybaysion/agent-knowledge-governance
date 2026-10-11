@@ -6,6 +6,7 @@
     { "kw": "fdc monitor", "inject": "pointer" }
   ],
   "status": "active",
+  "links": [{ "type": "db-schema", "id": "fdc_sensor", "rel": "related" }],
   "body": {
     "id": "fdc-monitor-history",
     "name": "센서값 이력 조회",

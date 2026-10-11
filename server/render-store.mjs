@@ -21,9 +21,10 @@ export function compileIndex(docs) {
       .filter((k) => k.inject === "pointer")
       .map((k) => k.kw);
     const path = `docs/${doc.id}.md`;
-    if (full.length) entries.push({ keywords: full, path });
+    const links = doc.links?.length ? { links: doc.links } : {};
+    if (full.length) entries.push({ keywords: full, path, ...links });
     if (pointer.length)
-      entries.push({ keywords: pointer, path, precision: 0.5 });
+      entries.push({ keywords: pointer, path, precision: 0.5, ...links });
   }
   return entries;
 }

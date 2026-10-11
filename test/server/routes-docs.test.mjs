@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -346,4 +346,220 @@ test("catalog-push replaces catalog and auto-deprecates an inferred slot whose c
   assert.equal(push.json().json.body.columnDescs.A.tier, "scaffold"); // untouched column, untouched slot
 
   await cleanup();
+});
+
+function screenMapDoc(id, overrides = {}) {
+  return {
+    schema: "screen-map/v1",
+    id,
+    keywords: [{ kw: id, inject: "pointer" }],
+    status: "active",
+    body: { id, name: `화면 ${id}` },
+    ...overrides,
+  };
+}
+
+const link = (type, id, rel = "related") => ({ type, id, rel });
+
+test("links: a write naming a target the store lacks is 400 unknown_link_target; pointing at itself is 400", async () => {
+  const { app, home, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  try {
+    const missing = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("edtok"),
+      payload: newDbSchemaDoc({ links: [link("screen-map", "nope", "screen")] }),
+    });
+    assert.equal(missing.statusCode, 400);
+    assert.equal(missing.json().error, "unknown_link_target");
+    assert.deepEqual(missing.json().missing, [{ type: "screen-map", id: "nope" }]);
+    assert.equal(existsSync(join(home, "store", "db-schema", "x.json")), false);
+
+    const self = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("edtok"),
+      payload: newDbSchemaDoc({ links: [link("db-schema", "x")] }),
+    });
+    assert.equal(self.statusCode, 400);
+    assert.ok(self.json().details.some((d) => d.includes("자기 자신")));
+
+    const batch = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema/batch",
+      headers: auth("edtok"),
+      payload: { docs: [newDbSchemaDoc({ links: [link("screen-map", "nope")] })] },
+    });
+    assert.equal(batch.statusCode, 400);
+    assert.equal(batch.json().rejected[0].error, "unknown_link_target");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("links: forward edges land in the list, the index and the read; the target computes backlinks", async () => {
+  const { app, home, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  try {
+    for (const payload of [
+      screenMapDoc("spc-chart-config"),
+      newDbSchemaDoc({ links: [link("screen-map", "spc-chart-config")] }),
+    ]) {
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/docs/${payload.schema.split("/")[0]}`,
+        headers: auth("edtok"),
+        payload,
+      });
+      assert.equal(r.statusCode, 201, r.body);
+    }
+
+    const list = await app.inject({ method: "GET", url: "/api/docs?type=db-schema" });
+    assert.deepEqual(list.json().docs[0].links, [link("screen-map", "spc-chart-config")]);
+
+    const index = JSON.parse(
+      readFileSync(join(home, "store", "rendered", "db-schema", "index.json"), "utf8"),
+    );
+    assert.deepEqual(index[0].links, [link("screen-map", "spc-chart-config")]);
+
+    const from = await app.inject({ method: "GET", url: "/api/docs/db-schema/x" });
+    assert.deepEqual(from.json().links, [
+      { ...link("screen-map", "spc-chart-config"), status: "active" },
+    ]);
+    assert.deepEqual(from.json().backlinks, []);
+
+    const to = await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
+    assert.deepEqual(to.json().backlinks, [
+      { type: "db-schema", id: "x", rel: "related", status: "active" },
+    ]);
+    assert.deepEqual(to.json().links, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("links: archiving either end keeps the edge and reports the archived status", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+  ]);
+  try {
+    await app.inject({
+      method: "POST",
+      url: "/api/docs/screen-map",
+      headers: auth("aptok"),
+      payload: screenMapDoc("spc-chart-config"),
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("aptok"),
+      payload: newDbSchemaDoc({ links: [link("screen-map", "spc-chart-config")] }),
+    });
+
+    await app.inject({
+      method: "DELETE",
+      url: "/api/docs/screen-map/spc-chart-config",
+      headers: auth("aptok"),
+    });
+    const from = await app.inject({ method: "GET", url: "/api/docs/db-schema/x" });
+    assert.equal(from.json().links[0].status, "archived");
+    assert.deepEqual(from.json().json.links, [link("screen-map", "spc-chart-config")]);
+
+    // An archived target still exists, so a new edge to it is accepted.
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("aptok"),
+      payload: newDbSchemaDoc({
+        id: "y",
+        body: { ...newDbSchemaDoc().body, table: "Y" },
+        links: [link("screen-map", "spc-chart-config")],
+      }),
+    });
+    assert.equal(again.statusCode, 201, again.body);
+
+    await app.inject({ method: "DELETE", url: "/api/docs/db-schema/x", headers: auth("aptok") });
+    const to = await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
+    assert.deepEqual(
+      to.json().backlinks.map((b) => `${b.id}:${b.status}`).sort(),
+      ["x:archived", "y:active"],
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("PUT links: If-Match required and checked; sets, checks targets, and an empty list drops the key", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "reader", role: "viewer", tokenHash: hashToken("vtok") },
+  ]);
+  try {
+    await app.inject({
+      method: "POST",
+      url: "/api/docs/screen-map",
+      headers: auth("edtok"),
+      payload: screenMapDoc("spc-chart-config"),
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/docs/db-schema",
+      headers: auth("edtok"),
+      payload: newDbSchemaDoc(),
+    });
+    const rev0 = created.json().rev;
+    const url = "/api/docs/db-schema/x/links";
+    const links = [link("screen-map", "spc-chart-config")];
+
+    const viewer = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...auth("vtok"), "if-match": rev0 },
+      payload: { links },
+    });
+    assert.equal(viewer.statusCode, 403);
+
+    const noIfMatch = await app.inject({ method: "PUT", url, headers: auth("edtok"), payload: { links } });
+    assert.equal(noIfMatch.statusCode, 428);
+
+    const unknown = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...auth("edtok"), "if-match": rev0 },
+      payload: { links: [link("screen-map", "nope")] },
+    });
+    assert.equal(unknown.statusCode, 400);
+    assert.equal(unknown.json().error, "unknown_link_target");
+
+    const set = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...auth("edtok"), "if-match": rev0 },
+      payload: { links },
+    });
+    assert.equal(set.statusCode, 200, set.body);
+    assert.deepEqual(Object.keys(set.json().json), ["schema", "id", "keywords", "status", "links", "body"]);
+
+    const stale = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...auth("edtok"), "if-match": rev0 },
+      payload: { links: [] },
+    });
+    assert.equal(stale.statusCode, 409);
+
+    const cleared = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...auth("edtok"), "if-match": set.json().rev },
+      payload: { links: [] },
+    });
+    assert.equal(cleared.statusCode, 200, cleared.body);
+    assert.equal("links" in cleared.json().json, false);
+  } finally {
+    await cleanup();
+  }
 });

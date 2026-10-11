@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common/link.v1",
+  "title": "link",
+  "description": "One entry of the envelope's links[]: this document points at another stored document. Only the forward edge is stored; the reverse (backlinks) is computed on read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "id", "rel"],
+  "properties": {
+    "type": { "type": "string", "pattern": "^[a-z][a-z-]*$" },
+    "id": { "type": "string", "pattern": "^[a-z0-9._-]+$" },
+    "rel": {
+      "type": "string",
+      "description": "What the edge means. Free string; in use: screen (manual → the screen it operates), related.",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    }
+  }
+}

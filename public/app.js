@@ -703,6 +703,7 @@ async function renderDocScreen(type, id) {
   let jsonOpen = false; // 승인자 원본 JSON 좌우 분할 패널이 열려 있는지
 
   const notice = el("div", { id: "doc-notice" });
+  const linksEl = linksSection(type, id, res.data, () => rev, canEdit, reload);
 
   async function reload() {
     await renderDocTree();
@@ -1290,6 +1291,7 @@ async function renderDocScreen(type, id) {
           : null,
         jsonOpen,
       );
+      skill.appendChild(linksEl);
       section.replaceChildren(
         jsonOpen
           ? el("div", { class: "doc-split open" }, [
@@ -1500,6 +1502,7 @@ async function renderDocScreen(type, id) {
             : null,
         ],
       ),
+      el("div", { class: "docwrap" }, linksEl),
     ];
     // el() 의 children 루프와 달리 replaceChildren() 은 null 을 걸러내지 않고
     // 문자열 "null" 로 바꿔 텍스트 노드로 넣는다. 활성 문서(=안내바 없음)에서
@@ -1843,6 +1846,173 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     );
   }
 
+  return wrap;
+}
+
+// ================= 연결 (envelope links[]) =================
+// What this doc points at (stored) and what points at it (computed by the
+// server on read). Built once per document screen so an open editor survives
+// the slot repaints around it; getRev reads the screen's current rev.
+const LINK_RELS = ["screen", "related"];
+function linksSection(type, id, data, getRev, canEdit, reload) {
+  const wrap = el("div", { class: "links" });
+  const targetsOf = new Map(); // type -> Promise<docs[]>
+  function targets(t) {
+    if (!targetsOf.has(t))
+      targetsOf.set(
+        t,
+        api(`/api/docs?type=${t}`).then((r) => (r.ok ? r.data.docs : [])),
+      );
+    return targetsOf.get(t);
+  }
+
+  function item(link) {
+    return el("li", { class: "link-item" }, [
+      el("span", { class: "chip", text: link.rel }),
+      el("a", {
+        href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
+        text: `${link.type}/${link.id}`,
+      }),
+      link.status && link.status !== "active" ? statusBadge(link.status) : null,
+    ]);
+  }
+  function list(title, links) {
+    return el("div", { class: "links-col" }, [
+      el("h3", { text: title }),
+      links.length
+        ? el("ul", { class: "links-list" }, links.map(item))
+        : el("p", { class: "dim", text: "없음" }),
+    ]);
+  }
+
+  function read() {
+    const h = el("h2", { class: "sk-h" }, ["연결"]);
+    if (canEdit)
+      h.appendChild(
+        el("button", { type: "button", class: "btn ghost sm add-btn", onclick: edit, text: "편집" }),
+      );
+    wrap.replaceChildren(
+      h,
+      el("div", { class: "links-cols" }, [
+        list("이 문서가 가리키는 문서", data.links || []),
+        list("이 문서를 가리키는 문서", data.backlinks || []),
+      ]),
+    );
+  }
+
+  function edit() {
+    const rows = (data.links || []).map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+    const body = el("div", { class: "links-rows" });
+    const relList = el(
+      "datalist",
+      { id: "link-rels" },
+      LINK_RELS.map((r) => el("option", { value: r })),
+    );
+
+    function row(r) {
+      const typeSel = el("select", { class: "fld", "aria-label": "대상 타입" });
+      for (const t of DOC_TYPES) typeSel.appendChild(el("option", { value: t }, TYPE_LABEL[t]));
+      typeSel.value = r.type;
+      const idSel = el("select", { class: "fld mono", "aria-label": "대상 문서" });
+      async function fillIds() {
+        idSel.replaceChildren(el("option", { value: "" }, "불러오는 중…"));
+        const docs = (await targets(r.type)).filter((d) => !(r.type === type && d.id === id));
+        idSel.replaceChildren(
+          el("option", { value: "" }, "문서를 고르세요"),
+          ...docs.map((d) =>
+            el("option", { value: d.id }, d.status === "active" ? d.id : `${d.id} (${STATUS_LABEL[d.status] ?? d.status})`),
+          ),
+        );
+        idSel.value = docs.some((d) => d.id === r.id) ? r.id : "";
+        r.id = idSel.value;
+      }
+      typeSel.addEventListener("change", () => {
+        r.type = typeSel.value;
+        r.id = "";
+        fillIds();
+      });
+      idSel.addEventListener("change", () => (r.id = idSel.value));
+      const relInp = el("input", {
+        class: "fld mono",
+        type: "text",
+        list: "link-rels",
+        "aria-label": "관계",
+        placeholder: "related",
+      });
+      relInp.value = r.rel;
+      relInp.addEventListener("input", () => (r.rel = relInp.value.trim()));
+      fillIds();
+      return el("div", { class: "link-row" }, [
+        typeSel,
+        idSel,
+        relInp,
+        el("button", {
+          type: "button",
+          class: "btn ghost sm",
+          text: "삭제",
+          onclick: () => {
+            rows.splice(rows.indexOf(r), 1);
+            paint();
+          },
+        }),
+      ]);
+    }
+    function paint() {
+      body.replaceChildren(
+        ...(rows.length ? rows.map(row) : [el("p", { class: "dim", text: "연결이 없습니다." })]),
+      );
+    }
+
+    const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+    save.addEventListener("click", async () => {
+      if (rows.some((r) => !r.id || !r.rel)) {
+        toast("모든 행에 대상 문서와 관계를 채우세요.", "error");
+        return;
+      }
+      save.disabled = true;
+      const r = await api(`/api/docs/${type}/${encodeURIComponent(id)}/links`, {
+        method: "PUT",
+        headers: { "if-match": getRev() },
+        body: { links: rows },
+      });
+      save.disabled = false;
+      if (r.ok) {
+        toast("연결을 저장했습니다", "ok");
+        reload();
+        return;
+      }
+      const d = r.data || {};
+      if (r.status === 409)
+        toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
+      else if (d.error === "unknown_link_target")
+        toast(`없는 문서입니다 — ${d.missing.map((m) => `${m.type}/${m.id}`).join(", ")}`, "error");
+      else toast(`저장 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`, "error");
+    });
+
+    wrap.replaceChildren(
+      el("h2", { class: "sk-h" }, ["연결 편집"]),
+      el("div", { class: "slot-edit" }, [
+        relList,
+        body,
+        el("div", { class: "editacts" }, [
+          el("button", {
+            type: "button",
+            class: "btn ghost sm",
+            text: "+ 연결 추가",
+            onclick: () => {
+              rows.push({ type: DOC_TYPES[0], id: "", rel: "related" });
+              paint();
+            },
+          }),
+          save,
+          el("button", { type: "button", class: "btn ghost sm", onclick: read, text: "취소" }),
+        ]),
+      ]),
+    );
+    paint();
+  }
+
+  read();
   return wrap;
 }
 

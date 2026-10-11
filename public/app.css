@@ -2769,3 +2769,46 @@ textarea.df-inp {
   font-weight: 600;
   max-width: 320px;
 }
+
+/* 연결 — 가리키는 문서 | 가리켜지는 문서 두 칸, 편집은 행마다 타입 · 문서 · 관계 */
+.links-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px 24px;
+}
+.links-col h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.links-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.link-item a {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--body-strong);
+}
+.link-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 120px auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+@media (max-width: 640px) {
+  .link-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

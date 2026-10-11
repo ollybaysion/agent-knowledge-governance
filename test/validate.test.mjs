@@ -436,3 +436,28 @@ test("screen-map: the shipped example validates", () => {
   );
   assert.deepEqual(validateDocument(doc, refs), []);
 });
+
+test("links: a well-formed edge validates, a bad rel or an extra key does not", () => {
+  const doc = screenMapDoc();
+  doc.links = [{ type: "db-schema", id: "fdc_sensor", rel: "related" }];
+  assert.deepEqual(validateDocument(doc, refs), []);
+
+  doc.links = [{ type: "db-schema", id: "fdc_sensor", rel: "Related" }];
+  assert.ok(validateDocument(doc, refs).some((e) => e.includes("$.links[0].rel")));
+
+  doc.links = [{ type: "db-schema", id: "fdc_sensor", rel: "related", note: "x" }];
+  assert.ok(validateDocument(doc, refs).some((e) => e.includes('unknown key "note"')));
+});
+
+test("links: a doc cannot point at itself or carry the same edge twice — drafts included", () => {
+  const doc = screenMapDoc();
+  doc.links = [{ type: "screen-map", id: "fdc-monitor-history", rel: "related" }];
+  assert.ok(validateDocument(doc, refs).some((e) => e.includes("자기 자신")));
+
+  const edge = { type: "db-schema", id: "fdc_sensor", rel: "related" };
+  doc.status = "inactive";
+  doc.links = [edge, { ...edge }];
+  assert.ok(
+    validateDocument(doc, refs, { draft: true }).some((e) => e.includes("두 번")),
+  );
+});
