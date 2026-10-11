@@ -7,7 +7,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, validateNode } from "./validate.mjs";
-import { isSkillSection, SKILL_SECTIONS, skillSections } from "./skill-sections.mjs";
+import {
+  isSkillSection,
+  normalizeHeading,
+  SKILL_SECTIONS,
+  skillSections,
+} from "./skill-sections.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -48,7 +53,7 @@ const KEYWORD_SCHEMA = {
 
 // json-spec §2 — the keys fixed for every type EXCEPT unclassified
 // (§1.4: envelope with body dropped, validated by its own schema file).
-// `links` is the one optional key.
+// `links` and `role` are the optional keys.
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -65,6 +70,9 @@ const ENVELOPE_SCHEMA = {
     // Forward edges to other stored documents. Whether each target exists is
     // a store question, so the write routes check it (server/links.mjs).
     links: { type: "array", items: { $ref: "common/link.v1" } },
+    // domain-skill only: a main skill is one an agent can be; a sub is
+    // knowledge a main points at. Absent reads as main.
+    role: { type: "string", enum: ["main", "sub"] },
   },
 };
 
@@ -132,6 +140,12 @@ function checkDerivedId(doc, errors) {
     const how = ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body";
     fail(errors, `$.id: expected "${wantId}" (${how}), got "${doc.id}"`);
   }
+}
+
+/** role belongs to domain-skill alone. */
+function checkRole(doc, errors) {
+  if (doc.role !== undefined && doc.schema !== "domain-skill/v1")
+    fail(errors, `$.role: role 은 domain-skill 에만 있습니다 (${doc.schema})`);
 }
 
 /** A document may not point at itself, nor carry the same edge twice. */
@@ -219,7 +233,12 @@ const SEMANTIC_CHECKS = {
   "domain-skill/v1"(doc, errors) {
     checkDerivedId(doc, errors);
     if (typeof doc.body?.markdown !== "string") return;
-    for (const title of skillSections(doc.body.markdown)) {
+    const titles = skillSections(doc.body.markdown);
+    // A sub is knowledge a main reads, so 도메인 지식 is the one section it
+    // must have. A main keeps the rule it had: any of the four.
+    if (doc.role === "sub" && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
+      fail(errors, '$.body.markdown: sub 스킬에는 "## 도메인 지식" 절이 있어야 합니다');
+    for (const title of titles) {
       if (!isSkillSection(title))
         fail(
           errors,
@@ -307,6 +326,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
   }
   if (errors.length === 0) {
     checkLinks(doc, errors);
+    checkRole(doc, errors);
     if (draft) {
       // A draft skips the completeness/coherence checks a finished doc must
       // pass, but the id must still name the document — the store filename and

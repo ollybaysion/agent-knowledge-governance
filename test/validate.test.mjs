@@ -461,3 +461,39 @@ test("links: a doc cannot point at itself or carry the same edge twice — draft
     validateDocument(doc, refs, { draft: true }).some((e) => e.includes("두 번")),
   );
 });
+
+function skillEnvelope(markdown, role) {
+  return {
+    schema: "domain-skill/v1",
+    id: "s",
+    keywords: [{ kw: "s", inject: "full" }],
+    status: "active",
+    ...(role ? { role } : {}),
+    body: { name: "s", markdown },
+  };
+}
+
+test("role sub: 도메인 지식 alone is a whole sub skill; without it the doc is rejected", () => {
+  assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 도메인 지식\n\n지식.\n", "sub"), refs), []);
+  const errors = validateDocument(skillEnvelope("# s\n\n## 데이터\n\nx\n", "sub"), refs);
+  assert.ok(errors.some((e) => e.includes('"## 도메인 지식" 절이 있어야')), JSON.stringify(errors));
+});
+
+test("role main (or absent) keeps today's rule: any of the four sections, unknown ones refused", () => {
+  for (const role of ["main", undefined])
+    assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 데이터\n\nx\n", role), refs), []);
+  assert.ok(validateDocument(skillEnvelope("# s\n\n## 데이타\n\nx\n", "main"), refs).some((e) => e.includes("모르는 절")));
+});
+
+test("role is domain-skill's alone, and only main | sub", () => {
+  const db = { ...minimalDbSchemaDoc(), role: "main" };
+  assert.ok(validateDocument(db, refs).some((e) => e.includes("role 은 domain-skill 에만")));
+  assert.ok(validateDocument(skillEnvelope("# s\n", "helper"), refs).some((e) => e.includes("$.role")));
+});
+
+test("domain-skill: both shipped examples validate — a main (role absent) and a sub", () => {
+  for (const name of ["fdc-explain-sensor-origin", "fdc-virtual-sensor-formula"]) {
+    const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "domain-skill", `${name}.json`), "utf8"));
+    assert.deepEqual(validateDocument(doc, refs), [], name);
+  }
+});
