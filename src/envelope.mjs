@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, validateNode } from "./validate.mjs";
+import { isSkillSection, SKILL_SECTIONS, skillSections } from "./skill-sections.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -133,30 +134,6 @@ function checkDerivedId(doc, errors) {
   }
 }
 
-// The `##` sections a skill md may have — the consumer's heading schema
-// (fdc-agent-be-spring SkillMarkdownTool). akg does not parse the document any
-// further; it only refuses a section it does not know, because downstream that
-// typo would not be an error but a silently missing section (## 데이타 → no
-// data items). A trailing `?`/`:` is noise, as it is for the consumer.
-const SKILL_SECTIONS = new Set(["한 줄 설명", "언제 호출되는가", "도메인 지식", "데이터"]);
-const normalizeHeading = (title) => title.trim().replace(/[?？:：\s]+$/u, "").trim();
-
-/** The `##` headings of a markdown text, skipping fenced code blocks. */
-export function skillSections(markdown) {
-  const out = [];
-  let fence = null;
-  for (const line of String(markdown ?? "").split(/\r?\n/)) {
-    const f = /^(`{3,}|~{3,})/.exec(line);
-    if (fence === null && f) fence = f[1];
-    else if (fence !== null && line.trim().startsWith(fence)) fence = null;
-    else if (fence === null) {
-      const h = /^##\s+(.*?)\s*#*\s*$/.exec(line);
-      if (h) out.push(h[1]);
-    }
-  }
-  return out;
-}
-
 /** A document may not point at itself, nor carry the same edge twice. */
 function checkLinks(doc, errors) {
   if (!Array.isArray(doc.links)) return;
@@ -235,16 +212,18 @@ const SEMANTIC_CHECKS = {
   },
   // The body is the author's md verbatim (user decision 2026-09-21); what the
   // schema cannot see is only whether its `##` sections are ones the consumer
-  // reads. Everything inside a section (items, fences, :vars) is the consumer's
-  // to judge — it is the one that turns the text into a skill.
+  // reads — downstream an unknown one is not an error but a silently missing
+  // section (## 데이타 → no data items). Everything inside a section (items,
+  // fences, :vars) is the consumer's to judge — it is the one that turns the
+  // text into a skill.
   "domain-skill/v1"(doc, errors) {
     checkDerivedId(doc, errors);
     if (typeof doc.body?.markdown !== "string") return;
     for (const title of skillSections(doc.body.markdown)) {
-      if (!SKILL_SECTIONS.has(normalizeHeading(title)))
+      if (!isSkillSection(title))
         fail(
           errors,
-          `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${[...SKILL_SECTIONS].map((t) => `## ${t}`).join(" · ")})`,
+          `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${SKILL_SECTIONS.map((t) => `## ${t.key}`).join(" · ")})`,
         );
     }
   },

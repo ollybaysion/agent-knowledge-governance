@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { loadSchemas } from "../../src/envelope.mjs";
 import { applyEdit, EditError } from "../../server/edit.mjs";
+import { joinSkill, splitSkill } from "../../src/skill-sections.mjs";
+import { readFileSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "..", "schemas"));
@@ -100,4 +102,20 @@ test("a brand new row (no current counterpart) always counts as changed", () => 
   });
   const merged = applyEdit(schema, baseBody(), client, "renoir", NOW);
   assert.equal(merged.queries[1].note.tier, "inferred");
+});
+
+// The section editor sends the whole md (the body is the unit), assembled from
+// the four textareas. Changing one textarea must leave the others' text as it was.
+test("domain-skill: a PUT built from one changed section keeps every other section verbatim", () => {
+  const skillSchema = refs["domain-skill/v1"];
+  const base = JSON.parse(
+    readFileSync(join(__dirname, "..", "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"), "utf8"),
+  ).body;
+  const { title, sections } = splitSkill(base.markdown);
+  const edited = sections.map((s) => (s.key === "한 줄 설명" ? { ...s, body: "새 한 줄 설명." } : s));
+  const merged = applyEdit(skillSchema, base, { ...base, markdown: joinSkill(title, edited) }, "renoir", NOW);
+
+  const after = splitSkill(merged.markdown).sections;
+  assert.equal(after[0].body, "새 한 줄 설명.");
+  for (const i of [1, 2, 3]) assert.equal(after[i].body, sections[i].body);
 });
