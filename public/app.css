@@ -2952,3 +2952,21 @@ textarea.df-inp {
   font-size: 12px;
 }
 
+/* 본문의 [[ ]] — 찾은 대상은 링크, 없는 대상은 빨간 글 */
+a.wiki {
+  color: var(--primary);
+}
+.wiki.missing {
+  color: var(--error-ink);
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.chip.from-body {
+  color: var(--primary);
+}
+.link-row.fixed {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 4px 0;
+}

@@ -1366,6 +1366,7 @@ async function renderDocScreen(type, id) {
             }
           : null,
         jsonOpen,
+        res.data.wikilinks || [],
       );
       skill.appendChild(linksEl);
       section.replaceChildren(
@@ -1692,6 +1693,35 @@ async function renderDocScreen(type, id) {
   renderInner();
 }
 
+// `[[ ]]` in a body text, drawn from the server's resolution (GET …
+// wikilinks): a found target is a link to it, anything else is red text. The
+// element shows the plain text at once and gains the links when the shared
+// parser (/wikilinks.mjs) has loaded.
+const wikiLib = import("/wikilinks.mjs").catch(() => null);
+function wikiText(node, text, wikis) {
+  node.textContent = text;
+  const byText = new Map((wikis || []).map((w) => [w.text, w]));
+  wikiLib.then((lib) => {
+    if (!lib) return;
+    node.replaceChildren(
+      ...lib.wikiSegments(text).map((seg) => {
+        if (!seg.link) return document.createTextNode(seg.text);
+        const w = byText.get(seg.link.text);
+        if (w && w.found)
+          return el("a", { class: "wiki", href: `#/doc/${w.type}/${encodeURIComponent(w.id)}`, text: seg.text });
+        return el("span", {
+          class: "wiki missing",
+          title: w && w.types
+            ? `여러 타입에 있습니다(${w.types.join(" · ")}) — [[타입/id]] 로 적으세요`
+            : "store 에 없는 문서입니다 — 연결에 들어가지 않습니다",
+          text: seg.text,
+        });
+      }),
+    );
+  });
+  return node;
+}
+
 // The header row the body views share: status chip (an approver's toggle),
 // rev, keywords, and the approver's JSON split.
 function viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen) {
@@ -1764,7 +1794,7 @@ const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
 // form. The heading structure inside the text is the consumer's schema
 // (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
 // refuses a `##` section it does not know, and the error comes back here.
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
 
@@ -1925,7 +1955,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         head,
         sec.body.trim() === ""
           ? el("p", { class: "dim", text: "비어 있습니다 — 비어 있는 절은 저장된 md 에 들어가지 않습니다." })
-          : el("pre", { class: "sk-md", text: sec.body }),
+          : wikiText(el("pre", { class: "sk-md" }), sec.body, wikis),
       ]);
     });
     docHolder.replaceChildren(
@@ -1942,7 +1972,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       note ? el("p", { class: "dim", text: note }) : null,
       (s.markdown || "").trim() === ""
         ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
-        : el("pre", { class: "sk-md", text: s.markdown }),
+        : wikiText(el("pre", { class: "sk-md" }), s.markdown, wikis),
       el("p", { class: "dim", text: HINT }),
     );
   }
@@ -2075,7 +2105,7 @@ async function uploadCapture(file) {
   return { error: `올리기 실패 (${r.status || "네트워크"})` };
 }
 
-function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
   const b = doc.body;
   const steps = b.steps || [];
   const screen = (doc.links || []).find((l) => l.rel === "screen");
@@ -2111,7 +2141,11 @@ function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
             { class: "mn-steps" },
             steps.map((s, i) =>
               el("li", { class: "mn-step" }, [
-                el("p", { class: "mn-text" }, [el("b", { class: "mono", text: `${i + 1}.` }), " ", s.text || ""]),
+                el("p", { class: "mn-text" }, [
+                  el("b", { class: "mono", text: `${i + 1}.` }),
+                  " ",
+                  wikiText(el("span"), s.text || "", wikis),
+                ]),
                 s.asset
                   ? captureImg(s, "mn-cap")
                   : el("p", { class: "mn-nocap dim", text: "캡처 없음" }),
@@ -2274,9 +2308,19 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     return targetsOf.get(t);
   }
 
+  // Links the body's [[ ]] made: shown with 본문에서, removed only by editing
+  // the body (the server re-adds them to whatever PUT …/links sends).
+  const fromBody = new Set(
+    (data.wikilinks || []).filter((w) => w.found).map((w) => `${w.type}/${w.id}#related`),
+  );
+  const isFromBody = (l) => fromBody.has(`${l.type}/${l.id}#${l.rel}`);
+  const bodyChip = () =>
+    el("span", { class: "chip from-body", title: "본문의 [[ ]] 에서 온 연결입니다", text: "본문에서" });
+
   function item(link) {
     return el("li", { class: "link-item" }, [
       el("span", { class: "chip", text: link.rel }),
+      isFromBody(link) ? bodyChip() : null,
       el("a", {
         href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
         text: `${link.type}/${link.id}`,
@@ -2309,7 +2353,10 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
   }
 
   function edit() {
-    const rows = (data.links || []).map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+    const rows = (data.links || [])
+      .filter((l) => !isFromBody(l))
+      .map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+    const fixed = (data.links || []).filter(isFromBody);
     const body = el("div", { class: "links-rows" });
     const relList = el(
       "datalist",
@@ -2367,7 +2414,15 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     }
     function paint() {
       body.replaceChildren(
-        ...(rows.length ? rows.map(row) : [el("p", { class: "dim", text: "연결이 없습니다." })]),
+        ...fixed.map((l) =>
+          el("div", { class: "link-row fixed" }, [
+            el("span", { class: "mono", text: TYPE_LABEL[l.type] ?? l.type }),
+            el("span", { class: "mono", text: l.id }),
+            el("span", { class: "mono", text: l.rel }),
+            bodyChip(),
+          ]),
+        ),
+        ...(rows.length || fixed.length ? rows.map(row) : [el("p", { class: "dim", text: "연결이 없습니다." })]),
       );
     }
 
