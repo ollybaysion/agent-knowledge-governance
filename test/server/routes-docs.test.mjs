@@ -421,6 +421,9 @@ test("links: forward edges land in the list, the index and the read; the target 
 
     const list = await app.inject({ method: "GET", url: "/api/docs?type=db-schema" });
     assert.deepEqual(list.json().docs[0].links, [link("screen-map", "spc-chart-config")]);
+    assert.equal(list.json().docs[0].title, "X");
+    const screens = await app.inject({ method: "GET", url: "/api/docs?type=screen-map" });
+    assert.equal(screens.json().docs[0].title, "화면 spc-chart-config");
 
     const index = JSON.parse(
       readFileSync(join(home, "store", "rendered", "db-schema", "index.json"), "utf8"),
@@ -637,6 +640,220 @@ test("manual: a draft saves without screen or captures; activation needs one rel
     const { rev } = (await app.inject({ method: "GET", url })).json();
     const drop = await app.inject({ method: "PUT", url: `${url}/links`, headers: { ...h, "if-match": rev }, payload: { links: [] } });
     assert.equal(drop.statusCode, 400);
+  } finally {
+    await cleanup();
+  }
+});
+
+function skillDoc(name, markdown, overrides = {}) {
+  return {
+    schema: "domain-skill/v1",
+    id: name,
+    keywords: [{ kw: name, inject: "full" }],
+    status: "active",
+    body: { name, markdown },
+    ...overrides,
+  };
+}
+
+test("[[ ]]: the body's targets join links[] as related, a missing one is kept out but reported found:false", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("spc-chart-config") });
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const md = "# s\n\n## 도메인 지식\n\n화면 [[spc-chart-config]] 과 표 [[db-schema/x]], 아직 없는 [[nope]].\n\n```\n[[in-fence]]\n```\n";
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skillDoc("s", md, { links: [link("db-schema", "x", "screen")] }),
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.deepEqual(created.json().json.links, [
+      link("db-schema", "x", "screen"),
+      link("screen-map", "spc-chart-config"),
+      link("db-schema", "x"),
+    ]);
+
+    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    assert.deepEqual(got.wikilinks, [
+      { text: "spc-chart-config", type: "screen-map", id: "spc-chart-config", found: true },
+      { text: "db-schema/x", type: "db-schema", id: "x", found: true },
+      { text: "nope", type: null, id: "nope", found: false },
+    ]);
+    const back = (await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" })).json();
+    assert.deepEqual(back.backlinks, [{ type: "domain-skill", id: "s", rel: "related", status: "active" }]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("[[ ]]: a bare id in two types is 400 ambiguous_link_target; [[type/id]] resolves it", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("x") });
+    const bare = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skillDoc("s", "# s\n\n## 도메인 지식\n\n[[x]]\n"),
+    });
+    assert.equal(bare.statusCode, 400);
+    assert.equal(bare.json().error, "ambiguous_link_target");
+    assert.match(bare.json().message, /타입\/id/);
+    assert.deepEqual(bare.json().targets, [{ text: "x", types: ["db-schema", "screen-map"] }]);
+
+    const typed = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skillDoc("s", "# s\n\n## 도메인 지식\n\n[[screen-map/x]]\n"),
+    });
+    assert.equal(typed.statusCode, 201, typed.body);
+    assert.deepEqual(typed.json().json.links, [link("screen-map", "x")]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("[[ ]]: PUT links cannot drop a body link; editing the [[ ]] out of the body drops it and keeps hand links", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("spc-chart-config") });
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const url = "/api/docs/domain-skill/s";
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skillDoc("s", "# s\n\n## 도메인 지식\n\n[[spc-chart-config]]\n"),
+    });
+    assert.equal(created.statusCode, 201, created.body);
+
+    const put = await app.inject({
+      method: "PUT",
+      url: `${url}/links`,
+      headers: { ...h, "if-match": created.json().rev },
+      payload: { links: [link("db-schema", "x")] },
+    });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json().json.links, [link("db-schema", "x"), link("screen-map", "spc-chart-config")]);
+
+    const edit = await app.inject({
+      method: "PUT",
+      url,
+      headers: { ...h, "if-match": put.json().rev },
+      payload: { name: "s", markdown: "# s\n\n## 도메인 지식\n\n이제 화면 이야기는 없다.\n" },
+    });
+    assert.equal(edit.statusCode, 200, edit.body);
+    assert.deepEqual(edit.json().json.links, [link("db-schema", "x")]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("[[ ]]: a manual's step texts are read too", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/docs/manual",
+      headers: h,
+      payload: {
+        schema: "manual/v1",
+        id: "m",
+        keywords: [{ kw: "m", inject: "pointer" }],
+        status: "inactive",
+        body: { title: "M", steps: [{ text: "표 [[x]] 를 연다." }] },
+      },
+    });
+    assert.equal(r.statusCode, 201, r.body);
+    assert.deepEqual(r.json().json.links, [link("db-schema", "x")]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("role: the domain-skill list carries role (absent = main); PUT role changes it under If-Match, skills only", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  ]);
+  const h = auth("edtok");
+  const skill = (name, markdown, extra = {}) => ({
+    schema: "domain-skill/v1",
+    id: name,
+    keywords: [{ kw: name, inject: "full" }],
+    status: "active",
+    ...extra,
+    body: { name, markdown },
+  });
+  try {
+    await app.inject({ method: "POST", url: "/api/docs/domain-skill", headers: h, payload: skill("m", "# m\n\n## 데이터\n\nx\n") });
+    const sub = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skill("k", "# k\n\n## 도메인 지식\n\n지식.\n", { role: "sub" }),
+    });
+    assert.equal(sub.statusCode, 201, sub.body);
+    const noKnowledge = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: skill("bad", "# bad\n\n## 데이터\n\nx\n", { role: "sub" }),
+    });
+    assert.equal(noKnowledge.statusCode, 400);
+
+    const list = (await app.inject({ method: "GET", url: "/api/docs?type=domain-skill" })).json().docs;
+    assert.deepEqual(
+      list.map((d) => [d.id, d.role]).sort(),
+      [["k", "sub"], ["m", "main"]],
+    );
+
+    const url = "/api/docs/domain-skill/m/role";
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/m" })).json();
+    assert.equal((await app.inject({ method: "PUT", url, headers: h, payload: { role: "sub" } })).statusCode, 428);
+    assert.equal(
+      (await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "x" } })).statusCode,
+      400,
+    );
+    // m has no 도메인 지식, so it cannot become a sub.
+    const toSub = await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
+    assert.equal(toSub.statusCode, 400);
+
+    const kRev = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/k" })).json().rev;
+    const toMain = await app.inject({
+      method: "PUT",
+      url: "/api/docs/domain-skill/k/role",
+      headers: { ...h, "if-match": kRev },
+      payload: { role: "main" },
+    });
+    assert.equal(toMain.statusCode, 200, toMain.body);
+    assert.deepEqual(Object.keys(toMain.json().json), ["schema", "id", "keywords", "status", "role", "body"]);
+    const stale = await app.inject({
+      method: "PUT",
+      url: "/api/docs/domain-skill/k/role",
+      headers: { ...h, "if-match": kRev },
+      payload: { role: "sub" },
+    });
+    assert.equal(stale.statusCode, 409);
+
+    await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
+    const xRev = (await app.inject({ method: "GET", url: "/api/docs/db-schema/x" })).json().rev;
+    const other = await app.inject({
+      method: "PUT",
+      url: "/api/docs/db-schema/x/role",
+      headers: { ...h, "if-match": xRev },
+      payload: { role: "main" },
+    });
+    assert.equal(other.statusCode, 400);
+    assert.equal(other.json().error, "role_not_allowed");
   } finally {
     await cleanup();
   }

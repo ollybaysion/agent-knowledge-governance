@@ -392,6 +392,7 @@ async function renderDocTree() {
   const tree = $("doc-tree");
   tree.replaceChildren();
   let pendingTotal = 0;
+  const pool = [];
   for (const type of DOC_TYPES) {
     const res = await api(`/api/docs?type=${type}`);
     // Inactive documents belong in the tree: they are readable by design and
@@ -400,6 +401,7 @@ async function renderDocTree() {
     const docs = (res.ok ? res.data.docs : []).filter(
       (d) => d.status !== "archived",
     );
+    pool.push(...docs.map((d) => ({ ...d, type })));
     // Local drafts (started but not saved) show in the tree immediately —
     // titled "(빈 문서)", "(빈 문서2)"… as they pile up — so every just-added
     // document is visible before it ever reaches the server. Named ones show
@@ -430,45 +432,43 @@ async function renderDocTree() {
         ],
       );
     });
+    for (const d of docs) pendingTotal += d.tiers.inferred || 0;
+    const docItem = (d, sub = false) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: `doc-item${d.status === "inactive" ? " off" : ""}${sub ? " sub-item" : ""}`,
+          "data-type": type,
+          "data-id": d.id,
+          onclick: () =>
+            (location.hash = `#/doc/${type}/${encodeURIComponent(d.id)}`),
+        },
+        [
+          el("span", { class: "nm", text: d.id }),
+          el("span", { class: "mini" }, [
+            d.status === "inactive"
+              ? el("span", { class: "mini-off", text: "비활성" })
+              : null,
+            d.tiers.inferred
+              ? el("span", {
+                  class: "mini-inf",
+                  text: String(d.tiers.inferred),
+                })
+              : null,
+            d.tiers.deprecated
+              ? el("span", {
+                  class: "mini-dep",
+                  text: String(d.tiers.deprecated),
+                })
+              : null,
+          ]),
+        ],
+      );
     const items = el(
       "div",
       { class: "grp-items" },
-      draftItems.concat(
-      docs.map((d) => {
-        pendingTotal += d.tiers.inferred || 0;
-        return el(
-          "button",
-          {
-            type: "button",
-            class: d.status === "inactive" ? "doc-item off" : "doc-item",
-            "data-type": type,
-            "data-id": d.id,
-            onclick: () =>
-              (location.hash = `#/doc/${type}/${encodeURIComponent(d.id)}`),
-          },
-          [
-            el("span", { class: "nm", text: d.id }),
-            el("span", { class: "mini" }, [
-              d.status === "inactive"
-                ? el("span", { class: "mini-off", text: "비활성" })
-                : null,
-              d.tiers.inferred
-                ? el("span", {
-                    class: "mini-inf",
-                    text: String(d.tiers.inferred),
-                  })
-                : null,
-              d.tiers.deprecated
-                ? el("span", {
-                    class: "mini-dep",
-                    text: String(d.tiers.deprecated),
-                  })
-                : null,
-            ]),
-          ],
-        );
-      }),
-      ),
+      draftItems.concat(type === "domain-skill" ? skillTree(docs, docItem) : docs.map((d) => docItem(d))),
     );
     const grp = el("div", { class: "grp" }, [
       el(
@@ -489,10 +489,37 @@ async function renderDocTree() {
     ]);
     tree.appendChild(grp);
   }
+  searchPool = pool;
   highlightTree();
+  runSearch();
   return pendingTotal;
 }
+// domain-skill: each main, then the subs its links point at, indented. A sub
+// two mains point at shows under both; a sub no main points at goes under
+// 연결 없음 at the end.
+function skillTree(docs, docItem) {
+  const subs = new Map(docs.filter((d) => d.role === "sub").map((d) => [d.id, d]));
+  const reached = new Set();
+  const out = [];
+  for (const m of docs.filter((d) => d.role !== "sub")) {
+    out.push(docItem(m));
+    for (const l of m.links || []) {
+      const sub = l.type === "domain-skill" ? subs.get(l.id) : null;
+      if (!sub) continue;
+      reached.add(sub.id);
+      out.push(docItem(sub, true));
+    }
+  }
+  const orphans = [...subs.values()].filter((d) => !reached.has(d.id));
+  if (orphans.length)
+    out.push(
+      el("div", { class: "tree-note", text: "연결 없음" }),
+      ...orphans.map((d) => docItem(d, true)),
+    );
+  return out;
+}
 function highlightTree() {
+  highlightResults();
   const draftHash = location.hash.match(/^#\/draft\/[\w-]+\/([\w-]+)/);
   for (const b of $("doc-tree").querySelectorAll(".doc-item")) {
     if (b.classList.contains("draft-item")) {
@@ -508,6 +535,74 @@ function highlightTree() {
     );
   }
 }
+
+// ---------- 문서 찾기 (사람용, 브라우저에서 거름) ----------
+// The tree's own list envelopes are the corpus: no request per keystroke.
+// While there is a query, results replace the tree, grouped by type.
+let searchPool = [];
+const searchState = { q: "" };
+const searchLib = import("/search.mjs").catch(() => null);
+
+async function runSearch() {
+  const lib = await searchLib;
+  const out = $("search-results");
+  const active = searchState.q.trim() !== "";
+  $("doc-tree").hidden = active;
+  out.hidden = !active;
+  if (!active) return;
+  if (!lib) {
+    out.replaceChildren(el("p", { class: "dim search-empty", text: "검색을 불러오지 못했습니다." }));
+    return;
+  }
+  const groups = lib.searchDocs(searchPool, { q: searchState.q, order: DOC_TYPES });
+  out.replaceChildren(
+    ...(groups.length
+      ? groups.map((g) =>
+          el("div", { class: "grp" }, [
+            el("div", { class: "grp-h" }, [` ${TYPE_LABEL[g.type]} `, el("span", { class: "cnt", text: String(g.docs.length) })]),
+            el(
+              "div",
+              { class: "grp-items" },
+              g.docs.map((d) =>
+                el(
+                  "button",
+                  {
+                    type: "button",
+                    class: d.status === "inactive" ? "doc-item off" : "doc-item",
+                    "data-type": g.type,
+                    "data-id": d.id,
+                    onclick: () => (location.hash = `#/doc/${g.type}/${encodeURIComponent(d.id)}`),
+                  },
+                  [
+                    el("span", { class: "nm", text: d.id }),
+                    d.title && d.title.toLowerCase() !== d.id
+                      ? el("span", { class: "search-title", text: d.title })
+                      : null,
+                  ],
+                ),
+              ),
+            ),
+          ]),
+        )
+      : [el("p", { class: "dim search-empty", text: "찾는 문서가 없습니다." })]),
+  );
+  highlightResults();
+}
+function highlightResults() {
+  for (const b of $("search-results").querySelectorAll(".doc-item"))
+    b.classList.toggle("on", !!lastDoc && b.dataset.type === lastDoc.type && b.dataset.id === lastDoc.id);
+}
+$("search-input").addEventListener("input", (e) => {
+  searchState.q = e.currentTarget.value;
+  runSearch();
+});
+$("search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.currentTarget.value) {
+    e.currentTarget.value = "";
+    searchState.q = "";
+    runSearch();
+  }
+});
 
 // ================= 개요 =================
 async function renderOverview() {
@@ -1293,6 +1388,7 @@ async function renderDocScreen(type, id) {
             }
           : null,
         jsonOpen,
+        res.data.wikilinks || [],
       );
       skill.appendChild(linksEl);
       section.replaceChildren(
@@ -1619,6 +1715,35 @@ async function renderDocScreen(type, id) {
   renderInner();
 }
 
+// `[[ ]]` in a body text, drawn from the server's resolution (GET …
+// wikilinks): a found target is a link to it, anything else is red text. The
+// element shows the plain text at once and gains the links when the shared
+// parser (/wikilinks.mjs) has loaded.
+const wikiLib = import("/wikilinks.mjs").catch(() => null);
+function wikiText(node, text, wikis) {
+  node.textContent = text;
+  const byText = new Map((wikis || []).map((w) => [w.text, w]));
+  wikiLib.then((lib) => {
+    if (!lib) return;
+    node.replaceChildren(
+      ...lib.wikiSegments(text).map((seg) => {
+        if (!seg.link) return document.createTextNode(seg.text);
+        const w = byText.get(seg.link.text);
+        if (w && w.found)
+          return el("a", { class: "wiki", href: `#/doc/${w.type}/${encodeURIComponent(w.id)}`, text: seg.text });
+        return el("span", {
+          class: "wiki missing",
+          title: w && w.types
+            ? `여러 타입에 있습니다(${w.types.join(" · ")}) — [[타입/id]] 로 적으세요`
+            : "store 에 없는 문서입니다 — 연결에 들어가지 않습니다",
+          text: seg.text,
+        });
+      }),
+    );
+  });
+  return node;
+}
+
 // The header row the body views share: status chip (an approver's toggle),
 // rev, keywords, and the approver's JSON split.
 function viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen) {
@@ -1681,12 +1806,57 @@ function inactiveBar(doc) {
   ]);
 }
 
+// The section splitter the server's validator uses (src/skill-sections.mjs,
+// served as a module). Null when it fails to load — the editor then falls
+// back to the whole md.
+const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
+
+// A skill's role: main = an agent can be this skill, sub = knowledge a main
+// points at. An editor's click flips it (PUT …/role); the server refuses a sub
+// without ## 도메인 지식.
+const ROLE_MEANING = {
+  main: "main 스킬 — 에이전트 목록에 오릅니다.",
+  sub: "sub 스킬 — main 이 가리키는 지식 문서입니다. 에이전트 목록에는 오르지 않습니다.",
+};
+function roleChip(doc, rev, canEdit, reload) {
+  const role = doc.role ?? "main";
+  const next = role === "main" ? "sub" : "main";
+  if (!canEdit)
+    return el("span", { class: `chip role-${role}`, text: role.toUpperCase(), title: ROLE_MEANING[role] });
+  return el("button", {
+    type: "button",
+    class: `chip role-${role} st-toggle`,
+    text: role.toUpperCase(),
+    title: `${ROLE_MEANING[role]} 클릭하면 ${next} 로 바꿉니다.`,
+    onclick: async () => {
+      if (!confirm(`이 스킬을 ${next} 로 바꿀까요?`)) return;
+      const r = await api(`/api/docs/domain-skill/${encodeURIComponent(doc.id)}/role`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body: { role: next },
+      });
+      if (r.ok) {
+        toast(`${next} 로 바꿨습니다`, "ok");
+        reload();
+        return;
+      }
+      const d = r.data || {};
+      toast(
+        r.status === 409
+          ? "다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요."
+          : `바꾸지 못했습니다 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`,
+        "error",
+      );
+    },
+  });
+}
+
 // domain-skill: the body is the author's md, stored verbatim (user decision
 // 2026-09-21) — so the view is the text and one editor for it, not a per-field
 // form. The heading structure inside the text is the consumer's schema
 // (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
 // refuses a `##` section it does not know, and the error comes back here.
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
   const s = doc.body;
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
 
@@ -1733,51 +1903,50 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return "";
   }
 
+  const chips = viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen);
+  chips.insertBefore(roleChip(doc, rev, canEdit, reload), chips.children[1] ?? null);
   const wrap = el("div", { class: "skwrap" }, [
     el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
     el("h1", { class: "sk-title", text: s.name }),
     el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
-    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    chips,
     inactiveBar(doc),
   ]);
 
   // ── 문서 ──────────────────────────────────────────────────────────────
-  // Read: the md as written, in a <pre> (the dashboard does not render md — the
-  // consumer does, and what it reads is exactly this text). Edit: one textarea
-  // over the whole document; 저장 = one PUT of { name, markdown }.
+  // Read: one block per `##` section (heading + its text as written — the
+  // dashboard does not render md, the consumer does). Each block has its own
+  // 편집, which turns that block alone into a textarea; 전체 md 편집 opens the
+  // whole text. A md the section splitter refuses is read and edited whole.
+  // Every save is one PUT of { name, markdown }, so the stored document is one
+  // md as before.
   const docHolder = el("div", { class: "sk-doc" });
-  function read() {
-    const h = el("h2", { class: "sk-h" }, ["문서"]);
-    if (canEdit)
-      h.appendChild(
-        el("button", { type: "button", class: "btn ghost sm add-btn", onclick: edit, text: "편집" }),
-      );
-    docHolder.replaceChildren(
-      h,
-      (s.markdown || "").trim() === ""
-        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
-        : el("pre", { class: "sk-md", text: s.markdown }),
-      el("p", {
-        class: "dim",
-        text: "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.",
-      }),
-    );
+  const HINT =
+    "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.";
+
+  async function read() {
+    const lib = await skillSectionsLib;
+    if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
+    try {
+      readSections(lib, lib.splitSkill(s.markdown || ""), null);
+    } catch (e) {
+      if (!(e instanceof lib.SkillSplitError)) throw e;
+      readWhole(`절 단위로 나눌 수 없어 전체 md 로 보입니다 — ${e.message}`);
+    }
   }
-  function edit() {
-    const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
-    input.value = s.markdown || "";
+
+  // An inline editor: 저장 · 취소 · esc · ⌘↵. `value()` is the md to save.
+  function editor(input, { dirty, value }) {
     const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
-    const dirty = () => input.value !== (s.markdown || "");
     const refresh = () => {
       save.disabled = !dirty();
       save.title = dirty() ? "" : "변경 없음";
     };
     save.addEventListener("click", async () => {
       save.disabled = true;
-      const ok = await commit({ ...s, markdown: input.value });
+      const ok = await commit({ ...s, markdown: value() });
       if (!ok) save.disabled = false;
     });
-    input.addEventListener("input", refresh);
     const card = el("div", { class: "slot-edit" }, [
       input,
       el("div", { class: "editacts" }, [
@@ -1791,6 +1960,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         ]),
       ]),
     ]);
+    input.addEventListener("input", refresh);
     card.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1801,8 +1971,83 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         if (!save.disabled) save.click();
       }
     });
-    docHolder.replaceChildren(el("h2", { class: "sk-h" }, ["문서 편집"]), card);
     refresh();
+    return card;
+  }
+
+  const editBtn = (label, onclick, disabled) =>
+    canEdit
+      ? el("button", { type: "button", class: "btn ghost sm add-btn", text: label, disabled, onclick })
+      : null;
+
+  // `editing` = the key of the one section open in a textarea, or null. While
+  // one is open every other 편집 is off — one edit at a time.
+  function readSections(lib, split, editing) {
+    const name = split.title ?? s.name;
+    const blocks = split.sections.map((sec) => {
+      const head = el("div", { class: "sk-sec-head" }, [
+        el("h3", { class: "sk-sec-h mono", text: `## ${sec.heading}` }),
+        editing === sec.key
+          ? null
+          : editBtn("편집", () => readSections(lib, split, sec.key), editing !== null),
+      ]);
+      if (editing === sec.key) {
+        const ta = el("textarea", {
+          class: "fld mono sk-sec-edit",
+          spellcheck: "false",
+          rows: Math.min(24, Math.max(3, sec.body.split("\n").length + 1)),
+          "aria-label": `## ${sec.heading}`,
+        });
+        ta.value = sec.body;
+        queueMicrotask(() => ta.focus());
+        return el("div", { class: "sk-sec editing" }, [
+          head,
+          editor(ta, {
+            dirty: () => ta.value !== sec.body,
+            // Unchanged gives back the md as it was (any section order).
+            value: () =>
+              ta.value === sec.body
+                ? s.markdown || ""
+                : lib.joinSkill(
+                    name,
+                    split.sections.map((x) => (x.key === sec.key ? { ...x, body: ta.value } : x)),
+                  ),
+          }),
+        ]);
+      }
+      return el("div", { class: "sk-sec" }, [
+        head,
+        sec.body.trim() === ""
+          ? el("p", { class: "dim", text: "비어 있습니다 — 비어 있는 절은 저장된 md 에 들어가지 않습니다." })
+          : wikiText(el("pre", { class: "sk-md" }), sec.body, wikis),
+      ]);
+    });
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서", editBtn("전체 md 편집", editWhole, editing !== null)]),
+      el("p", { class: "sk-sec-title mono", text: `# ${name}` }),
+      ...blocks,
+      el("p", { class: "dim", text: HINT }),
+    );
+  }
+
+  function readWhole(note) {
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서", editBtn("편집", editWhole, false)]),
+      note ? el("p", { class: "dim", text: note }) : null,
+      (s.markdown || "").trim() === ""
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
+        : wikiText(el("pre", { class: "sk-md" }), s.markdown, wikis),
+      el("p", { class: "dim", text: HINT }),
+    );
+  }
+
+  function editWhole() {
+    const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
+    input.value = s.markdown || "";
+    docHolder.replaceChildren(
+      el("h2", { class: "sk-h" }, ["문서 편집 · 전체 md"]),
+      editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value }),
+    );
     input.focus();
   }
   read();
@@ -1924,7 +2169,7 @@ async function uploadCapture(file) {
   return { error: `올리기 실패 (${r.status || "네트워크"})` };
 }
 
-function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen) {
+function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
   const b = doc.body;
   const steps = b.steps || [];
   const screen = (doc.links || []).find((l) => l.rel === "screen");
@@ -1960,7 +2205,11 @@ function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
             { class: "mn-steps" },
             steps.map((s, i) =>
               el("li", { class: "mn-step" }, [
-                el("p", { class: "mn-text" }, [el("b", { class: "mono", text: `${i + 1}.` }), " ", s.text || ""]),
+                el("p", { class: "mn-text" }, [
+                  el("b", { class: "mono", text: `${i + 1}.` }),
+                  " ",
+                  wikiText(el("span"), s.text || "", wikis),
+                ]),
                 s.asset
                   ? captureImg(s, "mn-cap")
                   : el("p", { class: "mn-nocap dim", text: "캡처 없음" }),
@@ -2123,9 +2372,19 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     return targetsOf.get(t);
   }
 
+  // Links the body's [[ ]] made: shown with 본문에서, removed only by editing
+  // the body (the server re-adds them to whatever PUT …/links sends).
+  const fromBody = new Set(
+    (data.wikilinks || []).filter((w) => w.found).map((w) => `${w.type}/${w.id}#related`),
+  );
+  const isFromBody = (l) => fromBody.has(`${l.type}/${l.id}#${l.rel}`);
+  const bodyChip = () =>
+    el("span", { class: "chip from-body", title: "본문의 [[ ]] 에서 온 연결입니다", text: "본문에서" });
+
   function item(link) {
     return el("li", { class: "link-item" }, [
       el("span", { class: "chip", text: link.rel }),
+      isFromBody(link) ? bodyChip() : null,
       el("a", {
         href: `#/doc/${link.type}/${encodeURIComponent(link.id)}`,
         text: `${link.type}/${link.id}`,
@@ -2158,7 +2417,10 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
   }
 
   function edit() {
-    const rows = (data.links || []).map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+    const rows = (data.links || [])
+      .filter((l) => !isFromBody(l))
+      .map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+    const fixed = (data.links || []).filter(isFromBody);
     const body = el("div", { class: "links-rows" });
     const relList = el(
       "datalist",
@@ -2216,7 +2478,15 @@ function linksSection(type, id, data, getRev, canEdit, reload) {
     }
     function paint() {
       body.replaceChildren(
-        ...(rows.length ? rows.map(row) : [el("p", { class: "dim", text: "연결이 없습니다." })]),
+        ...fixed.map((l) =>
+          el("div", { class: "link-row fixed" }, [
+            el("span", { class: "mono", text: TYPE_LABEL[l.type] ?? l.type }),
+            el("span", { class: "mono", text: l.id }),
+            el("span", { class: "mono", text: l.rel }),
+            bodyChip(),
+          ]),
+        ),
+        ...(rows.length || fixed.length ? rows.map(row) : [el("p", { class: "dim", text: "연결이 없습니다." })]),
       );
     }
 
@@ -3032,6 +3302,21 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
   const wrap = el("div", { class: "dfwrap" });
   wrap.append(
     dfRow(
+      "role",
+      true,
+      eSelect(
+        () => body.role || "main",
+        (v) => (body.role = v),
+        [
+          { value: "main", label: "main — 에이전트가 될 스킬" },
+          { value: "sub", label: "sub — main 이 가리키는 지식 (## 도메인 지식 필수)" },
+        ],
+        persist,
+      ),
+    ),
+  );
+  wrap.append(
+    dfRow(
       "markdown",
       false,
       eField(() => body.markdown, (v) => (body.markdown = v), {
@@ -3119,6 +3404,7 @@ async function saveDraft(type, localId, body) {
     id,
     keywords: [{ kw: id, inject: "full" }],
     status: "inactive",
+    ...(type === "domain-skill" ? { role: body.role || "main" } : {}),
     body: finalizeDraftBody(type, body),
   };
   const r = await api(`/api/docs/${type}`, { method: "POST", body: doc });

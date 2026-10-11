@@ -21,7 +21,13 @@ import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
-import { backlinksOf, missingLinkTargets, resolveLinks } from "../links.mjs";
+import {
+  backlinksOf,
+  mergeBodyLinks,
+  missingLinkTargets,
+  resolveLinks,
+  resolveWikilinks,
+} from "../links.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -53,6 +59,13 @@ function docMd(storeDir, type, doc) {
   } catch {
     return null;
   }
+}
+
+// The name people know a document by, for the dashboard's search: a manual's
+// title, a screen's name, a skill's name, a table, a command.
+function titleOf(doc) {
+  const b = doc.body ?? {};
+  return b.title ?? b.name ?? b.table ?? b.command ?? null;
 }
 
 function priorityOf(user) {
@@ -87,6 +100,9 @@ export function registerDocsRoutes(app) {
             tiers,
             keywords: doc.keywords,
             links: doc.links ?? [],
+            title: titleOf(doc),
+            // what an agent list filters on; absent reads as main
+            ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
           });
         }
@@ -128,6 +144,7 @@ export function registerDocsRoutes(app) {
         slots,
         links: resolveLinks(storeDir, doc.links),
         backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
+        wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
       };
     },
   );
@@ -165,7 +182,12 @@ export function registerDocsRoutes(app) {
             .send({ error: "edit_rejected", message: err.message });
         throw err;
       }
-      const doc = { ...submitted, body: resolvedBody };
+      const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+        ...submitted,
+        body: resolvedBody,
+      });
+      if (merged.error) return reply.code(400).send(merged.error);
+      const doc = merged.doc;
       const errors = validateForStore(doc, refs, inStore);
       if (errors.length)
         return reply
@@ -279,7 +301,13 @@ export function registerDocsRoutes(app) {
             }
           }
 
-          const newDoc = { ...currentDoc, body: mergedBody };
+          // [[ ]] the edit added or dropped move links[] with it.
+          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, currentDoc, {
+            ...currentDoc,
+            body: mergedBody,
+          });
+          if (merged.error) return { status: 400, body: merged.error };
+          const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
@@ -355,7 +383,16 @@ export function registerDocsRoutes(app) {
           }
           throw err;
         }
-        const doc = { ...raw, status: "inactive", body };
+        const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+          ...raw,
+          status: "inactive",
+          body,
+        });
+        if (merged.error) {
+          rejected.push({ ...at, ...merged.error });
+          continue;
+        }
+        const doc = merged.doc;
         const errors = validateForStore(doc, refs, inStore);
         if (errors.length) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
@@ -505,18 +542,18 @@ export function registerDocsRoutes(app) {
               body: { error: "unknown_base_rev", currentRev, current: doc },
             };
 
-          // links sits before body, the order json-spec §2 lists the keys in.
-          const { links: _old, body, ...head } = doc;
-          const newDoc = links.length
-            ? { ...head, links, body }
-            : { ...head, body };
+          // The body's [[ ]] stay linked whatever the list says: they are
+          // removed by editing the body, not here.
+          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, doc, doc, links);
+          if (merged.error) return { status: 400, body: merged.error };
+          const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
-          const missing = missingLinkTargets(storeDir, links);
+          const missing = missingLinkTargets(storeDir, newDoc.links);
           if (missing.length)
             return {
               status: 400,
@@ -526,6 +563,54 @@ export function registerDocsRoutes(app) {
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `links ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // A domain-skill's role (main | sub), the one envelope key besides links an
+  // editor changes after creation. Same If-Match rule as links.
+  app.put(
+    "/api/docs/:type/:id/role",
+    { config: { roles: ["editor"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (type !== "domain-skill")
+        return reply.code(400).send({ error: "role_not_allowed" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const role = request.body?.role;
+      if (role !== "main" && role !== "sub")
+        return reply.code(400).send({ error: "invalid_role" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return {
+              status: 409,
+              body: { error: "unknown_base_rev", currentRev, current: doc },
+            };
+
+          // role sits after status, before links and body.
+          const { schema, id: did, keywords, status, role: _old, ...rest } = doc;
+          const newDoc = { schema, id: did, keywords, status, role, ...rest };
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length)
+            return {
+              status: 400,
+              body: { error: "validation_failed", details: errors },
+            };
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `role ${type}/${id} → ${role}`,
           });
           return { status: 200, body: { rev, json: newDoc } };
         },

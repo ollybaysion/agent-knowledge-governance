@@ -1411,7 +1411,8 @@ ol.steps > li p {
   color: var(--body-strong);
   white-space: pre-wrap;
 }
-.slot-edit textarea.sk-md-edit {
+.slot-edit textarea.sk-md-edit,
+.slot-edit textarea.sk-sec-edit {
   width: 100%;
   min-height: 24em;
   font-family: var(--mono);
@@ -1424,7 +1425,35 @@ ol.steps > li p {
   padding: 9px 11px;
   resize: vertical;
 }
-.slot-edit textarea.sk-md-edit:focus {
+/* 절 단위 편집 — 절마다 고정 제목 + textarea, 높이는 글 길이에 맞춘 rows */
+.slot-edit textarea.sk-sec-edit {
+  min-height: 0;
+}
+.sk-sec-title {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.sk-sec {
+  margin-top: 14px;
+}
+.sk-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sk-sec-h {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--body-strong);
+}
+.sk-h .add-btn {
+  margin-left: 8px;
+}
+.slot-edit textarea.sk-md-edit:focus,
+.slot-edit textarea.sk-sec-edit:focus {
   outline: 2px solid var(--primary);
   outline-offset: 0;
   border-color: transparent;
@@ -2884,4 +2913,80 @@ textarea.df-inp {
 .sm-list {
   margin: 0;
   padding-left: 20px;
+}
+
+/* 문서 찾기 — 사이드바 위 입력 한 칸, 결과는 트리 자리에 타입별 묶음 */
+#doc-search {
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+}
+#search-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+#search-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+.search-title {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#search-results .doc-item {
+  flex-wrap: wrap;
+}
+.search-empty {
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* 본문의 [[ ]] — 찾은 대상은 링크, 없는 대상은 빨간 글 */
+a.wiki {
+  color: var(--primary);
+}
+.wiki.missing {
+  color: var(--error-ink);
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.chip.from-body {
+  color: var(--primary);
+}
+.link-row.fixed {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+/* domain-skill 트리 — main 아래 그 main 이 가리키는 sub 를 한 단 들여쓰기 */
+.doc-item.sub-item {
+  padding-left: 40px;
+  position: relative;
+}
+.doc-item.sub-item::before {
+  content: "└";
+  position: absolute;
+  left: 26px;
+  color: var(--muted-soft);
+}
+.tree-note {
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.chip.role-sub {
+  color: var(--teal-ink);
 }

@@ -253,3 +253,12 @@ test("manual: the example renders byte-identically to the checked-in golden", ()
   const expected = readFileSync(join(__dirname, "fixtures", "manual-golden.md"), "utf8");
   assert.equal(renderManualMd(doc), expected);
 });
+
+test("domain-skill: the sub example renders byte-identically to its golden", () => {
+  const doc = JSON.parse(
+    readFileSync(join(__dirname, "..", "examples", "domain-skill", "fdc-virtual-sensor-formula.json"), "utf8"),
+  );
+  assert.deepEqual(validateDocument(doc, refs), []);
+  const expected = readFileSync(join(__dirname, "fixtures", "domain-skill-sub-golden-SKILL.md"), "utf8");
+  assert.equal(renderDomainSkillMd(doc), expected);
+});

@@ -54,6 +54,16 @@
 
     <div class="layout" hidden id="app-layout">
       <aside aria-label="문서 트리" class="sidebar">
+        <div id="doc-search">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="문서 찾기 — id · 키워드 · 제목"
+            aria-label="문서 찾기"
+            autocomplete="off"
+          />
+        </div>
+        <div id="search-results" hidden></div>
         <div id="doc-tree"></div>
         <div id="tree-actions"></div>
       </aside>
