@@ -432,45 +432,43 @@ async function renderDocTree() {
         ],
       );
     });
+    for (const d of docs) pendingTotal += d.tiers.inferred || 0;
+    const docItem = (d, sub = false) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: `doc-item${d.status === "inactive" ? " off" : ""}${sub ? " sub-item" : ""}`,
+          "data-type": type,
+          "data-id": d.id,
+          onclick: () =>
+            (location.hash = `#/doc/${type}/${encodeURIComponent(d.id)}`),
+        },
+        [
+          el("span", { class: "nm", text: d.id }),
+          el("span", { class: "mini" }, [
+            d.status === "inactive"
+              ? el("span", { class: "mini-off", text: "비활성" })
+              : null,
+            d.tiers.inferred
+              ? el("span", {
+                  class: "mini-inf",
+                  text: String(d.tiers.inferred),
+                })
+              : null,
+            d.tiers.deprecated
+              ? el("span", {
+                  class: "mini-dep",
+                  text: String(d.tiers.deprecated),
+                })
+              : null,
+          ]),
+        ],
+      );
     const items = el(
       "div",
       { class: "grp-items" },
-      draftItems.concat(
-      docs.map((d) => {
-        pendingTotal += d.tiers.inferred || 0;
-        return el(
-          "button",
-          {
-            type: "button",
-            class: d.status === "inactive" ? "doc-item off" : "doc-item",
-            "data-type": type,
-            "data-id": d.id,
-            onclick: () =>
-              (location.hash = `#/doc/${type}/${encodeURIComponent(d.id)}`),
-          },
-          [
-            el("span", { class: "nm", text: d.id }),
-            el("span", { class: "mini" }, [
-              d.status === "inactive"
-                ? el("span", { class: "mini-off", text: "비활성" })
-                : null,
-              d.tiers.inferred
-                ? el("span", {
-                    class: "mini-inf",
-                    text: String(d.tiers.inferred),
-                  })
-                : null,
-              d.tiers.deprecated
-                ? el("span", {
-                    class: "mini-dep",
-                    text: String(d.tiers.deprecated),
-                  })
-                : null,
-            ]),
-          ],
-        );
-      }),
-      ),
+      draftItems.concat(type === "domain-skill" ? skillTree(docs, docItem) : docs.map((d) => docItem(d))),
     );
     const grp = el("div", { class: "grp" }, [
       el(
@@ -495,6 +493,30 @@ async function renderDocTree() {
   highlightTree();
   runSearch();
   return pendingTotal;
+}
+// domain-skill: each main, then the subs its links point at, indented. A sub
+// two mains point at shows under both; a sub no main points at goes under
+// 연결 없음 at the end.
+function skillTree(docs, docItem) {
+  const subs = new Map(docs.filter((d) => d.role === "sub").map((d) => [d.id, d]));
+  const reached = new Set();
+  const out = [];
+  for (const m of docs.filter((d) => d.role !== "sub")) {
+    out.push(docItem(m));
+    for (const l of m.links || []) {
+      const sub = l.type === "domain-skill" ? subs.get(l.id) : null;
+      if (!sub) continue;
+      reached.add(sub.id);
+      out.push(docItem(sub, true));
+    }
+  }
+  const orphans = [...subs.values()].filter((d) => !reached.has(d.id));
+  if (orphans.length)
+    out.push(
+      el("div", { class: "tree-note", text: "연결 없음" }),
+      ...orphans.map((d) => docItem(d, true)),
+    );
+  return out;
 }
 function highlightTree() {
   highlightResults();
@@ -1789,6 +1811,46 @@ function inactiveBar(doc) {
 // back to the whole md.
 const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
 
+// A skill's role: main = an agent can be this skill, sub = knowledge a main
+// points at. An editor's click flips it (PUT …/role); the server refuses a sub
+// without ## 도메인 지식.
+const ROLE_MEANING = {
+  main: "main 스킬 — 에이전트 목록에 오릅니다.",
+  sub: "sub 스킬 — main 이 가리키는 지식 문서입니다. 에이전트 목록에는 오르지 않습니다.",
+};
+function roleChip(doc, rev, canEdit, reload) {
+  const role = doc.role ?? "main";
+  const next = role === "main" ? "sub" : "main";
+  if (!canEdit)
+    return el("span", { class: `chip role-${role}`, text: role.toUpperCase(), title: ROLE_MEANING[role] });
+  return el("button", {
+    type: "button",
+    class: `chip role-${role} st-toggle`,
+    text: role.toUpperCase(),
+    title: `${ROLE_MEANING[role]} 클릭하면 ${next} 로 바꿉니다.`,
+    onclick: async () => {
+      if (!confirm(`이 스킬을 ${next} 로 바꿀까요?`)) return;
+      const r = await api(`/api/docs/domain-skill/${encodeURIComponent(doc.id)}/role`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body: { role: next },
+      });
+      if (r.ok) {
+        toast(`${next} 로 바꿨습니다`, "ok");
+        reload();
+        return;
+      }
+      const d = r.data || {};
+      toast(
+        r.status === 409
+          ? "다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요."
+          : `바꾸지 못했습니다 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`,
+        "error",
+      );
+    },
+  });
+}
+
 // domain-skill: the body is the author's md, stored verbatim (user decision
 // 2026-09-21) — so the view is the text and one editor for it, not a per-field
 // form. The heading structure inside the text is the consumer's schema
@@ -1841,11 +1903,13 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return "";
   }
 
+  const chips = viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen);
+  chips.insertBefore(roleChip(doc, rev, canEdit, reload), chips.children[1] ?? null);
   const wrap = el("div", { class: "skwrap" }, [
     el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
     el("h1", { class: "sk-title", text: s.name }),
     el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
-    viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
+    chips,
     inactiveBar(doc),
   ]);
 
@@ -3238,6 +3302,21 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
   const wrap = el("div", { class: "dfwrap" });
   wrap.append(
     dfRow(
+      "role",
+      true,
+      eSelect(
+        () => body.role || "main",
+        (v) => (body.role = v),
+        [
+          { value: "main", label: "main — 에이전트가 될 스킬" },
+          { value: "sub", label: "sub — main 이 가리키는 지식 (## 도메인 지식 필수)" },
+        ],
+        persist,
+      ),
+    ),
+  );
+  wrap.append(
+    dfRow(
       "markdown",
       false,
       eField(() => body.markdown, (v) => (body.markdown = v), {
@@ -3325,6 +3404,7 @@ async function saveDraft(type, localId, body) {
     id,
     keywords: [{ kw: id, inject: "full" }],
     status: "inactive",
+    ...(type === "domain-skill" ? { role: body.role || "main" } : {}),
     body: finalizeDraftBody(type, body),
   };
   const r = await api(`/api/docs/${type}`, { method: "POST", body: doc });

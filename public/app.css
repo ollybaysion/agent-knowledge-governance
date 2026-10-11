@@ -2970,3 +2970,23 @@ a.wiki {
   color: var(--muted);
   padding: 4px 0;
 }
+
+/* domain-skill 트리 — main 아래 그 main 이 가리키는 sub 를 한 단 들여쓰기 */
+.doc-item.sub-item {
+  padding-left: 40px;
+  position: relative;
+}
+.doc-item.sub-item::before {
+  content: "└";
+  position: absolute;
+  left: 26px;
+  color: var(--muted-soft);
+}
+.tree-note {
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.chip.role-sub {
+  color: var(--teal-ink);
+}
