@@ -1,5 +1,7 @@
-// A domain-skill's `## 데이터` item ids are procurement keys, unique across
-// every stored skill (active or inactive; archived ones are out).
+// A domain-skill's `## 데이터` query ids (items with a ```sql fence) are
+// procurement keys the consumer looks up across every stored skill (active or
+// inactive; archived ones are out), so one may not sit in two skills. A
+// question (no sql) is the skill's own and may repeat across skills.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -29,8 +31,11 @@ async function setup() {
 }
 const auth = (t) => ({ authorization: `Bearer ${t}` });
 
-function skill(name, ids, status = "active") {
-  const items = ids.map((id) => `### ${id} — 항목\n\n설명.`).join("\n\n");
+function skill(name, ids, status = "active", asks = []) {
+  const items = [
+    ...ids.map((id) => `### ${id} — 조회\n\n\`\`\`sql\nSELECT 1 FROM t WHERE k = :${id}\n\`\`\``),
+    ...asks.map((id) => `### ${id} — 물음\n\n어느 ${id}?`),
+  ].join("\n\n");
   return {
     schema: "domain-skill/v1",
     id: name,
@@ -51,6 +56,22 @@ test("POST: a data id another skill holds is 409 data_id_conflict naming that sk
     assert.deepEqual(r.json(), { error: "data_id_conflict", conflicts: [{ id: "snsr_id", doc: "a" }] });
     const got = await app.inject({ method: "GET", url: "/api/docs/domain-skill/b" });
     assert.equal(got.statusCode, 404);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("POST: a question id may sit in every skill; the same id as a query in either skill is 409", async () => {
+  const { app, cleanup } = await setup();
+  try {
+    assert.equal((await post(app, skill("a", ["trace"], "active", ["duration", "param_index"]))).statusCode, 201);
+    assert.equal((await post(app, skill("b", ["events"], "active", ["duration", "param_index"]))).statusCode, 201);
+    const askVsQuery = await post(app, skill("c", ["duration"]));
+    assert.equal(askVsQuery.statusCode, 409, askVsQuery.body);
+    assert.deepEqual(askVsQuery.json().conflicts, [{ id: "duration", doc: "a" }]);
+    const queryVsAsk = await post(app, skill("d", [], "active", ["trace"]));
+    assert.equal(queryVsAsk.statusCode, 409, queryVsAsk.body);
+    assert.deepEqual(queryVsAsk.json().conflicts, [{ id: "trace", doc: "a" }]);
   } finally {
     await cleanup();
   }

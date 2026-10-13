@@ -2,9 +2,11 @@ import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { listIds, readJson } from "./store.mjs";
 
 /**
- * Data id → the stored domain-skill that has it, over every skill except
- * `selfId` and the archived ones. Read on each call: skills are few.
- * @returns {Map<string, string>}
+ * Data id → the stored domain-skill that has it and whether its item is a
+ * query, over every skill except `selfId` and the archived ones. A query
+ * owner wins over a question owner of the same id. Read on each call: skills
+ * are few.
+ * @returns {Map<string, {doc: string, query: boolean}>}
  */
 export function dataIdOwners(storeDir, selfId) {
   const owners = new Map();
@@ -18,7 +20,8 @@ export function dataIdOwners(storeDir, selfId) {
     }
     if (!doc || doc.status === "archived" || typeof doc.body?.markdown !== "string") continue;
     for (const item of skillDataIds(doc.body.markdown))
-      if (!owners.has(item.id)) owners.set(item.id, id);
+      if (!owners.has(item.id) || (item.query && !owners.get(item.id).query))
+        owners.set(item.id, { doc: id, query: item.query });
   }
   return owners;
 }
