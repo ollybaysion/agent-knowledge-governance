@@ -447,8 +447,9 @@ export function registerDocsRoutes(app) {
             for (const doc of docs) {
               for (const c of dataIdConflicts(doc, () => taken))
                 conflicts.push({ ...c, source: doc.id });
-              for (const { id } of skillDataIds(doc.body.markdown))
-                if (!taken.has(id)) taken.set(id, doc.id);
+              for (const { id, query } of skillDataIds(doc.body.markdown))
+                if (!taken.has(id) || (query && !taken.get(id).query))
+                  taken.set(id, { doc: doc.id, query });
             }
             if (conflicts.length)
               return {

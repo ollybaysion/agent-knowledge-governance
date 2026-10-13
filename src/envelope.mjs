@@ -190,21 +190,28 @@ function checkSkillDataIds(doc, errors) {
 }
 
 /**
- * The data ids a skill shares with other stored skills — the consumer keeps
- * the first and silently drops the rest, so a write must not create one.
- * Kept apart from validateDocument's errors: a conflict is a 409 (the store
- * has the other side), not a 400 about this document alone.
+ * The data ids a skill shares with other stored skills where a query is on
+ * either side — the consumer looks a query up by id across every skill, keeps
+ * the first and silently drops the rest, so a write must not create one. A
+ * question (an item without ```sql) is the skill's own: every skill that asks
+ * `duration` or `param_index` carries its own item, and two of those never
+ * conflict. Kept apart from validateDocument's errors: a conflict is a 409
+ * (the store has the other side), not a 400 about this document alone.
  * @param {object} doc
- * @param {(selfId: string) => Map<string, string>} [dataIdOwners] data id →
- *   the stored skill that has it, `selfId` and archived ones left out
+ * @param {(selfId: string) => Map<string, {doc: string, query: boolean}>} [dataIdOwners]
+ *   data id → the stored skill that has it and whether its item is a query,
+ *   `selfId` and archived ones left out
  * @returns {{id: string, doc: string}[]}
  */
 export function dataIdConflicts(doc, dataIdOwners) {
   if (doc?.schema !== "domain-skill/v1" || !dataIdOwners) return [];
-  const ids = new Set(skillDataIds(doc.body?.markdown).map((d) => d.id));
-  if (ids.size === 0) return [];
+  const mine = new Map();
+  for (const d of skillDataIds(doc.body?.markdown)) mine.set(d.id, mine.get(d.id) || d.query);
+  if (mine.size === 0) return [];
   const owners = dataIdOwners(doc.id);
-  return [...ids].filter((id) => owners.has(id)).map((id) => ({ id, doc: owners.get(id) }));
+  return [...mine]
+    .filter(([id, query]) => owners.has(id) && (query || owners.get(id).query))
+    .map(([id]) => ({ id, doc: owners.get(id).doc }));
 }
 
 const SEMANTIC_CHECKS = {

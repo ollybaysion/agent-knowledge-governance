@@ -297,7 +297,7 @@ test("dataIdConflicts: the ids another skill holds, by the lookup the store give
   const asked = [];
   const owners = (selfId) => {
     asked.push(selfId);
-    return new Map([["row", "other-skill"], ["zzz", "third"]]);
+    return new Map([["row", { doc: "other-skill", query: true }], ["zzz", { doc: "third", query: true }]]);
   };
   assert.deepEqual(dataIdConflicts(skillDoc(), owners), [{ id: "row", doc: "other-skill" }]);
   assert.deepEqual(asked, ["x"]);
@@ -305,14 +305,27 @@ test("dataIdConflicts: the ids another skill holds, by the lookup the store give
   assert.deepEqual(dataIdConflicts(minimalDbSchemaDoc(), owners), []);
 });
 
-test("domain-skill: the shipped examples share no data id", () => {
+test("dataIdConflicts: a question shared with another skill's question is no conflict; a query on either side is", () => {
+  // the fixture: `id` is an ask item, `row` a sql item
+  const owners = (map) => () => new Map(Object.entries(map));
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ id: { doc: "o", query: false } })), []);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ id: { doc: "o", query: true } })), [{ id: "id", doc: "o" }]);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ row: { doc: "o", query: false } })), [{ id: "row", doc: "o" }]);
+  const md = SKILL_MD().replace("### id — 조회 키", "### duration — 기간");
+  assert.deepEqual(
+    dataIdConflicts(skillDoc({ name: "x", markdown: md }), owners({ duration: { doc: "o", query: false } })),
+    [],
+  );
+});
+
+test("domain-skill: the shipped examples share no query id", () => {
   const dir = join(__dirname, "..", "examples", "domain-skill");
   const owners = new Map();
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
     const doc = JSON.parse(readFileSync(join(dir, file), "utf8"));
-    for (const { id } of skillDataIds(doc.body.markdown)) {
-      assert.ok(!owners.has(id), `${id}: ${owners.get(id)} · ${doc.id}`);
-      owners.set(id, doc.id);
+    for (const { id, query } of skillDataIds(doc.body.markdown)) {
+      if (owners.has(id)) assert.ok(!query && !owners.get(id).query, `${id}: ${owners.get(id).doc} · ${doc.id}`);
+      else owners.set(id, { doc: doc.id, query });
     }
   }
   assert.ok(owners.size > 0);
