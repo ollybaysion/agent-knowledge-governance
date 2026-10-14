@@ -435,7 +435,7 @@ queries, binds·filledBy·when 배선)은 "누가 먼저 돌고 값은 어디서
 ```text
 # 이름                        → (안 읽는다 — 이름은 name)
 ## 한 줄 설명                 → summary  (SKILL.md frontmatter description 도 이 첫 문단)
-## 언제 호출되는가?           → description(라우팅 산문)
+## 언제 호출되는가?           → description(사람 말투 상황 문장, 줄마다 하나 — 사람 · 모델이 에이전트를 고를 때)
 ## 도메인 지식
   ### 절 / #### 소절          → 지식 문서 하나씩 — LLM 용, BE 는 해석하지 않는다
 ## 데이터
