@@ -1820,6 +1820,10 @@ const VERIFY_KEY = "답변 품질 검증 Set";
 const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석", 5: "신뢰성" };
 // The score-record/v1 kind names, by the same numbers.
 const VERIFY_KIND_WIRE = { 1: "general", 2: "data", 3: "relation", 4: "advanced", 5: "reliability" };
+// A record time 2026-10-14T20:08:48 as "10-14 20:08".
+const shortAt = (at) => (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(at ?? "") ? `${at.slice(5, 10)} ${at.slice(11, 16)}` : at ?? "");
+// The Score band tint: 0 신뢰 불가 · 20 기본 · 40 문제 이해 · 60 쉬운 문제 · 80 탁월.
+const bandClass = (score) => `band-${Math.min(4, Math.max(0, Math.floor(Number(score) / 20)))}`;
 const VERIFY_LABEL_OF_WIRE = Object.fromEntries(Object.entries(VERIFY_KIND_WIRE).map(([k, w]) => [w, VERIFY_KIND_LABEL[k]]));
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
@@ -2178,48 +2182,78 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   function showLastScore() {
     const last = [...(scoreLines || [])].reverse().find((l) => l.machine && l.run);
     if (!last) return;
-    scoreChip.className = "chip verify-score";
-    scoreChip.textContent = `Score ${last.run.score}${last.run.band ? ` · ${last.run.band}` : ""} · ${last.at}`;
+    scoreChip.className = `chip verify-score ${bandClass(last.run.score)}`;
+    scoreChip.textContent = `Score ${last.run.score}${last.run.band ? ` · ${last.run.band}` : ""} · ${shortAt(last.at)}`;
     const r2 = (x, d = 2) => (typeof x === "number" ? x.toFixed(d) : "—");
     scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"}`
       + ` · 문 앞 S ${r2(last.run.raw, 1)} · 사람 점수 비율 h ${r2(last.run.humanRatio)} · σ̃(h) ${r2(last.run.gate)} · ${last.model}`;
   }
 
-  // The person's 0~100 score for one question: last value, who · when, input · 저장.
+  // The person's 0~100 score for one question: "80 / 100 · who · when", or a
+  // "사람 점수 적기" link that opens the input · 저장 · 취소 in place.
   function humanScore(q, h) {
     const wire = VERIFY_KIND_WIRE[q.kind];
-    const shown = h
-      ? [el("b", { text: String(h.human.score) }), el("span", { class: "dim", text: ` / 100 · ${h.human.by} · ${h.human.at}` })]
-      : [el("span", { class: "dim", text: "—" })];
-    const label = el("span", { class: "dim", text: "사람 점수 (100점 만점) " });
-    if (!canEdit) return el("div", { class: "verify-human" }, [label, ...shown]);
-    const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
-    if (h) input.value = String(h.human.score);
-    const save = el("button", {
-      type: "button",
-      class: "btn ghost sm",
-      text: "저장",
-      onclick: async () => {
-        const score = Number(input.value);
-        if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
-          toast("사람 점수는 0~100 정수입니다", "error");
-          return;
-        }
-        save.disabled = true;
-        const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
-          method: "POST",
-          body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
-        });
-        if (r.ok) {
-          toast("사람 점수를 남겼습니다", "ok");
-          reload();
-          return;
-        }
-        save.disabled = false;
-        toast(`남기지 못했습니다 (${r.status})`, "error");
-      },
-    });
-    return el("div", { class: "verify-human" }, [label, ...shown, input, el("span", { class: "dim", text: "/ 100" }), save]);
+    const box = el("div", { class: "verify-human" });
+    const shown = () => {
+      const parts = h
+        ? [
+            el("span", { class: "dim", text: "사람 " }),
+            el("b", { text: `${h.human.score} / 100` }),
+            el("span", { class: "dim", text: ` · ${h.human.by} · ${shortAt(h.human.at)}` }),
+          ]
+        : canEdit ? [] : [el("span", { class: "dim", text: "사람 점수 —" })];
+      if (canEdit)
+        parts.push(el("button", { type: "button", class: "linkbtn", text: h ? "고치기" : "사람 점수 적기 (100점 만점)", onclick: form }));
+      box.replaceChildren(...parts);
+    };
+    const form = () => {
+      const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
+      if (h) input.value = String(h.human.score);
+      const save = el("button", {
+        type: "button",
+        class: "btn primary sm",
+        text: "저장",
+        onclick: async () => {
+          const score = Number(input.value);
+          if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
+            toast("사람 점수는 0~100 정수입니다", "error");
+            return;
+          }
+          save.disabled = true;
+          const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
+            method: "POST",
+            body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
+          });
+          if (r.ok) {
+            toast("사람 점수를 남겼습니다", "ok");
+            reload();
+            return;
+          }
+          save.disabled = false;
+          toast(`남기지 못했습니다 (${r.status})`, "error");
+        },
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") save.click();
+        if (e.key === "Escape") shown();
+      });
+      box.replaceChildren(
+        el("span", { class: "dim", text: "사람 점수 " }), input, el("span", { class: "dim", text: "/ 100" }), save,
+        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: shown }),
+      );
+      input.focus();
+    };
+    shown();
+    return box;
+  }
+
+  // The last machine verdict as a pill: ✓ 맞음 · ✗ 틀림 + 이유, and when.
+  function verdictPill(m) {
+    if (!m) return el("span", { class: "verify-pill none", text: "판정 없음" });
+    return el("span", { class: "verify-verdict" }, [
+      el("span", { class: `verify-pill ${m.machine.ok ? "ok" : "no"}`, text: m.machine.ok ? "✓ 맞음" : `✗ 틀림${m.machine.reason ? ` · ${m.machine.reason}` : ""}` }),
+      el("span", { class: "dim", text: shortAt(m.at) }),
+    ]);
   }
 
   // ── 답변 품질 검증 Set: 설정 카드 + 종류 다섯 묶음, 질문 하나 = 카드 ──
@@ -2258,18 +2292,18 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       box.hidden = false;
     }
     const cardActs = (save, cancel) =>
-      el("div", { class: "editacts" }, [
-        el("button", { type: "button", class: "btn primary sm", text: "저장", onclick: save }),
+      el("div", { class: "verify-acts" }, [
         el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: cancel }),
+        el("button", { type: "button", class: "btn primary sm", text: "저장", onclick: save }),
       ]);
-    const field = (label, control) => el("label", { class: "verify-field" }, [el("span", { class: "dim", text: label }), control]);
+    const field = (label, control) => el("label", { class: "verify-field" }, [el("span", { class: "verify-label", text: label }), control]);
     const input = (value, placeholder) => {
       const i = el("input", { type: "text", class: "fld", placeholder: placeholder || "" });
       i.value = value ?? "";
       return i;
     };
     const area = (value, cls) => {
-      const t = el("textarea", { class: `fld mono ${cls || ""}`, spellcheck: "false", rows: 2 });
+      const t = el("textarea", { class: `fld ${cls || ""}`, spellcheck: "false", rows: 2 });
       t.value = value ?? "";
       queueMicrotask(() => fitHeight(t));
       t.addEventListener("input", () => fitHeight(t));
@@ -2286,6 +2320,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         const end = input(st.duration?.end, "2026-10-01T06:00");
         const errBox = el("div", { class: "verify-errors", hidden: true });
         return el("div", { class: "verify-card editing sk-wide" }, [
+          el("b", { text: "설정" }),
           el("div", { class: "verify-fields" }, [field("라인", line), field("설비", eqp), field("기간 시작", start), field("기간 끝", end)]),
           errBox,
           cardActs((e) => {
@@ -2300,24 +2335,28 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           }, close),
         ]);
       }
-      const dur = st.duration ? `${st.duration.start} ~ ${st.duration.end}` : "—";
+      const dur = st.duration ? `${st.duration.start.replace("T", " ")} ~ ${st.duration.end.replace("T", " ")}` : null;
+      const cell = (k, v) => el("div", { class: "verify-cell" }, [
+        el("span", { class: "verify-label", text: k }),
+        el("span", { class: `verify-cell-v${v ? " mono" : " dim"}`, text: v || "—" }),
+      ]);
       return el("div", { class: "verify-card" }, [
         el("div", { class: "verify-card-head" }, [
-          el("b", { text: "설정" }),
+          el("b", { class: "verify-q", text: "설정" }),
           editBtn("편집", () => open("settings"), busy),
         ]),
-        el("p", { class: "verify-settings" }, `라인 ${st.line || "—"} · 설비 ${st.eqp || "—"} · 기간 ${dur}`),
+        el("div", { class: "verify-settings" }, [cell("라인", st.line), cell("설비", st.eqp), cell("기간", dur)]),
       ]);
     }
 
     // 질문 카드 — 읽기
     function readCard(q, index, last) {
       const answerParts = [];
-      if (q.path) answerParts.push(el("div", {}, [el("span", { class: "dim", text: "정답 " }), el("code", { text: q.path })]));
-      for (const sql of q.sqls) answerParts.push(el("pre", { class: "sk-md verify-sql", text: sql }));
-      if (q.rubric) answerParts.push(el("div", {}, [el("span", { class: "dim", text: "채점표 " }), q.rubric]));
-      if (q.deferred) answerParts.push(el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" }));
-      if (q.kind === 5) answerParts.push(el("span", { class: "dim", text: "답이 자료에 없는 질문 — \"모른다\" 가 맞는 답" }));
+      if (q.path) answerParts.push(el("div", { class: "verify-answer" }, [el("span", { class: "verify-label", text: "정답" }), el("span", { class: "chip verify-path-chip", text: q.path })]));
+      for (const sql of q.sqls) answerParts.push(el("pre", { class: "verify-sql", text: sql }));
+      if (q.rubric) answerParts.push(el("div", { class: "verify-answer" }, [el("span", { class: "verify-label", text: "채점표" }), el("span", { text: q.rubric })]));
+      if (q.deferred) answerParts.push(el("div", {}, el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" })));
+      if (q.kind === 5) answerParts.push(el("div", { class: "dim", text: "답이 자료에 없는 질문 — \"모른다\" 가 맞는 답" }));
       const m = last.machine.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text));
       return el("div", { class: "verify-card" }, [
         el("div", { class: "verify-card-head" }, [
@@ -2338,15 +2377,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
             : null,
         ]),
         ...answerParts,
-        el("div", { class: "verify-machine" }, m
-          ? [
-              el("span", { class: "dim", text: "기계 판정 " }),
-              el("b", { class: m.machine.ok ? "verify-ok" : "verify-no", text: m.machine.ok ? "✓" : "✗" }),
-              ` ${m.at}`,
-              m.machine.reason ? el("span", { class: "dim", text: ` · ${m.machine.reason}` }) : null,
-            ]
-          : [el("span", { class: "dim", text: "기계 판정 —" })]),
-        humanScore(q, last.human.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text))),
+        el("div", { class: "verify-foot" }, [
+          verdictPill(m),
+          humanScore(q, last.human.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text))),
+        ]),
         el("div", { class: "verify-errors", hidden: true }),
       ]);
     }
@@ -2354,7 +2388,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     // 조회 고르기 — 고른 조회의 SQL 틀과 입력 칸. 값을 치면 `target` 에 묶은 SQL 을 채운다.
     // `shared` 는 한 카드 안 SQL 줄들이 같이 쓰는 ASK 값(이름 → 값)이다.
     function sqlPicker(target, shared) {
-      if (!blib || verifyQueries.length === 0) return null;
+      if (!hasPicker) return null;
       const st = set.settings || {};
       const pick = el("select", { class: "fld verify-pick", "aria-label": "조회 고르기" }, [
         el("option", { value: "", text: "조회 고르기 — 고르면 SQL 틀과 입력 칸이 나옵니다" }),
@@ -2391,14 +2425,15 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           inputs.push([b.name, i]);
           const label = b.from === "eqp" ? "설비" : b.from === "start" ? "기간 시작" : b.from === "end" ? "기간 끝" : b.title || b.name;
           return el("label", { class: "verify-field" }, [
-            el("span", { class: "dim" }, [`${label} `, el("code", { text: `:${b.name}` }), b.from === "ask" ? "" : " · 설정에서"]),
+            el("span", { class: "verify-label" }, [`${label} `, el("code", { text: `:${b.name}` })]),
             i,
             b.from === "ask" && b.question ? el("span", { class: "dim verify-pick-q", text: b.question }) : null,
           ]);
         });
         body.replaceChildren(
-          el("div", { class: "dim" }, [`SQL 틀 · ${query.skill}`, st.line ? ` · 라인 ${st.line} 에서 돌립니다` : ""]),
-          el("pre", { class: "sk-md verify-sql", text: query.sql }),
+          el("div", { class: "verify-step" }, [el("b", { text: "① SQL 틀" }), el("span", { class: "dim", text: ` · ${query.skill}${st.line ? ` · 라인 ${st.line} 에서 돌립니다` : ""}` })]),
+          el("pre", { class: "verify-sql", text: query.sql }),
+          el("div", { class: "verify-step" }, [el("b", { text: "② 값" }), el("span", { class: "dim", text: " · 설비 · 기간은 설정에서 채웁니다" })]),
           fields.length ? el("div", { class: "verify-fields" }, fields) : el("div", { class: "dim", text: "이 조회는 입력이 없습니다" }),
           status,
         );
@@ -2406,8 +2441,13 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         fill(query, inputs);
         (inputs.find(([, i]) => i.value === "")?.[1] ?? inputs[0]?.[1])?.focus();
       });
-      return el("div", { class: "verify-pick-wrap" }, [pick, body]);
+      return el("div", { class: "verify-pick-wrap" }, [
+        el("label", { class: "verify-field" }, [el("span", { class: "verify-label", text: "조회 고르기 — 고른 조회의 틀에 값을 묶어 정답 SQL 을 채웁니다" }), pick]),
+        body,
+      ]);
     }
+    const hasPicker = !!blib && verifyQueries.length > 0;
+    const sqlLabel = (text) => (hasPicker ? `③ ${text}` : text);
     // 정답 SQL 에 묶이지 않은 :바인드가 남았으면 그 이름들.
     const unbound = (sqls) => (blib ? [...new Set(sqls.flatMap((x) => blib.varsOf(x)))] : []);
 
@@ -2427,26 +2467,39 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         collect = () => ({ path: path.value.trim() || null, rubric: rubric.value.trim() || null });
       } else if (q.kind === 2) {
         const sql = area(q.sqls[0], "verify-sql-edit");
-        parts.push(sqlPicker(sql, shared), field("정답 SQL(값이 다 들어간 문장)", sql));
+        parts.push(sqlPicker(sql, shared), field(sqlLabel("정답 SQL — 값이 다 들어간 문장"), sql));
         collect = () => ({ sqls: sql.value.trim() ? [sql.value.trim()] : [] });
       } else if (q.kind === 3) {
         const list = el("div", { class: "verify-sql-list" });
         const rows = [];
+        const renumber = () => list.querySelectorAll(".verify-sql-no").forEach((n, i) => { n.textContent = `SQL ${i + 1}`; });
         const addRow = (value) => {
           const t = area(value, "verify-sql-edit");
           const row = el("div", { class: "verify-sql-item" }, [
-            sqlPicker(t, shared),
-            el("div", { class: "verify-sql-row" }, [
-              t,
-              el("button", { type: "button", class: "btn ghost sm", text: "줄 삭제", onclick: () => { rows.splice(rows.indexOf(t), 1); row.remove(); } }),
+            el("div", { class: "verify-sql-head" }, [
+              el("b", { class: "verify-sql-no" }),
+              el("button", {
+                type: "button",
+                class: "iconbtn",
+                text: "✕",
+                title: "이 SQL 줄 삭제",
+                "aria-label": "이 SQL 줄 삭제",
+                onclick: () => { rows.splice(rows.indexOf(t), 1); row.remove(); renumber(); },
+              }),
             ]),
+            sqlPicker(t, shared),
+            field(sqlLabel("정답 SQL"), t),
           ]);
           rows.push(t);
           list.appendChild(row);
+          renumber();
         };
         (q.sqls.length ? q.sqls : [""]).forEach(addRow);
         const rubric = area(q.rubric);
-        parts.push(field("정답 SQL(여럿)", list), el("button", { type: "button", class: "btn ghost sm", text: "SQL 추가", onclick: () => addRow("") }));
+        parts.push(
+          el("div", { class: "verify-field" }, [el("span", { class: "verify-label", text: "정답 SQL — 하나 이상" }), list]),
+          el("div", {}, el("button", { type: "button", class: "btn ghost sm", text: "+ SQL 추가", onclick: () => addRow("") })),
+        );
         parts.push(field("채점표", rubric));
         collect = () => ({ sqls: rows.map((t) => t.value.trim()).filter(Boolean), rubric: rubric.value.trim() || null });
       } else if (q.kind === 4) {
@@ -2467,7 +2520,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           : set.questions.map((x, i) => (i === index ? edited : x));
         saveSet({ ...set, questions }, errBox, e.currentTarget);
       };
-      const card = el("div", { class: "verify-card editing sk-wide" }, [...parts, errBox, cardActs(save, close)]);
+      const card = el("div", { class: "verify-card editing sk-wide" }, [
+        el("b", { text: index === null ? `새 질문 · ${VERIFY_KIND_LABEL[q.kind]}` : `질문 고치기 · ${VERIFY_KIND_LABEL[q.kind]}` }),
+        ...parts, errBox, cardActs(save, close),
+      ]);
       card.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -2485,8 +2541,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         cards.push(editCard({ kind, text: "", path: null, sqls: [], rubric: null, deferred: kind === 4 }, null));
       return el("div", { class: "verify-group" }, [
         el("div", { class: "verify-group-head" }, [
-          el("h4", { text: `${VERIFY_KIND_LABEL[kind]} ` }, [el("span", { class: "dim", text: String(mine.length) })]),
-          canEdit ? el("button", { type: "button", class: "btn ghost sm add-btn", text: "질문 추가", disabled: busy, onclick: () => open(`new${kind}`) }) : null,
+          el("h4", { text: VERIFY_KIND_LABEL[kind] }),
+          el("span", { class: `verify-count${mine.length ? "" : " none"}`, text: String(mine.length) }),
+          canEdit ? el("button", { type: "button", class: "btn ghost sm verify-add", text: "+ 질문 추가", disabled: busy, onclick: () => open(`new${kind}`) }) : null,
         ]),
         ...cards,
       ]);
@@ -2505,11 +2562,12 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     const lines = [...scoreLines].reverse();
     return el("details", { class: "verify-history" }, [
       el("summary", { text: `기록 ${lines.length}줄` }),
-      el("table", {}, [
+      el("table", { class: "verify-history-tbl" }, [
+        el("colgroup", {}, ["c-at", "c-kind", "c-q", "c-machine", "c-human"].map((c) => el("col", { class: c }))),
         el("thead", {}, el("tr", {}, ["시각", "종류", "질문", "기계", "사람(100점 만점)"].map((t) => el("th", { text: t })))),
         el("tbody", {}, lines.map((l) =>
           el("tr", {}, [
-            el("td", { class: "mono", text: l.at }),
+            el("td", { class: "mono", text: shortAt(l.at) }),
             el("td", { class: "dim", text: VERIFY_LABEL_OF_WIRE[l.kind] ?? l.kind }),
             el("td", { text: l.text }),
             el("td", { text: l.machine ? `${l.machine.ok ? "✓" : "✗"}${l.machine.reason ? ` ${l.machine.reason}` : ""} · Score ${l.run?.score ?? "—"}` : "" }),

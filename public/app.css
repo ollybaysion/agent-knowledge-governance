@@ -35,6 +35,7 @@
   --error: #c64545;
   --success-ink: #2f7d43;
   --warning-ink: #8a6a0f;
+  --orange-ink: #9a5512;
   --error-ink: #c64545;
   /* tier aliases (미터 fill) */
   --tier-scaffold: var(--muted);
@@ -69,6 +70,7 @@
   --teal-ink: #5fb8c2;
   --success-ink: #5db872;
   --warning-ink: #d4a017;
+  --orange-ink: #e8a55a;
   --error-ink: #e08585;
 }
 * {
@@ -3014,55 +3016,342 @@ a.wiki {
   margin: 4px 0 0;
   padding-left: 18px;
 }
-/* 검증 Set 결과: 질문마다 마지막 기계 판정 · 사람 점수, 기록 이력 */
-.verify-results,
-.verify-history {
-  margin: 10px 0 0;
-  font-size: 12.5px;
+/* ---- 답변 품질 검증 Set — 설정 카드 · 종류 묶음 · 질문 카드 · 기록 이력 ---- */
+/* 리듬: 묶음 사이 24px, 카드 사이 10px, 카드 안 줄 사이 8px */
+.verify-set .verify-group {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.verify-results table,
-.verify-history table {
-  width: 100%;
-  border-collapse: collapse;
+.verify-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.verify-results th,
-.verify-results td,
-.verify-history th,
-.verify-history td {
-  text-align: left;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--hairline);
-  vertical-align: top;
+.verify-group-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
 }
-.verify-results th,
-.verify-history th {
+.verify-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  text-align: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--primary);
+}
+.verify-count.none {
+  background: var(--surface-card);
   color: var(--muted);
+}
+.verify-group-head .verify-add {
+  margin-left: auto;
+}
+.verify-card {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.verify-group .verify-card {
+  margin-top: 0;
+}
+.verify-card.editing {
+  background: var(--accent-soft);
+  border-color: var(--primary);
+  padding: 12px 16px;
+  gap: 12px;
+}
+.verify-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.verify-card-head .verify-q {
+  margin-right: auto;
+  color: var(--ink);
   font-weight: 600;
 }
-.verify-human-in {
-  width: 4.5em;
-  margin-right: 6px;
+.verify-label {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
 }
-.verify-ok {
+.verify-label code {
+  font-size: 10.5px;
   color: var(--teal-ink);
+  background: none;
 }
-.verify-no {
+.verify-answer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip.verify-path-chip {
+  background: var(--accent-soft);
+  color: var(--primary);
+}
+pre.verify-sql {
+  margin: 0;
+  padding: 8px 11px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--body-strong);
+  background: var(--surface-card);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+}
+/* 카드 셋째 줄: 판정 알약 · 사람 점수 */
+.verify-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.verify-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.verify-pill {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.verify-pill.ok {
+  background: rgba(93, 184, 114, 0.14);
+  border-color: rgba(93, 184, 114, 0.4);
+  color: var(--success-ink);
+}
+.verify-pill.no {
+  background: rgba(198, 69, 69, 0.1);
+  border-color: rgba(198, 69, 69, 0.35);
   color: var(--error-ink);
 }
-.verify-history summary {
-  cursor: pointer;
+.verify-pill.none {
+  font-weight: 400;
+  background: var(--surface-card);
   color: var(--muted);
 }
-.chip.verify-score.none {
+.verify-human {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.verify-human b {
+  font-variant-numeric: tabular-nums;
+  color: var(--body-strong);
+}
+.verify-human-in {
+  width: 5em;
+}
+.linkbtn {
+  font: inherit;
+  font-size: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+.linkbtn:hover {
+  text-decoration-color: currentColor;
+}
+.linkbtn:focus-visible,
+.iconbtn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.iconbtn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: none;
   color: var(--muted);
+  cursor: pointer;
+}
+.iconbtn:hover {
+  border-color: rgba(198, 69, 69, 0.38);
+  background: rgba(198, 69, 69, 0.1);
+  color: var(--error-ink);
+}
+/* 설정 카드: 라벨 달린 칸 셋을 한 줄에 */
+.verify-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.verify-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline-soft);
+}
+.verify-cell-v {
+  font-size: 12.5px;
+  color: var(--body-strong);
+}
+.verify-cell-v.mono {
+  font-family: var(--mono);
+}
+/* 편집 폼: 라벨 위 · 값 아래, 칸은 db-schema 슬롯 편집과 같은 만듦새 */
+.verify-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.verify-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.verify-card input.fld,
+.verify-card select.fld,
+.verify-card textarea.fld {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  color: var(--body-strong);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+.verify-card .verify-human input.fld {
+  width: 5em;
+  padding: 3px 7px;
+}
+.verify-card textarea.fld {
+  line-height: 1.55;
+  overflow: auto;
+  resize: vertical;
+}
+.verify-card textarea.verify-sql-edit {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.verify-card select.fld {
+  cursor: pointer;
+}
+.verify-card input.fld:focus,
+.verify-card select.fld:focus,
+.verify-card textarea.fld:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+  border-color: transparent;
+}
+.verify-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* 조회 고르기: 옅은 상자 안에 ① 틀 → ② 값, 상자 밖 ③ 정답 SQL */
+.verify-pick-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline-soft);
+}
+.verify-pick {
+  max-width: 520px;
+}
+.verify-pick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.verify-pick-body[hidden] {
+  display: none;
+}
+.verify-step {
+  font-size: 12px;
+  color: var(--body-strong);
+}
+.verify-pick-q {
+  font-size: 11.5px;
+}
+.verify-pick-status {
+  font-size: 12px;
+}
+.verify-pick-status.missing {
+  color: var(--error-ink);
+}
+.verify-sql-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.verify-sql-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-soft);
+}
+.verify-sql-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--body-strong);
+}
+.verify-errors {
+  color: var(--error-ink);
+  font-size: 12px;
+}
+.verify-errors ul {
+  margin: 0;
+  padding-left: 18px;
 }
 .verify-paths {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  margin: 4px 0 8px;
   font-size: 12px;
+}
+.verify-paths-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 button.chip.verify-path {
   font: inherit;
@@ -3073,6 +3362,83 @@ button.chip.verify-path {
 button.chip.verify-path:hover {
   border-color: var(--primary);
   color: var(--primary);
+}
+/* Score 칩: 구간 틴트 — 신뢰 불가 빨강 · 기본 주황 · 문제 이해 노랑 · 쉬운 문제 초록 · 탁월 청록 */
+.chip.verify-score {
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+.chip.verify-score.none {
+  font-weight: 400;
+  color: var(--muted);
+}
+.chip.verify-score.band-0 {
+  background: rgba(198, 69, 69, 0.12);
+  border-color: rgba(198, 69, 69, 0.35);
+  color: var(--error-ink);
+}
+.chip.verify-score.band-1 {
+  background: rgba(232, 165, 90, 0.16);
+  border-color: rgba(232, 165, 90, 0.5);
+  color: var(--orange-ink);
+}
+.chip.verify-score.band-2 {
+  background: rgba(212, 160, 23, 0.14);
+  border-color: rgba(212, 160, 23, 0.45);
+  color: var(--warning-ink);
+}
+.chip.verify-score.band-3 {
+  background: rgba(93, 184, 114, 0.14);
+  border-color: rgba(93, 184, 114, 0.42);
+  color: var(--success-ink);
+}
+.chip.verify-score.band-4 {
+  background: rgba(63, 125, 138, 0.14);
+  border-color: rgba(63, 125, 138, 0.42);
+  color: var(--teal-ink);
+}
+/* 기록 이력: 열 폭 고정, 짝수 줄 배경 */
+.verify-history {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+}
+.verify-history summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.verify-history-tbl {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.verify-history-tbl col.c-at {
+  width: 92px;
+}
+.verify-history-tbl col.c-kind {
+  width: 84px;
+}
+.verify-history-tbl col.c-machine {
+  width: 210px;
+}
+.verify-history-tbl col.c-human {
+  width: 150px;
+}
+.verify-history-tbl th,
+.verify-history-tbl td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--hairline-soft);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.verify-history-tbl th {
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom-color: var(--hairline);
+}
+.verify-history-tbl tbody tr:nth-child(even) {
+  background: var(--surface-soft);
 }
 /* 편집 중인 절 · 카드는 문서 열보다 넓게 — 화면 폭(옆 칸 몫을 뺀)까지 */
 .sk-wide {
@@ -3086,126 +3452,4 @@ button.chip.verify-path:hover {
 .slot-edit textarea.sk-md-edit {
   overflow: auto;
   resize: vertical;
-}
-/* 답변 품질 검증 Set — 설정 카드 · 종류 묶음 · 질문 카드 */
-.verify-set .verify-group {
-  margin-top: 14px;
-}
-.verify-group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.verify-group-head h4 {
-  margin: 0;
-  font-size: 13px;
-}
-.verify-card {
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  padding: 9px 12px;
-  margin: 6px 0;
-  background: var(--surface-soft);
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.verify-card.editing {
-  background: var(--canvas);
-  border-color: var(--primary);
-}
-.verify-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.verify-card-head .verify-q {
-  margin-right: auto;
-}
-.verify-settings {
-  margin: 0;
-}
-.verify-card pre.verify-sql {
-  margin: 0;
-  font-size: 12px;
-}
-.verify-machine,
-.verify-human {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.verify-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-}
-.verify-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
-}
-.verify-card textarea {
-  width: 100%;
-  font-size: 12.5px;
-  line-height: 1.55;
-  overflow: auto;
-  resize: vertical;
-}
-.verify-sql-row {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  margin-bottom: 4px;
-}
-.verify-errors {
-  color: var(--error-ink);
-  font-size: 12px;
-}
-.verify-errors ul {
-  margin: 0;
-  padding-left: 18px;
-}
-/* 조회 고르기 — SQL 틀 · 입력 칸 · 채운 결과 */
-.verify-pick-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.verify-pick {
-  max-width: 480px;
-}
-.verify-pick-body {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding-left: 10px;
-  border-left: 2px solid var(--hairline);
-}
-.verify-pick-body[hidden] {
-  display: none;
-}
-.verify-pick-status {
-  font-size: 12px;
-}
-.verify-pick-status.missing {
-  color: var(--error-ink);
-}
-.verify-sql-item {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-bottom: 8px;
-}
-.verify-paths-groups {
-  display: flex;
-  flex-direction: column;
-  margin: 4px 0 8px;
-}
-.verify-paths-groups .verify-paths {
-  margin: 0 0 2px;
 }
