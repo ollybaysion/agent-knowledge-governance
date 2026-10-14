@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, verifySetTemplate } from "../src/verify-set.mjs";
+import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, verifySetTemplate, withoutVerifySet } from "../src/verify-set.mjs";
+import { renderDomainSkillMd } from "../src/render/domain-skill.mjs";
 import { joinSkill, splitSkill } from "../src/skill-sections.mjs";
 
 const skill = readFileSync(new URL("../examples/domain-skill/fdc-explain-sensor-origin.md", import.meta.url), "utf8");
@@ -152,4 +153,14 @@ test("the section editor splits and joins a skill md with the set, the set last"
   const { title, sections } = splitSkill(withSet);
   assert.equal(sections.at(-1).key, "답변 품질 검증 Set");
   assert.equal(joinSkill(title, sections), withSet.trimEnd() + "\n");
+});
+
+test("the installed SKILL.md and the bundle leave the section out; a md without it renders as before", () => {
+  assert.equal(withoutVerifySet(skill), skill);
+  assert.equal(withoutVerifySet(withSet), skill.trimEnd() + "\n");
+  const middle = `${skill.trimEnd()}\n\n${SET}\n## 한 줄 설명\n\n끝\n`;
+  assert.ok(!withoutVerifySet(middle).includes("검증 Set"));
+  assert.ok(withoutVerifySet(middle).endsWith("## 한 줄 설명\n\n끝\n"));
+  const rendered = renderDomainSkillMd({ body: { name: "s", markdown: withSet } });
+  assert.equal(rendered, renderDomainSkillMd({ body: { name: "s", markdown: skill } }));
 });

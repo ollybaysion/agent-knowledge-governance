@@ -25,6 +25,7 @@ import { registerAuditRoutes } from "./routes/audit.mjs";
 import { registerMiscRoutes } from "./routes/misc.mjs";
 import { registerDashboardRoutes } from "./routes/dashboard.mjs";
 import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
+import { registerScoreRoutes } from "./routes/score.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -154,6 +155,7 @@ export async function buildApp({
   registerPromoteRoutes(app);
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
+  registerScoreRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

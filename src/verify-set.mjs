@@ -36,6 +36,23 @@ const BARE_FIELD = /^-\s+(\S+)\s*$/;
 const SUB_HEADING = /^(#{3,6})\s+(.*?)\s*#*\s*$/;
 const FENCE = /^(`{3,}|~{3,})\s*(\S*)/;
 
+/**
+ * The skill md without the `## 답변 품질 검증 Set` section — what leaves the
+ * store for an installed skill (SKILL.md, the bundle). The section is the
+ * scorer's answers. A md without it comes back unchanged.
+ */
+export function withoutVerifySet(markdown) {
+  const kept = [];
+  let skipping = false;
+  let dropped = false;
+  for (const { line, heading } of scan(markdown)) {
+    if (heading !== null) skipping = normalizeHeading(heading) === VERIFY_SECTION;
+    if (skipping) dropped = true;
+    else kept.push(line);
+  }
+  return dropped ? kept.join("\n").replace(/\s+$/, "") + "\n" : String(markdown ?? "");
+}
+
 /** The body of a section that has none yet: its five parts, no question. */
 export function verifySetTemplate() {
   return PARTS.map((p) => `### ${p}`).join("\n\n");
