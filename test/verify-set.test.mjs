@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, verifySetTemplate, withoutVerifySet } from "../src/verify-set.mjs";
+import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, toVerificationSet, verifySetTemplate, withoutVerifySet, VerifySetError } from "../src/verify-set.mjs";
+import { loadContractSchemas } from "../src/envelope.mjs";
+import { validate } from "../src/validate.mjs";
 import { renderDomainSkillMd } from "../src/render/domain-skill.mjs";
 import { joinSkill, splitSkill } from "../src/skill-sections.mjs";
 
@@ -83,10 +85,10 @@ test("the section reads into settings and eight questions, one per ####, SQL ans
   const { present, settings, questions, errors } = parseVerifySet(withSet);
   assert.deepEqual(errors, []);
   assert.equal(present, true);
-  assert.deepEqual(settings, { line: "L1", eqp: "EQP01", duration: { from: "2026-10-01T00:00", to: "2026-10-01T06:00" } });
+  assert.deepEqual(settings, { line: "L1", eqp: "EQP01", duration: { start: "2026-10-01T00:00", end: "2026-10-01T06:00" } });
   assert.deepEqual(countByKind(questions), { 1: 3, 2: 2, 3: 1, 4: 1, 5: 1 });
   const [first, , , explain, , relate, deferred, reliable] = questions;
-  assert.deepEqual(first.pieces, ["FDC_SENSOR"]);
+  assert.equal(first.path, "FDC_SENSOR");
   assert.equal(first.rubric, "다른 센서 값으로 수식을 계산해 얻는다");
   assert.equal(reliable.kind, 5);
   assert.equal(reliable.rubric, "환산 규칙은 자료에 없다고 말한다");
@@ -173,4 +175,15 @@ test("the installed SKILL.md and the bundle leave the section out; a md without 
   assert.ok(withoutVerifySet(middle).endsWith("## 한 줄 설명\n\n끝\n"));
   const rendered = renderDomainSkillMd({ body: { name: "s", markdown: withSet } });
   assert.equal(rendered, renderDomainSkillMd({ body: { name: "s", markdown: skill } }));
+});
+
+test("the contract object follows verification-set/v1; a broken section throws every break", () => {
+  const set = toVerificationSet("fdc-explain-sensor-origin", withSet, "r1");
+  const schema = loadContractSchemas()["verification-set/v1"];
+  assert.deepEqual(validate(schema, set, {}), []);
+  assert.deepEqual(set.questions.map((q) => q.kind), ["general", "general", "general", "data", "data", "relation", "advanced", "reliability"]);
+  assert.deepEqual(set.settings.duration, { start: "2026-10-01T00:00", end: "2026-10-01T06:00" });
+  assert.equal(toVerificationSet("s", skill, "r1"), null);
+  assert.throws(() => toVerificationSet("s", "## 답변 품질 검증 Set\n\n### 데이터\n", "r"), VerifySetError);
+  assert.match(errs("### 일반 지식\n\n#### q\n\n- 정답: A, B")[0], /경로 하나/);
 });

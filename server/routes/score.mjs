@@ -1,12 +1,11 @@
-// An agent's answer-quality record: store/score/<agent>.json, one array of
-// lines, appended one commit per write. The scorer (fdc-agent-be-spring)
+// An agent's answer-quality record: store/score/<agent>.json, an array of
+// score-record/v1 lines, appended one commit per write. The scorer (fdc-agent-be-spring)
 // writes a machine line per question each time it scores; a person writes a
 // human line (a 0~100 score for one question). The skill md is left alone.
 import { readJson, commitFiles, isValidId, revOfPath } from "../store.mjs";
-import { VERIFY_KINDS } from "../../src/verify-set.mjs";
+import { validateNode } from "../../src/validate.mjs";
 import { priorityOf } from "./docs.mjs";
 
-const KINDS = new Set(VERIFY_KINDS.map((k) => k.key));
 const AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 const MAX_LINES = 500;
 
@@ -18,48 +17,31 @@ export function localSeconds(date = new Date()) {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
 }
 
-const isText = (v) => typeof v === "string" && v.trim() !== "";
-const isTextOrNull = (v) => v === undefined || v === null || typeof v === "string";
-const isTextList = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
-
 /**
- * One submitted line checked and completed. A human line takes its `by` and
- * `at` from the request, not the body.
- * @returns {{line?: object, error?: string}}
+ * One submitted line as a score-record/v1 line. A human line takes its `by`
+ * and `at` from the request, not the body; a machine line keeps the scorer's.
+ * @returns {{line?: object, errors?: string[]}}
  */
-function lineOf(raw, agent, user, now) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "줄은 객체입니다" };
-  if (!KINDS.has(raw.kind)) return { error: `kind 는 ${[...KINDS].join(" · ")} 가운데 하나입니다` };
-  if (!isText(raw.question)) return { error: "question 이 비었습니다" };
-  const head = { agent, kind: raw.kind, question: raw.question };
+function lineOf(raw, agent, user, now, schema) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { errors: ["줄은 객체입니다"] };
+  let line;
   if (raw.human !== undefined) {
-    if (raw.machine !== undefined) return { error: "한 줄에 machine 과 human 을 같이 두지 않습니다" };
-    if (user.role === "agent") return { error: "사람 점수는 사람 계정만 적습니다" };
-    const score = raw.human?.score;
-    if (!Number.isInteger(score) || score < 0 || score > 100) return { error: "human.score 는 0~100 정수입니다" };
-    return { line: { at: now, ...head, human: { score, by: user.id, at: now } } };
+    if (raw.machine !== undefined || raw.run !== undefined) return { errors: ["사람 줄에는 machine · run 을 두지 않습니다"] };
+    if (user.role === "agent") return { errors: ["사람 점수는 사람 계정만 적습니다"] };
+    line = { agent, kind: raw.kind, text: raw.text, at: now, human: { score: raw.human?.score, by: user.id, at: now } };
+  } else {
+    if (raw.machine === undefined || raw.run === undefined || raw.model === undefined || raw.mdRev === undefined)
+      return { errors: ["기계 줄에는 machine · run · model · mdRev 가 있어야 합니다"] };
+    line = { ...raw, agent };
   }
-  const m = raw.machine;
-  if (!m || typeof m !== "object" || typeof m.answered !== "boolean")
-    return { error: "machine.answered(참/거짓)가 있어야 합니다" };
-  if (!isTextOrNull(m.reason) || !isTextOrNull(m.detail) || !isTextList(m.sql) || !isTextList(m.pieces))
-    return { error: "machine 의 reason · detail 은 글, sql · pieces 는 글 목록입니다" };
-  if (!(typeof raw.at === "string" && AT.test(raw.at))) return { error: "at 은 2026-10-14T19:30:05 꼴입니다" };
-  if (!isText(raw.model) || !isText(raw.mdRev)) return { error: "model · mdRev 가 있어야 합니다" };
-  const s = raw.score;
-  if (!s || typeof s !== "object" || !(s.g === null || typeof s.g === "number") || typeof s.a !== "number"
-    || !Number.isInteger(s.percent))
-    return { error: "score 는 { g(수 또는 null), a(수), percent(정수) } 입니다" };
-  const machine = { answered: m.answered, reason: m.reason ?? null, detail: m.detail ?? null };
-  if (m.sql) machine.sql = m.sql;
-  if (m.pieces) machine.pieces = m.pieces;
-  const score = { g: s.g, a: s.a, percent: s.percent };
-  if (typeof s.band === "string") score.band = s.band;
-  return { line: { at: raw.at, ...head, model: raw.model, mdRev: raw.mdRev, machine, score } };
+  const errors = [];
+  validateNode(schema, line, "$", {}, errors);
+  return errors.length ? { errors } : { line };
 }
 
 export function registerScoreRoutes(app) {
-  const { storeDir, queue } = app.akg;
+  const { storeDir, queue, contracts } = app.akg;
+  const schema = contracts["score-record/v1"];
 
   const agentOf = (request, reply) => {
     const { agent } = request.params;
@@ -106,8 +88,8 @@ export function registerScoreRoutes(app) {
       const lines = [];
       const rejected = [];
       raw.forEach((r, index) => {
-        const { line, error } = lineOf(r, agent, request.user, now);
-        if (error) rejected.push({ index, error });
+        const { line, errors } = lineOf(r, agent, request.user, now, schema);
+        if (errors) rejected.push({ index, errors });
         else lines.push(line);
       });
       if (rejected.length) return reply.code(400).send({ error: "lines_rejected", rejected });

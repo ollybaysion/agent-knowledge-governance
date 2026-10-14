@@ -17,12 +17,12 @@ const SETTINGS = "설정";
  * more). A data question's answer is its SQL with every value bound.
  */
 export const VERIFY_KINDS = [
-  { kind: 1, key: "일반 지식", fields: ["정답", "채점표"], required: ["정답"], sql: "none" },
-  { kind: 2, key: "데이터 설명", fields: [], required: [], sql: "one" },
-  { kind: 3, key: "데이터 연관", fields: ["채점표"], required: ["채점표"], sql: "many" },
-  { kind: 4, key: "고도화 분석", fields: ["보류"], required: ["보류"], sql: "none" },
+  { kind: 1, wire: "general", key: "일반 지식", fields: ["정답", "채점표"], required: ["정답"], sql: "none" },
+  { kind: 2, wire: "data", key: "데이터 설명", fields: [], required: [], sql: "one" },
+  { kind: 3, wire: "relation", key: "데이터 연관", fields: ["채점표"], required: ["채점표"], sql: "many" },
+  { kind: 4, wire: "advanced", key: "고도화 분석", fields: ["보류"], required: ["보류"], sql: "none" },
   // The answer is not in what the agent can reach: it should say it does not know.
-  { kind: 5, key: "신뢰성", fields: ["채점표"], required: [], sql: "none" },
+  { kind: 5, wire: "reliability", key: "신뢰성", fields: ["채점표"], required: [], sql: "none" },
 ];
 const KIND_BY_KEY = new Map(VERIFY_KINDS.map((k) => [k.key, k]));
 const PARTS = [SETTINGS, ...VERIFY_KINDS.map((k) => k.key)];
@@ -66,8 +66,8 @@ export function verifySetTemplate() {
  * them all.
  * @returns {{
  *   present: boolean,
- *   settings: {line?: string, eqp?: string, duration?: {from: string, to: string}} | null,
- *   questions: {kind: number, text: string, line: number, pieces: string[],
+ *   settings: {line?: string, eqp?: string, duration?: {start: string, end: string}} | null,
+ *   questions: {kind: number, text: string, line: number, path: string|null,
  *     sqls: string[], rubric: string|null, deferred: boolean}[],
  *   errors: string[],
  * }}
@@ -95,7 +95,7 @@ export function parseVerifySet(markdown) {
     const m = DURATION.exec(value);
     if (!m) return errors.push(`${at(i, raw)}: 기간은 "시작 ~ 끝"(예 2026-10-01T00:00 ~ 2026-10-01T06:00)입니다`);
     if (m[1] >= m[2]) return errors.push(`${at(i, raw)}: 기간의 끝이 시작보다 뒤여야 합니다`);
-    settings.duration = { from: m[1], to: m[2] };
+    settings.duration = { start: m[1], end: m[2] };
   }
 
   function field(i, raw, name, value) {
@@ -114,7 +114,8 @@ export function parseVerifySet(markdown) {
     if (name === "정답") {
       if (value === NO_ANSWER)
         return errors.push(`${at(i, raw)}: 정답은 ## 도메인 지식 소제목 경로입니다 — 답이 없는 질문은 ### 신뢰성 에 둡니다`);
-      question.pieces = value.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+      if (/[,，]/.test(value)) return errors.push(`${at(i, raw)}: 정답은 소제목 경로 하나입니다`);
+      question.path = value;
     } else {
       question.rubric = value;
     }
@@ -185,7 +186,7 @@ export function parseVerifySet(markdown) {
     if (h && h[1].length === 4) {
       if (part === SETTINGS) return errors.push(`${at(i, raw)}: 질문은 종류(### 일반 지식 …) 아래에 둡니다`);
       close();
-      question = { kind: part.kind, text: h[2], line: i + 1, pieces: [], sqls: [], rubric: null, deferred: false };
+      question = { kind: part.kind, text: h[2], line: i + 1, path: null, sqls: [], rubric: null, deferred: false };
       return;
     }
     if (h) return errors.push(`${at(i, raw)}: 질문은 #### 한 단계입니다`);
@@ -257,14 +258,51 @@ export function checkVerifySet(markdown) {
   const warnings = [];
   const paths = new Set(knowledgePaths(markdown));
   for (const q of questions) {
-    const unknown = q.pieces.filter((p) => !paths.has(p));
-    if (unknown.length)
-      warnings.push(`${q.line}행 "#### ${q.text}": ## 도메인 지식 에 없는 정답 경로입니다 — ${unknown.join(", ")}`);
+    if (q.path !== null && !paths.has(q.path))
+      warnings.push(`${q.line}행 "#### ${q.text}": ## 도메인 지식 에 없는 정답 경로입니다 — ${q.path}`);
   }
   const data = questions.filter((q) => q.kind === 2 || q.kind === 3).length;
   if (data && !(settings?.line && settings?.eqp))
     warnings.push(`### 설정 에 라인 · 설비가 없어 데이터 질문 ${data}개를 돌릴 수 없습니다`);
   return { present, errors, warnings };
+}
+
+/**
+ * The section as the verification-set/v1 contract (schemas/verification-set/v1.schema.json) — what
+ * GET /api/docs/domain-skill/:id/verification-set returns and the scorer reads. Null when the md has
+ * no section; throws a VerifySetError with every rule break when it does not parse.
+ */
+export function toVerificationSet(agent, markdown, rev) {
+  const parsed = parseVerifySet(markdown);
+  if (!parsed.present) return null;
+  if (parsed.errors.length) throw new VerifySetError(parsed.errors);
+  const s = parsed.settings;
+  const settings = s && {
+    ...(s.line ? { line: s.line } : {}),
+    ...(s.eqp ? { eqp: s.eqp } : {}),
+    ...(s.duration ? { duration: s.duration } : {}),
+  };
+  return {
+    agent,
+    rev,
+    ...(settings ? { settings } : {}),
+    questions: parsed.questions.map((q) => {
+      const out = { kind: VERIFY_KINDS[q.kind - 1].wire, text: q.text };
+      if (q.path !== null) out.answer = { path: q.path };
+      if (q.sqls.length) out.sql = q.sqls;
+      if (q.rubric !== null) out.rubric = q.rubric;
+      if (q.deferred) out.deferred = true;
+      return out;
+    }),
+    warnings: checkVerifySet(markdown).warnings,
+  };
+}
+
+export class VerifySetError extends Error {
+  constructor(errors) {
+    super(errors.join(" / "));
+    this.errors = errors;
+  }
 }
 
 /** Questions per kind, for a header: {1: n, …, 5: n}. */

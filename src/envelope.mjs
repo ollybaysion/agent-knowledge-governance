@@ -32,6 +32,23 @@ const SCHEMA_FILES = {
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
+// Contracts that are not document types: what the store hands out and takes
+// in besides documents. Kept out of loadSchemas so no document route accepts
+// them as a type.
+const CONTRACT_FILES = {
+  "verification-set/v1": "verification-set/v1.schema.json",
+  "score-record/v1": "score-record/v1.schema.json",
+};
+
+/** The contract schemas, { "<name>/v<N>": schema }. */
+export function loadContractSchemas(dir = SCHEMAS_DIR) {
+  const out = {};
+  for (const [id, rel] of Object.entries(CONTRACT_FILES)) {
+    out[id] = JSON.parse(readFileSync(join(dir, rel), "utf8"));
+  }
+  return out;
+}
+
 /** Load every schemas/*.schema.json into a { "<type>/v<N>": schema } map. */
 export function loadSchemas(dir = SCHEMAS_DIR) {
   const refs = {};

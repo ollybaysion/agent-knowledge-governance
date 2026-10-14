@@ -2,7 +2,7 @@
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
 import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
 import { skillDataIds } from "../../src/skill-data-ids.mjs";
-import { checkVerifySet } from "../../src/verify-set.mjs";
+import { checkVerifySet, toVerificationSet, VerifySetError } from "../../src/verify-set.mjs";
 import {
   readJson,
   readText,
@@ -170,6 +170,35 @@ export function registerDocsRoutes(app) {
         wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
         ...warningsOf(type, doc),
       };
+    },
+  );
+
+  // A main skill's verification set as the verification-set/v1 object, read
+  // with the parser the save check uses. Cached per document rev.
+  const verificationSets = new Map(); // id -> {rev, set}
+  app.get(
+    "/api/docs/domain-skill/:id/verification-set",
+    { config: { roles: ["viewer"], anonOk: true } },
+    async (request, reply) => {
+      const { id } = request.params;
+      const relpath = `domain-skill/${id}.json`;
+      const doc = readJson(storeDir, relpath);
+      if (!doc) return reply.code(404).send({ error: "not_found" });
+      const rev = revOfPath(storeDir, relpath);
+      const cached = verificationSets.get(id);
+      let set = cached && cached.rev === rev ? cached.set : undefined;
+      if (set === undefined) {
+        try {
+          set = toVerificationSet(id, doc.body?.markdown ?? "", rev);
+        } catch (err) {
+          if (!(err instanceof VerifySetError)) throw err;
+          return reply.code(422).send({ error: "invalid_verification_set", details: err.errors });
+        }
+        verificationSets.set(id, { rev, set });
+      }
+      if (set === null) return reply.code(404).send({ error: "no_verification_set" });
+      if (rev) reply.header("etag", rev);
+      return set;
     },
   );
 

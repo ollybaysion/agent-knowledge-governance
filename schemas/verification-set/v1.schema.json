@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verification-set/v1",
+  "title": "verification-set/v1",
+  "description": "A main agent's answer-quality verification set as an object: the `## 답변 품질 검증 Set` section of its skill md, read by src/verify-set.mjs. The md is the authoring form; this object is the contract the scorer (fdc-agent-be-spring) reads from GET /api/docs/domain-skill/:id/verification-set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "rev", "questions", "warnings"],
+  "properties": {
+    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "The domain-skill id." },
+    "rev": { "type": ["string", "null"], "description": "The domain-skill document's store rev the set was read at." },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where data questions run. Absent when the md has no `### 설정`.",
+      "properties": {
+        "line": { "type": "string", "minLength": 1 },
+        "eqp": { "type": "string", "minLength": 1 },
+        "duration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$" },
+            "end": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$" }
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "In written order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "text"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["general", "data", "relation", "advanced", "reliability"], "description": "일반 지식 · 데이터 설명 · 데이터 연관 · 고도화 분석 · 신뢰성." },
+          "text": { "type": "string", "minLength": 1, "description": "The question, as the `####` heading." },
+          "answer": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "description": "general only: the `## 도메인 지식` heading path the answer is in.",
+            "properties": { "path": { "type": "string", "minLength": 1 } }
+          },
+          "sql": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "data: one, relation: one or more — SQL with every value bound." },
+          "rubric": { "type": "string", "minLength": 1, "description": "What the answer has to say." },
+          "deferred": { "type": "boolean", "const": true, "description": "advanced: counted, not judged." }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" }, "description": "What saved but needs a look: an answer path the md lacks, data questions with nowhere to run." }
+  }
+}

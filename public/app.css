@@ -3056,3 +3056,21 @@ a.wiki {
 .chip.verify-score.none {
   color: var(--muted);
 }
+.verify-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+button.chip.verify-path {
+  font: inherit;
+  font-size: 11px;
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+}
+button.chip.verify-path:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}

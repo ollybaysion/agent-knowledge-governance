@@ -1816,6 +1816,9 @@ const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
 const verifyLib = import("/verify-set.mjs").catch(() => null);
 const VERIFY_KEY = "답변 품질 검증 Set";
 const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석", 5: "신뢰성" };
+// The score-record/v1 kind names, by the same numbers.
+const VERIFY_KIND_WIRE = { 1: "general", 2: "data", 3: "relation", 4: "advanced", 5: "reliability" };
+const VERIFY_LABEL_OF_WIRE = Object.fromEntries(Object.entries(VERIFY_KIND_WIRE).map(([k, w]) => [w, VERIFY_KIND_LABEL[k]]));
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
 // points at. An editor's click flips it (PUT …/role); the server refuses a sub
@@ -1946,6 +1949,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   let verifyTemplate = null;
   let verifyCounts = null; // {1..5: n} when the md has the section
   let verifyQuestions = []; // the section's questions, written order
+  let answerPaths = []; // the ## 도메인 지식 heading paths a 정답 can name
   let scoreLines = null; // GET /api/score/:agent lines, oldest first; null when not loaded
   async function read() {
     const [lib, vlib, scores] = await Promise.all([
@@ -1959,6 +1963,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       const parsed = vlib.parseVerifySet(s.markdown || "");
       verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
       verifyQuestions = parsed.questions;
+      answerPaths = vlib.knowledgePaths(s.markdown || "");
     }
     scoreLines = scores?.ok ? scores.data.lines : null;
     showLastScore();
@@ -2036,9 +2041,33 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           "aria-label": `## ${sec.heading}`,
         });
         ta.value = initial;
+        // 정답 paths to click in at the cursor; typing them works the same.
+        const paths =
+          sec.key === VERIFY_KEY && answerPaths.length
+            ? el("div", { class: "verify-paths" }, [
+                el("span", { class: "dim", text: "정답 경로 넣기 — " }),
+                ...answerPaths.map((p) =>
+                  el("button", {
+                    type: "button",
+                    class: "chip verify-path",
+                    text: p,
+                    title: `커서 자리에 "- 정답: ${p}" 를 넣습니다`,
+                    onclick: () => {
+                      const at = ta.selectionStart ?? ta.value.length;
+                      const before = ta.value.slice(0, at);
+                      const line = `${before === "" || before.endsWith("\n") ? "" : "\n"}- 정답: ${p}\n`;
+                      ta.setRangeText(line, at, ta.selectionEnd ?? at, "end");
+                      ta.dispatchEvent(new Event("input", { bubbles: true }));
+                      ta.focus();
+                    },
+                  }),
+                ),
+              ])
+            : null;
         queueMicrotask(() => ta.focus());
         return el("div", { class: "sk-sec editing" }, [
           head,
+          paths,
           editor(ta, {
             dirty: () => ta.value !== sec.body,
             // Unchanged gives back the md as it was (any section order).
@@ -2092,13 +2121,13 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return out;
   }
 
-  const questionKey = (kind, question) => `${kind}\n${question}`;
-  // The last machine and human line of each question, by 종류 + 질문 문장.
+  const questionKey = (kind, text) => `${kind}\n${text}`;
+  // The last machine and human line of each question, by kind + text.
   function lastLines() {
     const machine = new Map();
     const human = new Map();
     for (const l of scoreLines || []) {
-      const key = questionKey(l.kind, l.question);
+      const key = questionKey(l.kind, l.text);
       if (l.machine) machine.set(key, l);
       if (l.human) human.set(key, l);
     }
@@ -2109,11 +2138,11 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   const scoreChip = el("span", { class: "chip verify-score none", text: "Score 기록 없음" });
   if (main) chips.appendChild(scoreChip);
   function showLastScore() {
-    const last = [...(scoreLines || [])].reverse().find((l) => l.machine && l.score);
+    const last = [...(scoreLines || [])].reverse().find((l) => l.machine && l.run);
     if (!last) return;
     scoreChip.className = "chip verify-score";
-    scoreChip.textContent = `Score ${last.score.percent}${last.score.band ? ` · ${last.score.band}` : ""} · ${last.at}`;
-    scoreChip.title = `G ${last.score.g ?? "—"} · A ${last.score.a} · ${last.model}`;
+    scoreChip.textContent = `Score ${last.run.score}${last.run.band ? ` · ${last.run.band}` : ""} · ${last.at}`;
+    scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"} · ${last.model}`;
   }
 
   // One row per question: its last machine verdict and the person's score, editable.
@@ -2121,8 +2150,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     const { machine, human } = lastLines();
     const rows = verifyQuestions.map((q) => {
       const kind = VERIFY_KIND_LABEL[q.kind];
-      const m = machine.get(questionKey(kind, q.text));
-      const h = human.get(questionKey(kind, q.text));
+      const wire = VERIFY_KIND_WIRE[q.kind];
+      const m = machine.get(questionKey(wire, q.text));
+      const h = human.get(questionKey(wire, q.text));
       const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
       if (h) input.value = String(h.human.score);
       const save = el("button", {
@@ -2138,7 +2168,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           save.disabled = true;
           const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
             method: "POST",
-            body: { lines: [{ kind, question: q.text, human: { score } }] },
+            body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
           });
           if (r.ok) {
             toast("사람 점수를 남겼습니다", "ok");
@@ -2154,7 +2184,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         el("td", { text: q.text }),
         el("td", {}, m
           ? [
-              el("b", { class: m.machine.answered ? "verify-ok" : "verify-no", text: m.machine.answered ? "✓" : "✗" }),
+              el("b", { class: m.machine.ok ? "verify-ok" : "verify-no", text: m.machine.ok ? "✓" : "✗" }),
               ` ${m.at}`,
               m.machine.reason ? el("span", { class: "dim", text: ` · ${m.machine.reason}` }) : null,
             ]
@@ -2181,9 +2211,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         el("tbody", {}, lines.map((l) =>
           el("tr", {}, [
             el("td", { class: "mono", text: l.at }),
-            el("td", { class: "dim", text: l.kind }),
-            el("td", { text: l.question }),
-            el("td", { text: l.machine ? `${l.machine.answered ? "✓" : "✗"}${l.machine.reason ? ` ${l.machine.reason}` : ""} · Score ${l.score?.percent ?? "—"}` : "" }),
+            el("td", { class: "dim", text: VERIFY_LABEL_OF_WIRE[l.kind] ?? l.kind }),
+            el("td", { text: l.text }),
+            el("td", { text: l.machine ? `${l.machine.ok ? "✓" : "✗"}${l.machine.reason ? ` ${l.machine.reason}` : ""} · Score ${l.run?.score ?? "—"}` : "" }),
             el("td", { text: l.human ? `${l.human.score} · ${l.human.by}` : "" }),
           ]),
         )),
