@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, toVerificationSet, verifySetTemplate, withoutVerifySet, VerifySetError } from "../src/verify-set.mjs";
+import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, toVerificationSet, verifySetTemplate, withoutVerifySet, VerifySetError, verifySetBody } from "../src/verify-set.mjs";
 import { loadContractSchemas } from "../src/envelope.mjs";
 import { validate } from "../src/validate.mjs";
 import { renderDomainSkillMd } from "../src/render/domain-skill.mjs";
@@ -186,4 +186,16 @@ test("the contract object follows verification-set/v1; a broken section throws e
   assert.equal(toVerificationSet("s", skill, "r1"), null);
   assert.throws(() => toVerificationSet("s", "## 답변 품질 검증 Set\n\n### 데이터\n", "r"), VerifySetError);
   assert.match(errs("### 일반 지식\n\n#### q\n\n- 정답: A, B")[0], /경로 하나/);
+});
+
+test("verifySetBody writes back what parseVerifySet read — the card editor's save", () => {
+  const parsed = parseVerifySet(withSet);
+  const again = parseVerifySet(`# s\n\n## 답변 품질 검증 Set\n\n${verifySetBody(parsed)}\n`);
+  const strip = (qs) => qs.map(({ line, ...q }) => q);
+  assert.deepEqual(again.errors, []);
+  assert.deepEqual(again.settings, parsed.settings);
+  assert.deepEqual(strip(again.questions), strip(parsed.questions));
+  assert.equal(verifySetBody({ settings: null, questions: [] }), verifySetTemplate());
+  const multi = verifySetBody({ settings: null, questions: [{ kind: 1, text: "q\n이어짐", path: "A", sqls: [], rubric: "한\n줄", deferred: false }] });
+  assert.match(multi, /#### q 이어짐\n\n- 정답: A\n- 채점표: 한 줄/);
 });

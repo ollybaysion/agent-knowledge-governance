@@ -1950,17 +1950,21 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   let verifyCounts = null; // {1..5: n} when the md has the section
   let verifyQuestions = []; // the section's questions, written order
   let answerPaths = []; // the ## 도메인 지식 heading paths a 정답 can name
+  let vlib = null; // src/verify-set.mjs once loaded
+  let verifyParsed = null; // parseVerifySet of the md
   let scoreLines = null; // GET /api/score/:agent lines, oldest first; null when not loaded
   async function read() {
-    const [lib, vlib, scores] = await Promise.all([
+    const [lib, verifyModule, scores] = await Promise.all([
       skillSectionsLib,
       verifyLib,
       main ? api(`/api/score/${encodeURIComponent(doc.id)}`) : null,
     ]);
     if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
+    vlib = verifyModule;
     if (vlib) {
       verifyTemplate = vlib.verifySetTemplate();
       const parsed = vlib.parseVerifySet(s.markdown || "");
+      verifyParsed = parsed;
       verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
       verifyQuestions = parsed.questions;
       answerPaths = vlib.knowledgePaths(s.markdown || "");
@@ -2015,6 +2019,18 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return card;
   }
 
+  // A textarea as tall as its text; dragging the corner makes it taller still.
+  const fitHeight = (ta) => {
+    const grow = () => {
+      if (ta.scrollHeight > ta.clientHeight) ta.style.height = `${ta.scrollHeight + 2}px`;
+    };
+    queueMicrotask(grow);
+    if (!ta.dataset.fit) {
+      ta.dataset.fit = "1";
+      ta.addEventListener("input", grow);
+    }
+  };
+
   const editBtn = (label, onclick, disabled) =>
     canEdit
       ? el("button", { type: "button", class: "btn ghost sm add-btn", text: label, disabled, onclick })
@@ -2037,10 +2053,11 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         const ta = el("textarea", {
           class: "fld mono sk-sec-edit",
           spellcheck: "false",
-          rows: Math.min(24, Math.max(3, initial.split("\n").length + 1)),
+          rows: Math.max(3, initial.split("\n").length + 1),
           "aria-label": `## ${sec.heading}`,
         });
         ta.value = initial;
+        fitHeight(ta);
         // 정답 paths to click in at the cursor; typing them works the same.
         const paths =
           sec.key === VERIFY_KEY && answerPaths.length
@@ -2065,7 +2082,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
               ])
             : null;
         queueMicrotask(() => ta.focus());
-        return el("div", { class: "sk-sec editing" }, [
+        return el("div", { class: "sk-sec editing sk-wide" }, [
           head,
           paths,
           editor(ta, {
@@ -2082,6 +2099,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           }),
         ]);
       }
+      // The verification set is edited question by question; a section the
+      // reader refuses (a draft) falls back to the section textarea above.
+      if (sec.key === VERIFY_KEY && vlib && verifyParsed && verifyParsed.errors.length === 0)
+        return verifyBlock(lib, split, editing, sec);
       return el("div", { class: "sk-sec" }, [
         head,
         sec.body.trim() === ""
@@ -2115,7 +2136,6 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           el("ul", {}, warnings.map((w) => el("li", { text: w }))),
         ]),
       );
-    if (verifyQuestions.length) out.push(verifyResults());
     if (scoreLines?.length) out.push(verifyHistory());
     out.push(el("p", { class: "dim", text: VERIFY_HINT }));
     return out;
@@ -2145,59 +2165,256 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"} · ${last.model}`;
   }
 
-  // One row per question: its last machine verdict and the person's score, editable.
-  function verifyResults() {
-    const { machine, human } = lastLines();
-    const rows = verifyQuestions.map((q) => {
-      const kind = VERIFY_KIND_LABEL[q.kind];
-      const wire = VERIFY_KIND_WIRE[q.kind];
-      const m = machine.get(questionKey(wire, q.text));
-      const h = human.get(questionKey(wire, q.text));
-      const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
-      if (h) input.value = String(h.human.score);
-      const save = el("button", {
-        type: "button",
-        class: "btn ghost sm",
-        text: "저장",
-        onclick: async () => {
-          const score = Number(input.value);
-          if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
-            toast("사람 점수는 0~100 정수입니다", "error");
-            return;
-          }
-          save.disabled = true;
-          const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
-            method: "POST",
-            body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
-          });
-          if (r.ok) {
-            toast("사람 점수를 남겼습니다", "ok");
-            reload();
-            return;
-          }
-          save.disabled = false;
-          toast(`남기지 못했습니다 (${r.status})`, "error");
-        },
-      });
-      return el("tr", {}, [
-        el("td", { class: "dim", text: kind }),
-        el("td", { text: q.text }),
-        el("td", {}, m
+  // The person's 0~100 score for one question: last value, who · when, input · 저장.
+  function humanScore(q, h) {
+    const wire = VERIFY_KIND_WIRE[q.kind];
+    const shown = h
+      ? [el("b", { text: String(h.human.score) }), el("span", { class: "dim", text: ` · ${h.human.by} · ${h.human.at}` })]
+      : [el("span", { class: "dim", text: "—" })];
+    if (!canEdit) return el("div", { class: "verify-human" }, [el("span", { class: "dim", text: "사람 점수 " }), ...shown]);
+    const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
+    if (h) input.value = String(h.human.score);
+    const save = el("button", {
+      type: "button",
+      class: "btn ghost sm",
+      text: "저장",
+      onclick: async () => {
+        const score = Number(input.value);
+        if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
+          toast("사람 점수는 0~100 정수입니다", "error");
+          return;
+        }
+        save.disabled = true;
+        const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
+          method: "POST",
+          body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
+        });
+        if (r.ok) {
+          toast("사람 점수를 남겼습니다", "ok");
+          reload();
+          return;
+        }
+        save.disabled = false;
+        toast(`남기지 못했습니다 (${r.status})`, "error");
+      },
+    });
+    return el("div", { class: "verify-human" }, [el("span", { class: "dim", text: "사람 점수 " }), ...shown, input, save]);
+  }
+
+  // ── 답변 품질 검증 Set: 설정 카드 + 종류 다섯 묶음, 질문 하나 = 카드 ──
+  // A card edits one question; 저장 rebuilds the section md (verifySetBody)
+  // and saves the document the way a section edit does. `editing` is
+  // "verify:settings", "verify:q<index>" or "verify:new<kind>" while a card is open.
+  function verifyBlock(lib, split, editing, sec) {
+    const name = split.title ?? s.name;
+    const set = { settings: verifyParsed.settings, questions: verifyParsed.questions };
+    const busy = editing !== null;
+    const open = (key) => readSections(lib, split, `verify:${key}`);
+    const close = () => readSections(lib, split, null);
+
+    async function saveSet(next, errBox, button) {
+      const body = vlib.verifySetBody(next);
+      const md = lib.joinSkill(
+        name,
+        split.sections.map((x) => (x.key === VERIFY_KEY ? { ...x, body } : x)),
+        sectionsOf(lib),
+      );
+      const problems = vlib.parseVerifySet(md).errors;
+      if (problems.length) return showErrors(errBox, problems);
+      button.disabled = true;
+      const r = await api(url, { method: "PUT", headers: { "if-match": rev }, body: { ...s, markdown: md } });
+      if (r.ok) {
+        toast("저장했습니다", "");
+        reload();
+        return;
+      }
+      button.disabled = false;
+      const d = r.data || {};
+      showErrors(errBox, r.status === 409 ? ["다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요."]
+        : d.details || [d.message || `저장 실패 (${r.status})`]);
+    }
+    function showErrors(box, list) {
+      box.replaceChildren(el("ul", {}, list.map((e) => el("li", { text: e.replace(/^\$\.body\.markdown: /, "") }))));
+      box.hidden = false;
+    }
+    const cardActs = (save, cancel) =>
+      el("div", { class: "editacts" }, [
+        el("button", { type: "button", class: "btn primary sm", text: "저장", onclick: save }),
+        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: cancel }),
+      ]);
+    const field = (label, control) => el("label", { class: "verify-field" }, [el("span", { class: "dim", text: label }), control]);
+    const input = (value, placeholder) => {
+      const i = el("input", { type: "text", class: "fld", placeholder: placeholder || "" });
+      i.value = value ?? "";
+      return i;
+    };
+    const area = (value, cls) => {
+      const t = el("textarea", { class: `fld mono ${cls || ""}`, spellcheck: "false", rows: 2 });
+      t.value = value ?? "";
+      queueMicrotask(() => fitHeight(t));
+      t.addEventListener("input", () => fitHeight(t));
+      return t;
+    };
+
+    // 설정 — 라인 · 설비 · 기간
+    function settingsCard() {
+      const st = set.settings || {};
+      if (editing === "verify:settings") {
+        const line = input(st.line, "L1");
+        const eqp = input(st.eqp, "EQP01");
+        const start = input(st.duration?.start, "2026-10-01T00:00");
+        const end = input(st.duration?.end, "2026-10-01T06:00");
+        const errBox = el("div", { class: "verify-errors", hidden: true });
+        return el("div", { class: "verify-card editing sk-wide" }, [
+          el("div", { class: "verify-fields" }, [field("라인", line), field("설비", eqp), field("기간 시작", start), field("기간 끝", end)]),
+          errBox,
+          cardActs((e) => {
+            const v = (x) => x.value.trim();
+            if ((v(start) === "") !== (v(end) === "")) return showErrors(errBox, ["기간은 시작과 끝을 같이 적습니다"]);
+            const settings = {
+              ...(v(line) ? { line: v(line) } : {}),
+              ...(v(eqp) ? { eqp: v(eqp) } : {}),
+              ...(v(start) ? { duration: { start: v(start), end: v(end) } } : {}),
+            };
+            saveSet({ ...set, settings }, errBox, e.currentTarget);
+          }, close),
+        ]);
+      }
+      const dur = st.duration ? `${st.duration.start} ~ ${st.duration.end}` : "—";
+      return el("div", { class: "verify-card" }, [
+        el("div", { class: "verify-card-head" }, [
+          el("b", { text: "설정" }),
+          editBtn("편집", () => open("settings"), busy),
+        ]),
+        el("p", { class: "verify-settings" }, `라인 ${st.line || "—"} · 설비 ${st.eqp || "—"} · 기간 ${dur}`),
+      ]);
+    }
+
+    // 질문 카드 — 읽기
+    function readCard(q, index, last) {
+      const answerParts = [];
+      if (q.path) answerParts.push(el("div", {}, [el("span", { class: "dim", text: "정답 " }), el("code", { text: q.path })]));
+      for (const sql of q.sqls) answerParts.push(el("pre", { class: "sk-md verify-sql", text: sql }));
+      if (q.rubric) answerParts.push(el("div", {}, [el("span", { class: "dim", text: "채점표 " }), q.rubric]));
+      if (q.deferred) answerParts.push(el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" }));
+      if (q.kind === 5) answerParts.push(el("span", { class: "dim", text: "답이 자료에 없는 질문 — \"모른다\" 가 맞는 답" }));
+      const m = last.machine.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text));
+      return el("div", { class: "verify-card" }, [
+        el("div", { class: "verify-card-head" }, [
+          el("b", { class: "verify-q", text: q.text }),
+          editBtn("편집", () => open(`q${index}`), busy),
+          canEdit
+            ? el("button", {
+                type: "button",
+                class: "btn ghost sm add-btn",
+                text: "삭제",
+                disabled: busy,
+                onclick: (e) => {
+                  if (!confirm(`"${q.text}" 질문을 지울까요?`)) return;
+                  const errBox = e.currentTarget.closest(".verify-card").querySelector(".verify-errors");
+                  saveSet({ ...set, questions: set.questions.filter((_, i) => i !== index) }, errBox, e.currentTarget);
+                },
+              })
+            : null,
+        ]),
+        ...answerParts,
+        el("div", { class: "verify-machine" }, m
           ? [
+              el("span", { class: "dim", text: "기계 판정 " }),
               el("b", { class: m.machine.ok ? "verify-ok" : "verify-no", text: m.machine.ok ? "✓" : "✗" }),
               ` ${m.at}`,
               m.machine.reason ? el("span", { class: "dim", text: ` · ${m.machine.reason}` }) : null,
             ]
-          : el("span", { class: "dim", text: "—" })),
-        el("td", {}, h ? [el("b", { text: String(h.human.score) }), el("span", { class: "dim", text: ` · ${h.human.by} · ${h.human.at}` })] : el("span", { class: "dim", text: "—" })),
-        el("td", {}, canEdit ? [input, save] : null),
+          : [el("span", { class: "dim", text: "기계 판정 —" })]),
+        humanScore(q, last.human.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text))),
+        el("div", { class: "verify-errors", hidden: true }),
+      ]);
+    }
+
+    // 질문 카드 — 편집. `index` null 이면 새 질문(묶음 끝에 붙는다).
+    function editCard(q, index) {
+      const text = input(q.text, "질문 문장");
+      const errBox = el("div", { class: "verify-errors", hidden: true });
+      const parts = [field("질문", text)];
+      let collect = () => ({});
+      if (q.kind === 1) {
+        const path = input(q.path, "## 도메인 지식 소제목 경로");
+        const rubric = area(q.rubric);
+        parts.push(field("정답 경로", path));
+        if (answerPaths.length)
+          parts.push(el("div", { class: "verify-paths" }, [
+            el("span", { class: "dim", text: "경로 고르기 — " }),
+            ...answerPaths.map((p) => el("button", { type: "button", class: "chip verify-path", text: p, onclick: () => { path.value = p; path.focus(); } })),
+          ]));
+        parts.push(field("채점표(선택)", rubric));
+        collect = () => ({ path: path.value.trim() || null, rubric: rubric.value.trim() || null });
+      } else if (q.kind === 2) {
+        const sql = area(q.sqls[0], "verify-sql-edit");
+        parts.push(field("정답 SQL(값이 다 들어간 문장)", sql));
+        collect = () => ({ sqls: sql.value.trim() ? [sql.value.trim()] : [] });
+      } else if (q.kind === 3) {
+        const list = el("div", { class: "verify-sql-list" });
+        const rows = [];
+        const addRow = (value) => {
+          const t = area(value, "verify-sql-edit");
+          const row = el("div", { class: "verify-sql-row" }, [
+            t,
+            el("button", { type: "button", class: "btn ghost sm", text: "줄 삭제", onclick: () => { rows.splice(rows.indexOf(t), 1); row.remove(); } }),
+          ]);
+          rows.push(t);
+          list.appendChild(row);
+        };
+        (q.sqls.length ? q.sqls : [""]).forEach(addRow);
+        const rubric = area(q.rubric);
+        parts.push(field("정답 SQL(여럿)", list), el("button", { type: "button", class: "btn ghost sm", text: "SQL 추가", onclick: () => addRow("") }));
+        parts.push(field("채점표", rubric));
+        collect = () => ({ sqls: rows.map((t) => t.value.trim()).filter(Boolean), rubric: rubric.value.trim() || null });
+      } else if (q.kind === 4) {
+        parts.push(el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" }));
+        collect = () => ({ deferred: true });
+      } else {
+        parts.push(el("span", { class: "dim", text: "답이 자료에 없는 질문 — 에이전트가 \"모른다\" 로 답해야 맞습니다" }));
+      }
+      queueMicrotask(() => text.focus());
+      const save = (e) => {
+        const t = text.value.trim();
+        if (!t) return showErrors(errBox, ["질문 문장이 비었습니다"]);
+        const edited = { ...q, text: t, ...collect() };
+        const questions = index === null
+          ? [...set.questions, edited]
+          : set.questions.map((x, i) => (i === index ? edited : x));
+        saveSet({ ...set, questions }, errBox, e.currentTarget);
+      };
+      const card = el("div", { class: "verify-card editing sk-wide" }, [...parts, errBox, cardActs(save, close)]);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+      return card;
+    }
+
+    const last = lastLines();
+    const groups = [1, 2, 3, 4, 5].map((kind) => {
+      const mine = set.questions.map((q, i) => [q, i]).filter(([q]) => q.kind === kind);
+      const cards = mine.map(([q, i]) => (editing === `verify:q${i}` ? editCard(q, i) : readCard(q, i, last)));
+      if (editing === `verify:new${kind}`)
+        cards.push(editCard({ kind, text: "", path: null, sqls: [], rubric: null, deferred: kind === 4 }, null));
+      return el("div", { class: "verify-group" }, [
+        el("div", { class: "verify-group-head" }, [
+          el("h4", { text: `${VERIFY_KIND_LABEL[kind]} ` }, [el("span", { class: "dim", text: String(mine.length) })]),
+          canEdit ? el("button", { type: "button", class: "btn ghost sm add-btn", text: "질문 추가", disabled: busy, onclick: () => open(`new${kind}`) }) : null,
+        ]),
+        ...cards,
       ]);
     });
-    return el("div", { class: "verify-results" }, [
-      el("table", {}, [
-        el("thead", {}, el("tr", {}, ["종류", "질문", "마지막 기계 판정", "사람 점수", canEdit ? "사람 점수 적기" : ""].map((t) => el("th", { text: t })))),
-        el("tbody", {}, rows),
-      ]),
+    return el("div", { class: "sk-sec verify-set" }, [
+      el("div", { class: "sk-sec-head" }, [el("h3", { class: "sk-sec-h mono", text: `## ${sec.heading}` })]),
+      sec.body.trim() === "" ? el("p", { class: "dim", text: "아직 질문이 없습니다 — 설정을 적고 묶음마다 [질문 추가] 로 넣으세요." }) : null,
+      settingsCard(),
+      ...groups,
+      ...verifyExtras(),
     ]);
   }
 
@@ -2235,9 +2452,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   function editWhole() {
     const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
     input.value = s.markdown || "";
+    fitHeight(input);
     docHolder.replaceChildren(
       el("h2", { class: "sk-h" }, ["문서 편집 · 전체 md"]),
-      editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value }),
+      el("div", { class: "sk-wide" }, editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value })),
     );
     input.focus();
   }

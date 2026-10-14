@@ -3074,3 +3074,99 @@ button.chip.verify-path:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
+/* 편집 중인 절 · 카드는 문서 열보다 넓게 — 화면 폭(옆 칸 몫을 뺀)까지 */
+.sk-wide {
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max(100%, min(1200px, calc(100vw - 300px)));
+}
+/* 절 · 전체 md 편집 글 상자: 글 높이에 맞추고(fitHeight), 모서리로 더 늘린다 */
+.slot-edit textarea.sk-sec-edit,
+.slot-edit textarea.sk-md-edit {
+  overflow: auto;
+  resize: vertical;
+}
+/* 답변 품질 검증 Set — 설정 카드 · 종류 묶음 · 질문 카드 */
+.verify-set .verify-group {
+  margin-top: 14px;
+}
+.verify-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.verify-group-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.verify-card {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin: 6px 0;
+  background: var(--surface-soft);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.verify-card.editing {
+  background: var(--canvas);
+  border-color: var(--primary);
+}
+.verify-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.verify-card-head .verify-q {
+  margin-right: auto;
+}
+.verify-settings {
+  margin: 0;
+}
+.verify-card pre.verify-sql {
+  margin: 0;
+  font-size: 12px;
+}
+.verify-machine,
+.verify-human {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.verify-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.verify-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.verify-card textarea {
+  width: 100%;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow: auto;
+  resize: vertical;
+}
+.verify-sql-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+.verify-errors {
+  color: var(--error-ink);
+  font-size: 12px;
+}
+.verify-errors ul {
+  margin: 0;
+  padding-left: 18px;
+}

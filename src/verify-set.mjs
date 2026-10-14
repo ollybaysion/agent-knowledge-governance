@@ -305,6 +305,38 @@ export class VerifySetError extends Error {
   }
 }
 
+/**
+ * The section body for a set as parseVerifySet reads it — the inverse the card
+ * editor saves with. Parts come in the standard order, every part heading is
+ * written (an empty part stays as a place to add to), questions keep their
+ * order within a kind. A field is one line: line breaks in it become spaces.
+ * A question's fields and SQL blocks follow each other line by line.
+ * @param {{settings: object|null, questions: object[]}} set
+ */
+export function verifySetBody({ settings, questions }) {
+  const one = (v) => String(v).replace(/\s*\r?\n\s*/g, " ").trim();
+  const out = [`### ${SETTINGS}`];
+  const s = settings ?? {};
+  const fields = [];
+  if (s.line) fields.push(`- 라인: ${one(s.line)}`);
+  if (s.eqp) fields.push(`- 설비: ${one(s.eqp)}`);
+  if (s.duration) fields.push(`- 기간: ${s.duration.start} ~ ${s.duration.end}`);
+  if (fields.length) out.push(fields.join("\n"));
+  for (const k of VERIFY_KINDS) {
+    out.push(`### ${k.key}`);
+    for (const q of questions.filter((x) => x.kind === k.kind)) {
+      out.push(`#### ${one(q.text)}`);
+      const body = [];
+      if (q.path) body.push(`- 정답: ${one(q.path)}`);
+      for (const sql of q.sqls ?? []) body.push("```sql\n" + String(sql).trim() + "\n```");
+      if (q.rubric) body.push(`- 채점표: ${one(q.rubric)}`);
+      if (q.deferred) body.push("- 보류");
+      if (body.length) out.push(body.join("\n"));
+    }
+  }
+  return out.join("\n\n");
+}
+
 /** Questions per kind, for a header: {1: n, …, 5: n}. */
 export function countByKind(questions) {
   const out = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
