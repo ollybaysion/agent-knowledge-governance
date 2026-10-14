@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "score-record/v1",
+  "title": "score-record/v1",
+  "description": "One line of an agent's answer-quality record (store/score/<agent>.json): the scorer's verdict on one question (machine + run), or a person's score for one question (human). A question is its kind + text. Written by POST /api/score/:agent, read by GET /api/score/:agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent",
+    "kind",
+    "text",
+    "at"
+  ],
+  "properties": {
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "general",
+        "data",
+        "relation",
+        "advanced",
+        "reliability"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Server-local date and time to the second."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "machine lines: the judging LLM."
+    },
+    "mdRev": {
+      "type": "string",
+      "minLength": 1,
+      "description": "machine lines: the skill md's fingerprint."
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Answered."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why not, when not."
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sql": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "data · relation: the SQL the agent ran, values bound."
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "general: the knowledge pieces it picked."
+        }
+      }
+    },
+    "human": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "by",
+        "at"
+      ],
+      "properties": {
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "G",
+        "A",
+        "R",
+        "score"
+      ],
+      "description": "machine lines: the agent's whole score that run.",
+      "properties": {
+        "G": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "A": {
+          "type": "number"
+        },
+        "R": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Reliability: right answers / reliability questions. Null when there are none."
+        },
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "band": {
+          "type": "string"
+        },
+        "raw": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "S: the geometric mean × 100 before the human gate, unrounded."
+        },
+        "humanRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "h: questions with a human score / questions judged (all but 고도화 분석)."
+        },
+        "gate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "σ̃(h): the share of S above the gate start that score keeps."
+        },
+        "general": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "m",
+            "n"
+          ],
+          "properties": {
+            "m": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "일반 지식: machine-answered m of n questions."
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "m",
+            "n"
+          ],
+          "properties": {
+            "m": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "데이터 설명: machine-answered m of n questions."
+        },
+        "relation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "m",
+            "n"
+          ],
+          "properties": {
+            "m": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "데이터 연관: machine-answered m of n questions."
+        },
+        "reliability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "m",
+            "n"
+          ],
+          "properties": {
+            "m": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "신뢰성: machine-answered m of n questions."
+        },
+        "pieces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "level"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "Absolute criterion: knowledge pieces the agent reaches, and their level."
+        },
+        "queries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "level"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "Absolute criterion: queries the agent reaches, and their level."
+        }
+      }
+    }
+  }
+}

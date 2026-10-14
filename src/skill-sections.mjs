@@ -12,6 +12,8 @@ export const SKILL_SECTIONS = [
   { key: "언제 호출되는가", heading: "언제 호출되는가?" },
   { key: "도메인 지식", heading: "도메인 지식" },
   { key: "데이터", heading: "데이터" },
+  // main only: the questions the agent is scored against (src/verify-set.mjs).
+  { key: "답변 품질 검증 Set", heading: "답변 품질 검증 Set" },
 ];
 const KEYS = new Set(SKILL_SECTIONS.map((s) => s.key));
 
@@ -59,14 +61,15 @@ const trimBlankLines = (lines) => {
 };
 
 /**
- * Split a skill md into its `# title` line and the four sections, in
- * SKILL_SECTIONS order (a missing one has body ""). Refuses — throws
+ * Split a skill md into its `# title` line and the sections of `order`
+ * (SKILL_SECTIONS by default), in that order (a missing one has body ""). Refuses — throws
  * SkillSplitError — what the section editor could not give back unchanged: an
  * unknown or repeated `##` section, or text before the first section other
  * than the `# title` line.
  * @returns {{title: string|null, sections: {key: string, heading: string, body: string}[]}}
  */
-export function splitSkill(markdown) {
+export function splitSkill(markdown, order = SKILL_SECTIONS) {
+  const keys = new Set(order.map((s) => s.key));
   let title = null;
   const pre = [];
   const found = new Map(); // key -> {heading, lines}
@@ -74,7 +77,7 @@ export function splitSkill(markdown) {
   for (const { line, heading } of scan(markdown)) {
     if (heading !== null) {
       const key = normalizeHeading(heading);
-      if (!KEYS.has(key)) throw new SkillSplitError(`모르는 절입니다 — "## ${heading}"`);
+      if (!keys.has(key)) throw new SkillSplitError(`모르는 절입니다 — "## ${heading}"`);
       if (found.has(key)) throw new SkillSplitError(`같은 절이 두 번 있습니다 — "## ${heading}"`);
       current = { heading, lines: [] };
       found.set(key, current);
@@ -90,7 +93,7 @@ export function splitSkill(markdown) {
     throw new SkillSplitError("첫 ## 절 앞에 # 제목 줄 밖의 글이 있습니다");
   return {
     title,
-    sections: SKILL_SECTIONS.map(({ key, heading }) => {
+    sections: order.map(({ key, heading }) => {
       const f = found.get(key);
       return { key, heading: f?.heading ?? heading, body: f ? trimBlankLines(f.lines) : "" };
     }),
@@ -99,13 +102,13 @@ export function splitSkill(markdown) {
 
 /**
  * The inverse of splitSkill: `# title`, then each non-empty section in
- * SKILL_SECTIONS order, blank-line separated, one trailing newline. An empty
- * section is left out of the document.
+ * `order`, blank-line separated, one trailing newline. An empty section is
+ * left out of the document.
  */
-export function joinSkill(title, sections) {
+export function joinSkill(title, sections, order = SKILL_SECTIONS) {
   const byKey = new Map(sections.map((s) => [s.key, s]));
   const parts = [`# ${title}`];
-  for (const { key, heading } of SKILL_SECTIONS) {
+  for (const { key, heading } of order) {
     const s = byKey.get(key);
     const body = trimBlankLines(String(s?.body ?? "").split(/\r?\n/));
     if (body !== "") parts.push(`## ${s.heading ?? heading}`, body);

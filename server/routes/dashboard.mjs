@@ -19,6 +19,18 @@ const FILES = {
     path: "skill-sections.mjs",
     type: "text/javascript; charset=utf-8",
   },
+  // The verification-set reader, for the skill screen's template and counts.
+  "/verify-set.mjs": {
+    dir: SRC_DIR,
+    path: "verify-set.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
+  // The consumer's bind rules, so a filled 정답 SQL is the statement it runs.
+  "/sql-bind.mjs": {
+    dir: SRC_DIR,
+    path: "sql-bind.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
   "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
   // The server's own [[ ]] parser, so the page reads the brackets the way the
   // links were made. Served from src/ rather than copied into public/.

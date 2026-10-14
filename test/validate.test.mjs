@@ -589,3 +589,31 @@ test("voc: the shipped example validates", () => {
   const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));
   assert.deepEqual(validateDocument(doc, refs), []);
 });
+
+function setSkillDoc(set, extra = {}) {
+  const markdown = `# s\n\n## 도메인 지식\n\n### A\n\n글\n\n## 답변 품질 검증 Set\n\n${set}\n`;
+  return {
+    schema: "domain-skill/v1",
+    id: "s",
+    keywords: [{ kw: "s", inject: "full" }],
+    status: "active",
+    ...extra,
+    body: { name: "s", markdown },
+  };
+}
+
+test("domain-skill: ## 답변 품질 검증 Set is a section a main may have; its rules refuse a break", () => {
+  assert.deepEqual(validateDocument(setSkillDoc("### 일반 지식\n\n#### q\n\n- 정답: A"), refs), []);
+  assert.deepEqual(validateDocument(setSkillDoc("### 일반 지식\n\n#### q\n\n- 정답: 옛 제목"), refs), [], "an unknown path is a warning");
+  const bad = validateDocument(setSkillDoc("### 데이터 설명\n\n#### r"), refs);
+  assert.deepEqual(bad, ['$.body.markdown: 13행 "#### r": 데이터 설명 질문에는 ```sql 블록이 꼭 하나 있어야 합니다 (지금 0개)']);
+});
+
+test("domain-skill: a sub may not have ## 답변 품질 검증 Set", () => {
+  const errors = validateDocument(setSkillDoc("### 일반 지식", { role: "sub" }), refs);
+  assert.ok(errors.some((e) => e.includes('"## 답변 품질 검증 Set" 은 main 스킬에만 둡니다')), errors.join("\n"));
+});
+
+test("domain-skill: a draft skips the verification-set rules like any draft", () => {
+  assert.deepEqual(validateForStore(setSkillDoc("### 데이터 설명\n\n#### r", { status: "inactive" }), refs), []);
+});

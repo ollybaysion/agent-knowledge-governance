@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadSchemas } from "../src/envelope.mjs";
+import { loadContractSchemas, loadSchemas } from "../src/envelope.mjs";
 import { initStore, isValidId } from "./store.mjs";
 import {
   loadUsers,
@@ -25,6 +25,7 @@ import { registerAuditRoutes } from "./routes/audit.mjs";
 import { registerMiscRoutes } from "./routes/misc.mjs";
 import { registerDashboardRoutes } from "./routes/dashboard.mjs";
 import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
+import { registerScoreRoutes } from "./routes/score.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -56,11 +57,12 @@ export async function buildApp({
   loadUsers(usersPath); // throws AuthBootError if missing/empty/wrong perms — validated eagerly so misconfig is caught at boot, not on first request
 
   const refs = loadSchemas(schemasDir);
+  const contracts = loadContractSchemas(schemasDir);
   const queue = createQueue();
 
   const app = Fastify({ bodyLimit: BODY_LIMIT, logger: false });
 
-  app.decorate("akg", { storeDir, usersPath, refs, queue });
+  app.decorate("akg", { storeDir, usersPath, refs, contracts, queue });
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
   app.addHook("onSend", async (request, reply, payload) => {
@@ -154,6 +156,7 @@ export async function buildApp({
   registerPromoteRoutes(app);
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
+  registerScoreRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

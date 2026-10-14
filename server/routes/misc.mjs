@@ -11,7 +11,7 @@ const VERSION = JSON.parse(
 ).version;
 
 export function registerMiscRoutes(app) {
-  const { storeDir, refs } = app.akg;
+  const { storeDir, refs, contracts } = app.akg;
 
   app.get("/health", { config: { public: true } }, async () => {
     let rev = null;
@@ -43,7 +43,8 @@ export function registerMiscRoutes(app) {
     "/api/schemas/:type",
     { config: { public: true } },
     async (request, reply) => {
-      const schema = refs[`${request.params.type}/v1`];
+      const id = `${request.params.type}/v1`;
+      const schema = refs[id] ?? contracts[id];
       if (!schema) return reply.code(404).send({ error: "not_found" });
       return schema;
     },

@@ -1390,6 +1390,7 @@ async function renderDocScreen(type, id) {
           : null,
         jsonOpen,
         res.data.wikilinks || [],
+        res.data,
       );
       skill.appendChild(linksEl);
       section.replaceChildren(
@@ -1811,6 +1812,19 @@ function inactiveBar(doc) {
 // served as a module). Null when it fails to load — the editor then falls
 // back to the whole md.
 const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
+// The verification-set reader (src/verify-set.mjs): template and counts.
+const verifyLib = import("/verify-set.mjs").catch(() => null);
+// The consumer's bind rules (src/sql-bind.mjs): a picked query's SQL with the typed values.
+const sqlBindLib = import("/sql-bind.mjs").catch(() => null);
+const VERIFY_KEY = "답변 품질 검증 Set";
+const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석", 5: "신뢰성" };
+// The score-record/v1 kind names, by the same numbers.
+const VERIFY_KIND_WIRE = { 1: "general", 2: "data", 3: "relation", 4: "advanced", 5: "reliability" };
+// A record time 2026-10-14T20:08:48 as "10-14 20:08".
+const shortAt = (at) => (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(at ?? "") ? `${at.slice(5, 10)} ${at.slice(11, 16)}` : at ?? "");
+// The Score band tint: 0 신뢰 불가 · 20 기본 · 40 문제 이해 · 60 쉬운 문제 · 80 탁월.
+const bandClass = (score) => `band-${Math.min(4, Math.max(0, Math.floor(Number(score) / 20)))}`;
+const VERIFY_LABEL_OF_WIRE = Object.fromEntries(Object.entries(VERIFY_KIND_WIRE).map(([k, w]) => [w, VERIFY_KIND_LABEL[k]]));
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
 // points at. An editor's click flips it (PUT …/role); the server refuses a sub
@@ -1862,8 +1876,13 @@ function dataIdConflictText(d) {
 // form. The heading structure inside the text is the consumer's schema
 // (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
 // refuses a `##` section it does not know, and the error comes back here.
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
+// A main skill's screen always has the ## 답변 품질 검증 Set block; a skill
+// without it shows the block empty, and 편집 starts from the template.
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis, data) {
   const s = doc.body;
+  const main = (doc.role ?? "main") === "main";
+  // A sub never has the section, so its screen leaves the block out.
+  const sectionsOf = (lib) => (main ? lib.SKILL_SECTIONS : lib.SKILL_SECTIONS.filter((x) => x.key !== VERIFY_KEY));
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
 
   // One whole-body PUT (the body is the unit — no tiered slots). On success the
@@ -1929,13 +1948,51 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   // md as before.
   const docHolder = el("div", { class: "sk-doc" });
   const HINT =
-    "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.";
+    "절은 다섯 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask) · ## 답변 품질 검증 Set(main 만). 모르는 ## 절은 저장이 거절됩니다.";
+  const VERIFY_HINT =
+    "답변 품질 검증 Set — ### 설정(- 라인 · - 설비 · - 기간: 시작 ~ 끝) · ### 일반 지식 · ### 데이터 설명 · ### 데이터 연관 · ### 고도화 분석 · ### 신뢰성. #### 하나가 질문 하나다. 일반 지식은 - 정답: ## 도메인 지식 소제목 경로 · - 채점표(선택), 데이터 설명은 ```sql 블록 하나(값이 다 들어간 SQL), 데이터 연관은 ```sql 블록 여럿 + - 채점표, 고도화 분석은 - 보류, 신뢰성은 답이 자료에 없는 질문(\"모른다\" 가 맞는 답) · - 채점표(선택).";
 
+  let verifyTemplate = null;
+  let verifyCounts = null; // {1..5: n} when the md has the section
+  let verifyQuestions = []; // the section's questions, written order
+  // The pieces a 정답 can name, by skill (own · link1 · link2). Own paths go in
+  // bare; another skill's as <skill>/<path>.
+  let answerGroups = [];
+  let vlib = null; // src/verify-set.mjs once loaded
+  let verifyParsed = null; // parseVerifySet of the md
+  let scoreLines = null; // GET /api/score/:agent lines, oldest first; null when not loaded
+  let verifyQueries = []; // GET …/verification-choices: the queries a 정답 SQL can come from
+  let blib = null; // src/sql-bind.mjs once loaded
   async function read() {
-    const lib = await skillSectionsLib;
+    const [lib, verifyModule, scores, queries, bindModule] = await Promise.all([
+      skillSectionsLib,
+      verifyLib,
+      main ? api(`/api/score/${encodeURIComponent(doc.id)}`) : null,
+      main ? api(`${url}/verification-choices`) : null,
+      sqlBindLib,
+    ]);
     if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
+    vlib = verifyModule;
+    blib = bindModule;
+    verifyQueries = queries?.ok ? queries.data.queries : [];
+    answerGroups = (queries?.ok ? queries.data.pieces : [])
+      .filter((g) => g.paths.length)
+      .map((g) => ({ ...g, values: g.paths.map((p) => (g.tier === "own" ? p : `${g.skill}/${p}`)) }));
+    if (vlib) {
+      verifyTemplate = vlib.verifySetTemplate();
+      const parsed = vlib.parseVerifySet(s.markdown || "");
+      verifyParsed = parsed;
+      verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
+      verifyQuestions = parsed.questions;
+      if (!answerGroups.length) {
+        const own = vlib.knowledgePaths(s.markdown || "");
+        answerGroups = own.length ? [{ skill: doc.id, tier: "own", paths: own, values: own }] : [];
+      }
+    }
+    scoreLines = scores?.ok ? scores.data.lines : null;
+    showLastScore();
     try {
-      readSections(lib, lib.splitSkill(s.markdown || ""), null);
+      readSections(lib, lib.splitSkill(s.markdown || "", sectionsOf(lib)), null);
     } catch (e) {
       if (!(e instanceof lib.SkillSplitError)) throw e;
       readWhole(`절 단위로 나눌 수 없어 전체 md 로 보입니다 — ${e.message}`);
@@ -1982,6 +2039,18 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     return card;
   }
 
+  // A textarea as tall as its text; dragging the corner makes it taller still.
+  const fitHeight = (ta) => {
+    const grow = () => {
+      if (ta.scrollHeight > ta.clientHeight) ta.style.height = `${ta.scrollHeight + 2}px`;
+    };
+    queueMicrotask(grow);
+    if (!ta.dataset.fit) {
+      ta.dataset.fit = "1";
+      ta.addEventListener("input", grow);
+    }
+  };
+
   const editBtn = (label, onclick, disabled) =>
     canEdit
       ? el("button", { type: "button", class: "btn ghost sm add-btn", text: label, disabled, onclick })
@@ -1999,16 +2068,32 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           : editBtn("편집", () => readSections(lib, split, sec.key), editing !== null),
       ]);
       if (editing === sec.key) {
+        // An empty verification set opens on its template; saving it puts the section in.
+        const initial = sec.key === VERIFY_KEY && sec.body === "" && verifyTemplate ? verifyTemplate : sec.body;
         const ta = el("textarea", {
           class: "fld mono sk-sec-edit",
           spellcheck: "false",
-          rows: Math.min(24, Math.max(3, sec.body.split("\n").length + 1)),
+          rows: Math.max(3, initial.split("\n").length + 1),
           "aria-label": `## ${sec.heading}`,
         });
-        ta.value = sec.body;
+        ta.value = initial;
+        fitHeight(ta);
+        // 정답 paths to click in at the cursor; typing them works the same.
+        const paths =
+          sec.key === VERIFY_KEY
+            ? pathPicker("정답 경로 넣기", (p) => {
+                const at = ta.selectionStart ?? ta.value.length;
+                const before = ta.value.slice(0, at);
+                const line = `${before === "" || before.endsWith("\n") ? "" : "\n"}- 정답: ${p}\n`;
+                ta.setRangeText(line, at, ta.selectionEnd ?? at, "end");
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+                ta.focus();
+              })
+            : null;
         queueMicrotask(() => ta.focus());
-        return el("div", { class: "sk-sec editing" }, [
+        return el("div", { class: "sk-sec editing sk-wide" }, [
           head,
+          paths,
           editor(ta, {
             dirty: () => ta.value !== sec.body,
             // Unchanged gives back the md as it was (any section order).
@@ -2018,15 +2103,21 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
                 : lib.joinSkill(
                     name,
                     split.sections.map((x) => (x.key === sec.key ? { ...x, body: ta.value } : x)),
+                    sectionsOf(lib),
                   ),
           }),
         ]);
       }
+      // The verification set is edited question by question; a section the
+      // reader refuses (a draft) falls back to the section textarea above.
+      if (sec.key === VERIFY_KEY && vlib && verifyParsed && verifyParsed.errors.length === 0)
+        return verifyBlock(lib, split, editing, sec);
       return el("div", { class: "sk-sec" }, [
         head,
         sec.body.trim() === ""
           ? el("p", { class: "dim", text: "비어 있습니다" })
           : wikiText(el("pre", { class: "sk-md" }), sec.body, wikis),
+        ...(sec.key === VERIFY_KEY ? verifyExtras() : []),
       ]);
     });
     docHolder.replaceChildren(
@@ -2035,6 +2126,456 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       ...blocks,
       el("p", { class: "dim", text: HINT }),
     );
+  }
+
+  // The pieces a 정답 can name, one row per skill: own first, then the linked skills.
+  const TIER_LABEL = { own: "이 스킬", link1: "연결 1단", link2: "연결 2단" };
+  function pathPicker(label, onPick) {
+    if (!answerGroups.length) return null;
+    return el("div", { class: "verify-paths-groups" }, answerGroups.map((g) =>
+      el("div", { class: "verify-paths" }, [
+        el("span", { class: "dim", text: `${label} · ${TIER_LABEL[g.tier]}${g.tier === "own" ? "" : ` ${g.skill}`} — ` }),
+        ...g.values.map((v, i) =>
+          el("button", { type: "button", class: "chip verify-path", text: g.paths[i], title: `- 정답: ${v}`, onclick: () => onPick(v) })),
+      ]),
+    ));
+  }
+
+  // Under the verification block: questions per kind, the server's warnings, the rules.
+  function verifyExtras() {
+    const out = [];
+    if (verifyCounts)
+      out.push(
+        el("div", { class: "verify-counts" }, [1, 2, 3, 4, 5].map((k) =>
+          el("span", { class: `chip${verifyCounts[k] ? "" : " none"}`, text: `${VERIFY_KIND_LABEL[k]} ${verifyCounts[k]}` }),
+        )),
+      );
+    const warnings = data?.warnings || [];
+    if (warnings.length)
+      out.push(
+        el("div", { class: "verify-warn" }, [
+          el("b", { text: `경고 ${warnings.length}` }),
+          el("ul", {}, warnings.map((w) => el("li", { text: w }))),
+        ]),
+      );
+    if (scoreLines?.length) out.push(verifyHistory());
+    out.push(el("p", { class: "dim", text: VERIFY_HINT }));
+    return out;
+  }
+
+  const questionKey = (kind, text) => `${kind}\n${text}`;
+  // The last machine and human line of each question, by kind + text.
+  function lastLines() {
+    const machine = new Map();
+    const human = new Map();
+    for (const l of scoreLines || []) {
+      const key = questionKey(l.kind, l.text);
+      if (l.machine) machine.set(key, l);
+      if (l.human) human.set(key, l);
+    }
+    return { machine, human };
+  }
+
+  // The agent's last Score, next to the role chip.
+  const scoreChip = el("span", { class: "chip verify-score none", text: "Score 기록 없음" });
+  if (main) chips.appendChild(scoreChip);
+  function showLastScore() {
+    const last = [...(scoreLines || [])].reverse().find((l) => l.machine && l.run);
+    if (!last) return;
+    scoreChip.className = `chip verify-score ${bandClass(last.run.score)}`;
+    scoreChip.textContent = `Score ${last.run.score}${last.run.band ? ` · ${last.run.band}` : ""} · ${shortAt(last.at)}`;
+    const r2 = (x, d = 2) => (typeof x === "number" ? x.toFixed(d) : "—");
+    scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"}`
+      + ` · 문 앞 S ${r2(last.run.raw, 1)} · 사람 점수 비율 h ${r2(last.run.humanRatio)} · σ̃(h) ${r2(last.run.gate)} · ${last.model}`;
+  }
+
+  // The person's 0~100 score for one question: "80 / 100 · who · when", or a
+  // "사람 점수 적기" link that opens the input · 저장 · 취소 in place.
+  function humanScore(q, h) {
+    const wire = VERIFY_KIND_WIRE[q.kind];
+    const box = el("div", { class: "verify-human" });
+    const shown = () => {
+      const parts = h
+        ? [
+            el("span", { class: "dim", text: "사람 " }),
+            el("b", { text: `${h.human.score} / 100` }),
+            el("span", { class: "dim", text: ` · ${h.human.by} · ${shortAt(h.human.at)}` }),
+          ]
+        : canEdit ? [] : [el("span", { class: "dim", text: "사람 점수 —" })];
+      if (canEdit)
+        parts.push(el("button", { type: "button", class: "linkbtn", text: h ? "고치기" : "사람 점수 적기 (100점 만점)", onclick: form }));
+      box.replaceChildren(...parts);
+    };
+    const form = () => {
+      const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
+      if (h) input.value = String(h.human.score);
+      const save = el("button", {
+        type: "button",
+        class: "btn primary sm",
+        text: "저장",
+        onclick: async () => {
+          const score = Number(input.value);
+          if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
+            toast("사람 점수는 0~100 정수입니다", "error");
+            return;
+          }
+          save.disabled = true;
+          const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
+            method: "POST",
+            body: { lines: [{ kind: wire, text: q.text, human: { score } }] },
+          });
+          if (r.ok) {
+            toast("사람 점수를 남겼습니다", "ok");
+            reload();
+            return;
+          }
+          save.disabled = false;
+          toast(`남기지 못했습니다 (${r.status})`, "error");
+        },
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") save.click();
+        if (e.key === "Escape") shown();
+      });
+      box.replaceChildren(
+        el("span", { class: "dim", text: "사람 점수 " }), input, el("span", { class: "dim", text: "/ 100" }), save,
+        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: shown }),
+      );
+      input.focus();
+    };
+    shown();
+    return box;
+  }
+
+  // The last machine verdict as a pill: ✓ 맞음 · ✗ 틀림 + 이유, and when.
+  function verdictPill(m) {
+    if (!m) return el("span", { class: "verify-pill none", text: "판정 없음" });
+    return el("span", { class: "verify-verdict" }, [
+      el("span", { class: `verify-pill ${m.machine.ok ? "ok" : "no"}`, text: m.machine.ok ? "✓ 맞음" : `✗ 틀림${m.machine.reason ? ` · ${m.machine.reason}` : ""}` }),
+      el("span", { class: "dim", text: shortAt(m.at) }),
+    ]);
+  }
+
+  // ── 답변 품질 검증 Set: 설정 카드 + 종류 다섯 묶음, 질문 하나 = 카드 ──
+  // A card edits one question; 저장 rebuilds the section md (verifySetBody)
+  // and saves the document the way a section edit does. `editing` is
+  // "verify:settings", "verify:q<index>" or "verify:new<kind>" while a card is open.
+  function verifyBlock(lib, split, editing, sec) {
+    const set = { settings: verifyParsed.settings, questions: verifyParsed.questions };
+    const busy = editing !== null;
+    const open = (key) => readSections(lib, split, `verify:${key}`);
+    const close = () => readSections(lib, split, null);
+
+    // The one write path scripts use too: PUT …/verification-set with the contract object.
+    async function saveSet(next, errBox, button) {
+      button.disabled = true;
+      const r = await api(`${url}/verification-set`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body: {
+          ...(next.settings && Object.keys(next.settings).length ? { settings: next.settings } : {}),
+          questions: next.questions.map(vlib.toContractQuestion),
+        },
+      });
+      if (r.ok) {
+        toast("저장했습니다", "");
+        reload();
+        return;
+      }
+      button.disabled = false;
+      const d = r.data || {};
+      showErrors(errBox, r.status === 409 ? ["다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요."]
+        : d.details || [d.message || `저장 실패 (${r.status})`]);
+    }
+    function showErrors(box, list) {
+      box.replaceChildren(el("ul", {}, list.map((e) => el("li", { text: e.replace(/^\$\.body\.markdown: /, "") }))));
+      box.hidden = false;
+    }
+    const cardActs = (save, cancel) =>
+      el("div", { class: "verify-acts" }, [
+        el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: cancel }),
+        el("button", { type: "button", class: "btn primary sm", text: "저장", onclick: save }),
+      ]);
+    const field = (label, control) => el("label", { class: "verify-field" }, [el("span", { class: "verify-label", text: label }), control]);
+    const input = (value, placeholder) => {
+      const i = el("input", { type: "text", class: "fld", placeholder: placeholder || "" });
+      i.value = value ?? "";
+      return i;
+    };
+    const area = (value, cls) => {
+      const t = el("textarea", { class: `fld ${cls || ""}`, spellcheck: "false", rows: 2 });
+      t.value = value ?? "";
+      queueMicrotask(() => fitHeight(t));
+      t.addEventListener("input", () => fitHeight(t));
+      return t;
+    };
+
+    // 설정 — 라인 · 설비 · 기간
+    function settingsCard() {
+      const st = set.settings || {};
+      if (editing === "verify:settings") {
+        const line = input(st.line, "L1");
+        const eqp = input(st.eqp, "EQP01");
+        const start = input(st.duration?.start, "2026-10-01T00:00");
+        const end = input(st.duration?.end, "2026-10-01T06:00");
+        const errBox = el("div", { class: "verify-errors", hidden: true });
+        return el("div", { class: "verify-card editing sk-wide" }, [
+          el("b", { text: "설정" }),
+          el("div", { class: "verify-fields" }, [field("라인", line), field("설비", eqp), field("기간 시작", start), field("기간 끝", end)]),
+          errBox,
+          cardActs((e) => {
+            const v = (x) => x.value.trim();
+            if ((v(start) === "") !== (v(end) === "")) return showErrors(errBox, ["기간은 시작과 끝을 같이 적습니다"]);
+            const settings = {
+              ...(v(line) ? { line: v(line) } : {}),
+              ...(v(eqp) ? { eqp: v(eqp) } : {}),
+              ...(v(start) ? { duration: { start: v(start), end: v(end) } } : {}),
+            };
+            saveSet({ ...set, settings }, errBox, e.currentTarget);
+          }, close),
+        ]);
+      }
+      const dur = st.duration ? `${st.duration.start.replace("T", " ")} ~ ${st.duration.end.replace("T", " ")}` : null;
+      const cell = (k, v) => el("div", { class: "verify-cell" }, [
+        el("span", { class: "verify-label", text: k }),
+        el("span", { class: `verify-cell-v${v ? " mono" : " dim"}`, text: v || "—" }),
+      ]);
+      return el("div", { class: "verify-card" }, [
+        el("div", { class: "verify-card-head" }, [
+          el("b", { class: "verify-q", text: "설정" }),
+          editBtn("편집", () => open("settings"), busy),
+        ]),
+        el("div", { class: "verify-settings" }, [cell("라인", st.line), cell("설비", st.eqp), cell("기간", dur)]),
+      ]);
+    }
+
+    // 질문 카드 — 읽기
+    function readCard(q, index, last) {
+      const answerParts = [];
+      if (q.path) answerParts.push(el("div", { class: "verify-answer" }, [el("span", { class: "verify-label", text: "정답" }), el("span", { class: "chip verify-path-chip", text: q.path })]));
+      for (const sql of q.sqls) answerParts.push(el("pre", { class: "verify-sql", text: sql }));
+      if (q.rubric) answerParts.push(el("div", { class: "verify-answer" }, [el("span", { class: "verify-label", text: "채점표" }), el("span", { text: q.rubric })]));
+      if (q.deferred) answerParts.push(el("div", {}, el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" })));
+      if (q.kind === 5) answerParts.push(el("div", { class: "dim", text: "답이 자료에 없는 질문 — \"모른다\" 가 맞는 답" }));
+      const m = last.machine.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text));
+      return el("div", { class: "verify-card" }, [
+        el("div", { class: "verify-card-head" }, [
+          el("b", { class: "verify-q", text: q.text }),
+          editBtn("편집", () => open(`q${index}`), busy),
+          canEdit
+            ? el("button", {
+                type: "button",
+                class: "btn ghost sm add-btn",
+                text: "삭제",
+                disabled: busy,
+                onclick: (e) => {
+                  if (!confirm(`"${q.text}" 질문을 지울까요?`)) return;
+                  const errBox = e.currentTarget.closest(".verify-card").querySelector(".verify-errors");
+                  saveSet({ ...set, questions: set.questions.filter((_, i) => i !== index) }, errBox, e.currentTarget);
+                },
+              })
+            : null,
+        ]),
+        ...answerParts,
+        el("div", { class: "verify-foot" }, [
+          verdictPill(m),
+          humanScore(q, last.human.get(questionKey(VERIFY_KIND_WIRE[q.kind], q.text))),
+        ]),
+        el("div", { class: "verify-errors", hidden: true }),
+      ]);
+    }
+
+    // 조회 고르기 — 고른 조회의 SQL 틀과 입력 칸. 값을 치면 `target` 에 묶은 SQL 을 채운다.
+    // `shared` 는 한 카드 안 SQL 줄들이 같이 쓰는 ASK 값(이름 → 값)이다.
+    function sqlPicker(target, shared) {
+      if (!hasPicker) return null;
+      const st = set.settings || {};
+      const pick = el("select", { class: "fld verify-pick", "aria-label": "조회 고르기" }, [
+        el("option", { value: "", text: "조회 고르기 — 고르면 SQL 틀과 입력 칸이 나옵니다" }),
+        ...verifyQueries.map((qq, i) =>
+          el("option", { value: String(i), text: `${qq.id}${qq.title ? ` — ${qq.title}` : ""}${qq.skill === doc.id ? "" : ` (${qq.skill})`}` }),
+        ),
+      ]);
+      const body = el("div", { class: "verify-pick-body", hidden: true });
+      const fill = (query, inputs) => {
+        const binds = {};
+        for (const [name, i] of inputs) if (i.value.trim() !== "") binds[name] = i.value;
+        const { sql, missing } = blib.bindSql(query.sql, binds);
+        target.value = sql;
+        fitHeight(target);
+        status.textContent = missing.length ? `값이 빈 칸: ${missing.map((m) => `:${m}`).join(" · ")}` : "SQL 을 채웠습니다 — 아래 칸에서 더 고칠 수 있습니다";
+        status.className = missing.length ? "verify-pick-status missing" : "verify-pick-status dim";
+      };
+      const status = el("div", { class: "verify-pick-status dim" });
+      pick.addEventListener("change", () => {
+        const query = verifyQueries[Number(pick.value)];
+        if (pick.value === "" || !query) {
+          body.hidden = true;
+          body.replaceChildren();
+          return;
+        }
+        const inputs = [];
+        const fields = query.binds.map((b) => {
+          const prefill = b.from === "eqp" ? st.eqp : b.from === "start" ? st.duration?.start : b.from === "end" ? st.duration?.end : shared[b.name];
+          const i = input(prefill, b.example ? `예: ${b.example}` : b.from === "start" || b.from === "end" ? "2026-10-01T00:00" : "");
+          i.addEventListener("input", () => {
+            if (b.from === "ask") shared[b.name] = i.value;
+            fill(query, inputs);
+          });
+          inputs.push([b.name, i]);
+          const label = b.from === "eqp" ? "설비" : b.from === "start" ? "기간 시작" : b.from === "end" ? "기간 끝" : b.title || b.name;
+          return el("label", { class: "verify-field" }, [
+            el("span", { class: "verify-label" }, [`${label} `, el("code", { text: `:${b.name}` })]),
+            i,
+            b.from === "ask" && b.question ? el("span", { class: "dim verify-pick-q", text: b.question }) : null,
+          ]);
+        });
+        body.replaceChildren(
+          el("div", { class: "verify-step" }, [el("b", { text: "① SQL 틀" }), el("span", { class: "dim", text: ` · ${query.skill}${st.line ? ` · 라인 ${st.line} 에서 돌립니다` : ""}` })]),
+          el("pre", { class: "verify-sql", text: query.sql }),
+          el("div", { class: "verify-step" }, [el("b", { text: "② 값" }), el("span", { class: "dim", text: " · 설비 · 기간은 설정에서 채웁니다" })]),
+          fields.length ? el("div", { class: "verify-fields" }, fields) : el("div", { class: "dim", text: "이 조회는 입력이 없습니다" }),
+          status,
+        );
+        body.hidden = false;
+        fill(query, inputs);
+        (inputs.find(([, i]) => i.value === "")?.[1] ?? inputs[0]?.[1])?.focus();
+      });
+      return el("div", { class: "verify-pick-wrap" }, [
+        el("label", { class: "verify-field" }, [el("span", { class: "verify-label", text: "조회 고르기 — 고른 조회의 틀에 값을 묶어 정답 SQL 을 채웁니다" }), pick]),
+        body,
+      ]);
+    }
+    const hasPicker = !!blib && verifyQueries.length > 0;
+    const sqlLabel = (text) => (hasPicker ? `③ ${text}` : text);
+    // 정답 SQL 에 묶이지 않은 :바인드가 남았으면 그 이름들.
+    const unbound = (sqls) => (blib ? [...new Set(sqls.flatMap((x) => blib.varsOf(x)))] : []);
+
+    // 질문 카드 — 편집. `index` null 이면 새 질문(묶음 끝에 붙는다).
+    function editCard(q, index) {
+      const text = input(q.text, "질문 문장");
+      const errBox = el("div", { class: "verify-errors", hidden: true });
+      const parts = [field("질문", text)];
+      let collect = () => ({});
+      const shared = {};
+      if (q.kind === 1) {
+        const path = input(q.path, "소제목 경로 — 다른 스킬 조각은 <스킬>/<소제목 경로>");
+        const rubric = area(q.rubric);
+        parts.push(field("정답 경로", path));
+        parts.push(pathPicker("경로 고르기", (p) => { path.value = p; path.focus(); }));
+        parts.push(field("채점표(선택)", rubric));
+        collect = () => ({ path: path.value.trim() || null, rubric: rubric.value.trim() || null });
+      } else if (q.kind === 2) {
+        const sql = area(q.sqls[0], "verify-sql-edit");
+        parts.push(sqlPicker(sql, shared), field(sqlLabel("정답 SQL — 값이 다 들어간 문장"), sql));
+        collect = () => ({ sqls: sql.value.trim() ? [sql.value.trim()] : [] });
+      } else if (q.kind === 3) {
+        const list = el("div", { class: "verify-sql-list" });
+        const rows = [];
+        const renumber = () => list.querySelectorAll(".verify-sql-no").forEach((n, i) => { n.textContent = `SQL ${i + 1}`; });
+        const addRow = (value) => {
+          const t = area(value, "verify-sql-edit");
+          const row = el("div", { class: "verify-sql-item" }, [
+            el("div", { class: "verify-sql-head" }, [
+              el("b", { class: "verify-sql-no" }),
+              el("button", {
+                type: "button",
+                class: "iconbtn",
+                text: "✕",
+                title: "이 SQL 줄 삭제",
+                "aria-label": "이 SQL 줄 삭제",
+                onclick: () => { rows.splice(rows.indexOf(t), 1); row.remove(); renumber(); },
+              }),
+            ]),
+            sqlPicker(t, shared),
+            field(sqlLabel("정답 SQL"), t),
+          ]);
+          rows.push(t);
+          list.appendChild(row);
+          renumber();
+        };
+        (q.sqls.length ? q.sqls : [""]).forEach(addRow);
+        const rubric = area(q.rubric);
+        parts.push(
+          el("div", { class: "verify-field" }, [el("span", { class: "verify-label", text: "정답 SQL — 하나 이상" }), list]),
+          el("div", {}, el("button", { type: "button", class: "btn ghost sm", text: "+ SQL 추가", onclick: () => addRow("") })),
+        );
+        parts.push(field("채점표", rubric));
+        collect = () => ({ sqls: rows.map((t) => t.value.trim()).filter(Boolean), rubric: rubric.value.trim() || null });
+      } else if (q.kind === 4) {
+        parts.push(el("span", { class: "chip", text: "보류 — 판정 없이 수만 셉니다" }));
+        collect = () => ({ deferred: true });
+      } else {
+        parts.push(el("span", { class: "dim", text: "답이 자료에 없는 질문 — 에이전트가 \"모른다\" 로 답해야 맞습니다" }));
+      }
+      queueMicrotask(() => text.focus());
+      const save = (e) => {
+        const t = text.value.trim();
+        if (!t) return showErrors(errBox, ["질문 문장이 비었습니다"]);
+        const edited = { ...q, text: t, ...collect() };
+        const left = unbound(edited.sqls || []);
+        if (left.length) return showErrors(errBox, [`정답 SQL 에 값이 빈 바인드가 있습니다: ${left.map((m) => `:${m}`).join(" · ")}`]);
+        const questions = index === null
+          ? [...set.questions, edited]
+          : set.questions.map((x, i) => (i === index ? edited : x));
+        saveSet({ ...set, questions }, errBox, e.currentTarget);
+      };
+      const card = el("div", { class: "verify-card editing sk-wide" }, [
+        el("b", { text: index === null ? `새 질문 · ${VERIFY_KIND_LABEL[q.kind]}` : `질문 고치기 · ${VERIFY_KIND_LABEL[q.kind]}` }),
+        ...parts, errBox, cardActs(save, close),
+      ]);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+      return card;
+    }
+
+    const last = lastLines();
+    const groups = [1, 2, 3, 4, 5].map((kind) => {
+      const mine = set.questions.map((q, i) => [q, i]).filter(([q]) => q.kind === kind);
+      const cards = mine.map(([q, i]) => (editing === `verify:q${i}` ? editCard(q, i) : readCard(q, i, last)));
+      if (editing === `verify:new${kind}`)
+        cards.push(editCard({ kind, text: "", path: null, sqls: [], rubric: null, deferred: kind === 4 }, null));
+      return el("div", { class: "verify-group" }, [
+        el("div", { class: "verify-group-head" }, [
+          el("h4", { text: VERIFY_KIND_LABEL[kind] }),
+          el("span", { class: `verify-count${mine.length ? "" : " none"}`, text: String(mine.length) }),
+          canEdit ? el("button", { type: "button", class: "btn ghost sm verify-add", text: "+ 질문 추가", disabled: busy, onclick: () => open(`new${kind}`) }) : null,
+        ]),
+        ...cards,
+      ]);
+    });
+    return el("div", { class: "sk-sec verify-set" }, [
+      el("div", { class: "sk-sec-head" }, [el("h3", { class: "sk-sec-h mono", text: `## ${sec.heading}` })]),
+      sec.body.trim() === "" ? el("p", { class: "dim", text: "아직 질문이 없습니다 — 설정을 적고 묶음마다 [질문 추가] 로 넣으세요." }) : null,
+      settingsCard(),
+      ...groups,
+      ...verifyExtras(),
+    ]);
+  }
+
+  // Every record line, newest first.
+  function verifyHistory() {
+    const lines = [...scoreLines].reverse();
+    return el("details", { class: "verify-history" }, [
+      el("summary", { text: `기록 ${lines.length}줄` }),
+      el("table", { class: "verify-history-tbl" }, [
+        el("colgroup", {}, ["c-at", "c-kind", "c-q", "c-machine", "c-human"].map((c) => el("col", { class: c }))),
+        el("thead", {}, el("tr", {}, ["시각", "종류", "질문", "기계", "사람(100점 만점)"].map((t) => el("th", { text: t })))),
+        el("tbody", {}, lines.map((l) =>
+          el("tr", {}, [
+            el("td", { class: "mono", text: shortAt(l.at) }),
+            el("td", { class: "dim", text: VERIFY_LABEL_OF_WIRE[l.kind] ?? l.kind }),
+            el("td", { text: l.text }),
+            el("td", { text: l.machine ? `${l.machine.ok ? "✓" : "✗"}${l.machine.reason ? ` ${l.machine.reason}` : ""} · Score ${l.run?.score ?? "—"}` : "" }),
+            el("td", { text: l.human ? `${l.human.score} / 100 · ${l.human.by}` : "" }),
+          ]),
+        )),
+      ]),
+    ]);
   }
 
   function readWhole(note) {
@@ -2051,9 +2592,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   function editWhole() {
     const input = el("textarea", { class: "fld mono sk-md-edit", spellcheck: "false" });
     input.value = s.markdown || "";
+    fitHeight(input);
     docHolder.replaceChildren(
       el("h2", { class: "sk-h" }, ["문서 편집 · 전체 md"]),
-      editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value }),
+      el("div", { class: "sk-wide" }, editor(input, { dirty: () => input.value !== (s.markdown || ""), value: () => input.value })),
     );
     input.focus();
   }
@@ -3418,13 +3960,13 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
       eField(() => body.markdown, (v) => (body.markdown = v), {
         area: true,
         mono: true,
-        placeholder: "스킬 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터",
+        placeholder: "스킬 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터 / ## 답변 품질 검증 Set",
         onChange: persist,
       }),
     ),
   );
   wrap.append(
-    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 넷만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 다섯만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · main 만 ## 답변 품질 검증 Set), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }

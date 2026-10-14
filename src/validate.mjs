@@ -9,7 +9,7 @@
 //
 // Supported keywords: type (incl. integer), enum, const, pattern, minLength,
 // minItems, items, properties, required, additionalProperties (bool|schema),
-// minimum, dependentRequired, if/then/else, $ref (resolved against a
+// minimum, maximum, dependentRequired, if/then/else, $ref (resolved against a
 // caller-supplied map of schema-id -> schema, not fetched over a network).
 
 function typeOf(value) {
@@ -71,6 +71,9 @@ function checkNumberConstraints(schema, data, path, errors) {
   if (typeof data !== "number") return;
   if (schema.minimum !== undefined && data < schema.minimum) {
     errors.push(`${path}: ${data} < minimum ${schema.minimum}`);
+  }
+  if (schema.maximum !== undefined && data > schema.maximum) {
+    errors.push(`${path}: ${data} > maximum ${schema.maximum}`);
   }
 }
 

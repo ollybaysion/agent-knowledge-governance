@@ -14,6 +14,7 @@ import {
   skillSections,
 } from "./skill-sections.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
+import { checkVerifySet, VERIFY_SECTION } from "./verify-set.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -30,6 +31,23 @@ const SCHEMA_FILES = {
   "voc/v1": "voc/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
+
+// Contracts that are not document types: what the store hands out and takes
+// in besides documents. Kept out of loadSchemas so no document route accepts
+// them as a type.
+const CONTRACT_FILES = {
+  "verification-set/v1": "verification-set/v1.schema.json",
+  "score-record/v1": "score-record/v1.schema.json",
+};
+
+/** The contract schemas, { "<name>/v<N>": schema }. */
+export function loadContractSchemas(dir = SCHEMAS_DIR) {
+  const out = {};
+  for (const [id, rel] of Object.entries(CONTRACT_FILES)) {
+    out[id] = JSON.parse(readFileSync(join(dir, rel), "utf8"));
+  }
+  return out;
+}
 
 /** Load every schemas/*.schema.json into a { "<type>/v<N>": schema } map. */
 export function loadSchemas(dir = SCHEMAS_DIR) {
@@ -291,9 +309,13 @@ const SEMANTIC_CHECKS = {
     if (typeof doc.body?.markdown !== "string") return;
     const titles = skillSections(doc.body.markdown);
     // A sub is knowledge a main reads, so 도메인 지식 is the one section it
-    // must have. A main keeps the rule it had: any of the four.
+    // must have. A main keeps the rule it had: any of the five.
     if (doc.role === "sub" && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
       fail(errors, '$.body.markdown: sub 스킬에는 "## 도메인 지식" 절이 있어야 합니다');
+    // The verification set scores an agent, and only a main is one.
+    if (doc.role === "sub" && titles.some((t) => normalizeHeading(t) === VERIFY_SECTION))
+      fail(errors, `$.body.markdown: "## ${VERIFY_SECTION}" 은 main 스킬에만 둡니다`);
+    for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
     for (const title of titles) {
       if (!isSkillSection(title))
         fail(

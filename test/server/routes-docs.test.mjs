@@ -889,3 +889,36 @@ test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as writte
     await cleanup();
   }
 });
+
+test("verification set: a skill save names unknown 정답 paths as warnings and refuses a rule break", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  const base = "# s\n\n## 도메인 지식\n\n### A\n\n글\n";
+  const withSet = (set) => `${base}\n## 답변 품질 검증 Set\n\n${set}\n`;
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: base } },
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal("warnings" in created.json(), false, "no set, no warnings");
+
+    const put = (rev, markdown) =>
+      app.inject({ method: "PUT", url: "/api/docs/domain-skill/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown } });
+    const refused = await put(created.json().rev, withSet("### 데이터 설명\n\n#### r\n\n```sql\n```"));
+    assert.equal(refused.statusCode, 400);
+    assert.ok(refused.json().details.some((d) => d.includes("SQL 블록이 비었습니다")), refused.body);
+
+    const ok = await put(created.json().rev, withSet("### 일반 지식\n\n#### q\n\n- 정답: 옛 제목\n\n### 데이터 설명\n\n#### r\n\n```sql\nSELECT 1\n```"));
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.equal(ok.json().warnings.length, 2);
+    assert.match(ok.json().warnings[0], /닿는 지식 조각에 없는 정답입니다 — 옛 제목/);
+    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    assert.deepEqual(got.warnings, ok.json().warnings);
+    assert.deepEqual(got.backlinks, []);
+  } finally {
+    await cleanup();
+  }
+});

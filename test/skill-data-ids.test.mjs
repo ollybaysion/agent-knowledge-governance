@@ -5,7 +5,7 @@ import { skillDataIds } from "../src/skill-data-ids.mjs";
 
 test("### id — title: em, en and hyphen dashes all split, with a space on both sides", () => {
   const md = "# s\n\n## 데이터\n\n### a — 가\n\n### b – 나\n\n### c - 다\n\n### d-e — 라\n";
-  assert.deepEqual(skillDataIds(md), [
+  assert.deepEqual(skillDataIds(md).map(({ id, title, line, query }) => ({ id, title, line, query })), [
     { id: "a", title: "가", line: 5, query: false },
     { id: "b", title: "나", line: 7, query: false },
     { id: "c", title: "다", line: 9, query: false },
@@ -28,8 +28,22 @@ test("query: an item whose body opens a ```sql fence (any case, ~~~ too); ask fe
   );
 });
 
+test("sql · ask: the first such fence's text, text: the prose, each trimmed of blank lines; #### stays in the prose", () => {
+  const md = [
+    "## 데이터",
+    "### snsr_id — 센서 ID", "", "물을 센서 (예: S-0004)", "", "```ask", "어느 센서인가요?", "```", "",
+    "### row — 행", "", "#### 메모", "기준 정보.", "", "```sql", "SELECT a", "  FROM t WHERE id = :snsr_id", "```", "",
+    "### bare",
+  ].join("\n");
+  assert.deepEqual(skillDataIds(md).map(({ id, sql, ask, text }) => ({ id, sql, ask, text })), [
+    { id: "snsr_id", sql: null, ask: "어느 센서인가요?", text: "물을 센서 (예: S-0004)" },
+    { id: "row", sql: "SELECT a\n  FROM t WHERE id = :snsr_id", ask: null, text: "#### 메모\n기준 정보." },
+    { id: "bare", sql: null, ask: null, text: null },
+  ]);
+});
+
 test("without a dash the first token is the id and the title is null", () => {
-  assert.deepEqual(skillDataIds("## 데이터\n### snsr_id\n### row 설명\n"), [
+  assert.deepEqual(skillDataIds("## 데이터\n### snsr_id\n### row 설명\n").map(({ id, title, line, query }) => ({ id, title, line, query })), [
     { id: "snsr_id", title: null, line: 2, query: false },
     { id: "row", title: null, line: 3, query: false },
   ]);

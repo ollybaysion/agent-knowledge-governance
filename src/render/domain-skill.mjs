@@ -9,7 +9,9 @@
 // name so the frontmatter stays well-formed.
 //
 // Schema validation (unknown keys, `\S`, known `##` sections) is the caller's
-// job via envelope.mjs — this module only renders.
+// job via envelope.mjs — this module only renders. The `## 답변 품질 검증 Set`
+// section (the scorer's answers) stays in the store and is left out here.
+import { withoutVerifySet } from "../verify-set.mjs";
 
 /** The first non-empty line under `## 한 줄 설명`, or null when there is none. */
 export function skillSummary(markdown) {
@@ -39,5 +41,5 @@ function frontmatter(body) {
 
 export function renderDomainSkillMd(doc) {
   const body = doc.body;
-  return `${frontmatter(body)}\n\n${String(body.markdown).replace(/\s+$/, "")}\n`;
+  return `${frontmatter(body)}\n\n${withoutVerifySet(body.markdown).replace(/\s+$/, "")}\n`;
 }

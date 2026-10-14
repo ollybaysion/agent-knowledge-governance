@@ -11,7 +11,7 @@ const example = JSON.parse(
 test("split → join gives the document back byte for byte when its sections are in the standard order", () => {
   const { title, sections } = splitSkill(example);
   assert.equal(title, "fdc-explain-sensor-origin");
-  assert.deepEqual(sections.map((s) => s.heading), ["한 줄 설명", "언제 호출되는가?", "도메인 지식", "데이터"]);
+  assert.deepEqual(sections.map((s) => s.heading), ["한 줄 설명", "언제 호출되는가?", "도메인 지식", "데이터", "답변 품질 검증 Set"]);
   assert.ok(sections[2].body.startsWith("### FDC_SENSOR"));
   assert.equal(joinSkill(title, sections), example);
 });
@@ -38,6 +38,7 @@ test("missing sections split to empty bodies; join writes standard order and lea
       ["언제 호출되는가", "언제 호출되는가?", ""],
       ["도메인 지식", "도메인 지식", ""],
       ["데이터", "데이터", "d"],
+      ["답변 품질 검증 Set", "답변 품질 검증 Set", ""],
     ],
   );
   assert.equal(joinSkill(title, sections), "# s\n\n## 한 줄 설명:\n\n요약\n\n## 데이터\n\nd\n");

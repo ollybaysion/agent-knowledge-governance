@@ -72,6 +72,15 @@ test("GET /wikilinks.mjs serves the server's own [[ ]] parser, byte for byte, pu
   await cleanup();
 });
 
+test("GET /verify-set.mjs serves the validator's own verification-set reader, byte for byte, publicly", async () => {
+  const { app, cleanup } = await setup();
+  const res = await app.inject({ method: "GET", url: "/verify-set.mjs" });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /javascript/);
+  assert.equal(res.body, readFileSync(new URL("../../src/verify-set.mjs", import.meta.url), "utf8"));
+  await cleanup();
+});
+
 test("GET /api/me echoes id/role without leaking tokenHash", async () => {
   const { app, cleanup } = await setup();
   // Without a token this now answers as the anonymous viewer — that response is

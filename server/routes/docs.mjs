@@ -3,6 +3,17 @@
 import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
 import { skillDataIds } from "../../src/skill-data-ids.mjs";
 import {
+  checkVerifySet,
+  fromVerificationSet,
+  parseVerifySet,
+  toVerificationSet,
+  VERIFY_SECTION,
+  verifySetBody,
+  VerifySetError,
+} from "../../src/verify-set.mjs";
+import { joinSkill, SkillSplitError, splitSkill } from "../../src/skill-sections.mjs";
+import { validateNode } from "../../src/validate.mjs";
+import {
   readJson,
   readText,
   revOfPath,
@@ -30,6 +41,7 @@ import {
   resolveWikilinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
+import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -77,13 +89,23 @@ function priorityOf(user) {
 }
 
 export function registerDocsRoutes(app) {
-  const { storeDir, refs, queue } = app.akg;
+  const { storeDir, refs, queue, contracts } = app.akg;
   // What the validator needs from the store (a manual's captures, the data
   // ids other skills hold).
   const inStore = {
     assetExists: (sha256) => hasAsset(storeDir, sha256),
     dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
   };
+  // A verification set's 정답 paths the skill md lacks: saved anyway (the
+  // author may be renaming a heading), shown beside the document.
+  const warningsOf = (type, doc) => {
+    if (type !== "domain-skill" || typeof doc.body?.markdown !== "string") return {};
+    const { present, warnings } = checkVerifySet(doc.body.markdown, { agent: doc.id, known: knownPieces(doc.id, doc) });
+    return present ? { warnings } : {};
+  };
+  // The piece ids a 정답 can name: this skill's and its linked skills' (LINK1 · LINK2).
+  const knownPieces = (id, doc) =>
+    pieceIds(pieceChoices({ id, markdown: doc.body?.markdown ?? "" }, linkedSkills(storeDir, id, doc)));
   // Run inside the queue, like already_exists: the other side is in the store.
   const dataIdConflict = (doc) => {
     const conflicts = dataIdConflicts(doc, inStore.dataIdOwners);
@@ -160,7 +182,136 @@ export function registerDocsRoutes(app) {
         links: resolveLinks(storeDir, doc.links),
         backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
         wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
+        ...warningsOf(type, doc),
       };
+    },
+  );
+
+  // A main skill's verification set as the verification-set/v1 object, read
+  // with the parser the save check uses. Cached per document rev.
+  // Keyed by the skills' last commit too: the 정답 warnings read the linked skills.
+  const verificationSets = new Map(); // id -> {key, set}
+  app.get(
+    "/api/docs/domain-skill/:id/verification-set",
+    { config: { roles: ["viewer"], anonOk: true } },
+    async (request, reply) => {
+      const { id } = request.params;
+      const relpath = `domain-skill/${id}.json`;
+      const doc = readJson(storeDir, relpath);
+      if (!doc) return reply.code(404).send({ error: "not_found" });
+      const rev = revOfPath(storeDir, relpath);
+      const key = `${rev}:${revOfPath(storeDir, "domain-skill")}`;
+      const cached = verificationSets.get(id);
+      let set = cached && cached.key === key ? cached.set : undefined;
+      if (set === undefined) {
+        try {
+          set = toVerificationSet(id, doc.body?.markdown ?? "", rev, knownPieces(id, doc));
+        } catch (err) {
+          if (!(err instanceof VerifySetError)) throw err;
+          return reply.code(422).send({ error: "invalid_verification_set", details: err.errors });
+        }
+        verificationSets.set(id, { key, set });
+      }
+      if (set === null) return reply.code(404).send({ error: "no_verification_set" });
+      if (rev) reply.header("etag", rev);
+      return set;
+    },
+  );
+
+  // Writes the section from a verification-set/v1 object — what GET gives,
+  // edited. The base rev is If-Match or the object's own `rev`. The server
+  // writes the section md (verifySetBody) and saves the document in one
+  // commit, through the same checks a document PUT runs.
+  app.put(
+    "/api/docs/domain-skill/:id/verification-set",
+    { config: { roles: ["editor"] } },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!isValidId(id)) return reply.code(400).send({ error: "invalid_path_param", param: "id" });
+      const submitted = request.body;
+      const base = request.headers["if-match"] ?? submitted?.rev;
+      if (!base) return reply.code(428).send({ error: "if_match_required", message: "If-Match 나 몸의 rev 에 바탕 rev 를 줍니다" });
+      if (!submitted || typeof submitted !== "object" || Array.isArray(submitted))
+        return reply.code(400).send({ error: "invalid_body", details: ["몸은 verification-set/v1 객체입니다"] });
+      if (submitted.agent !== undefined && submitted.agent !== id)
+        return reply.code(400).send({ error: "agent_mismatch", message: `agent 는 ${id} 입니다` });
+      const shapeErrors = [];
+      validateNode(
+        contracts["verification-set/v1"],
+        { warnings: [], ...submitted, agent: id, rev: base },
+        "$",
+        {},
+        shapeErrors,
+      );
+      if (shapeErrors.length) return reply.code(400).send({ error: "invalid_body", details: shapeErrors });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `domain-skill/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (base !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev } };
+          if ((doc.role ?? "main") !== "main")
+            return { status: 400, body: { error: "not_main", message: "검증 Set 은 main 스킬에만 둡니다" } };
+          let split;
+          try {
+            split = splitSkill(doc.body?.markdown ?? "");
+          } catch (err) {
+            if (!(err instanceof SkillSplitError)) throw err;
+            return { status: 422, body: { error: "unsplittable_markdown", message: err.message } };
+          }
+          const sectionBody = verifySetBody(fromVerificationSet(submitted));
+          const markdown = joinSkill(
+            split.title ?? doc.body.name,
+            split.sections.map((x) => (x.key === VERIFY_SECTION ? { ...x, body: sectionBody } : x)),
+          );
+          const problems = parseVerifySet(markdown).errors;
+          if (problems.length)
+            return { status: 422, body: { error: "invalid_verification_set", details: problems } };
+
+          let body;
+          try {
+            body = applyEdit(refs["domain-skill/v1"], doc.body, { ...doc.body, markdown }, request.user.id, new Date().toISOString());
+          } catch (err) {
+            if (err instanceof EditError) return { status: 400, body: { error: "edit_rejected", message: err.message } };
+            throw err;
+          }
+          const merged = mergeBodyLinks(storeDir, DOC_TYPES, "domain-skill", doc, { ...doc, body });
+          if (merged.error) return { status: 400, body: merged.error };
+          const newDoc = merged.doc;
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length) return { status: 422, body: { error: "invalid_verification_set", details: errors } };
+          const conflict = dataIdConflict(newDoc);
+          if (conflict) return conflict;
+          const rev = persistDoc(storeDir, "domain-skill", newDoc, {
+            author: request.user.id,
+            message: `verification-set domain-skill/${id}`,
+          });
+          return { status: 200, body: toVerificationSet(id, newDoc.body.markdown, rev, knownPieces(id, newDoc)) };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // What a question's 정답 can name — the editor's pickers. `queries`: the
+  // 데이터 설명 · 데이터 연관 SQL, this skill's and its LINK1 skills', each
+  // with where each bind's value comes from. `pieces`: the 일반 지식 knowledge
+  // paths, this skill's and its LINK1 · LINK2 skills'.
+  app.get(
+    "/api/docs/domain-skill/:id/verification-choices",
+    { config: { roles: ["viewer"], anonOk: true } },
+    async (request, reply) => {
+      const { id } = request.params;
+      if (!isValidId(id)) return reply.code(400).send({ error: "invalid_path_param", param: "id" });
+      const doc = readJson(storeDir, `domain-skill/${id}.json`);
+      if (!doc) return reply.code(404).send({ error: "not_found" });
+      const own = { id, markdown: doc.body?.markdown ?? "" };
+      const linked = linkedSkills(storeDir, id, doc);
+      return { queries: queryChoices(own, linked.link1), pieces: pieceChoices(own, linked) };
     },
   );
 
@@ -223,7 +374,7 @@ export function registerDocsRoutes(app) {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
           });
-          return { status: 201, body: { rev, json: doc } };
+          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc) } };
         },
         { priority: priorityOf(request.user) },
       );
@@ -340,7 +491,7 @@ export function registerDocsRoutes(app) {
           });
           return {
             status: 200,
-            body: { rev, json: newDoc, rebased: outcome.rebased },
+            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc) },
           };
         },
         { priority: priorityOf(request.user) },
