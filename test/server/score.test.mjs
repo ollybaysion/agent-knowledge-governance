@@ -32,7 +32,11 @@ const machine = (text, at, ok = true) => ({
   model: "mock",
   mdRev: "md1",
   machine: { ok, reason: ok ? null : "검색 놓침", detail: null, pieces: ["s/A"] },
-  run: { G: 0.5, A: 0.25, R: null, score: 35, band: "기본적인 질의응답 가능" },
+  run: {
+    G: 0.5, A: 0.25, R: null, score: 35, band: "기본적인 질의응답 가능",
+    general: { m: 1, n: 2 }, data: { m: 0, n: 0 }, relation: { m: 0, n: 0 }, reliability: { m: 0, n: 0 },
+    pieces: { count: 12, level: 1 }, queries: { count: 3, level: 1 },
+  },
 });
 
 test("score: the scorer appends machine lines, one commit per write, and GET reads them back with since", async () => {
