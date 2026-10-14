@@ -155,3 +155,120 @@ test("verification set: GET …/verification-set is the section as the contract 
     await cleanup();
   }
 });
+
+test("verification set: PUT …/verification-set writes the section from the contract object in one commit; GET reads it back", async () => {
+  const { app, storeDir, cleanup } = await setup();
+  const h = { authorization: "Bearer edtok" };
+  try {
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const set = {
+      settings: { line: "L1", eqp: "E1", duration: { start: "2026-10-01T00:00", end: "2026-10-01T06:00" } },
+      questions: [
+        { kind: "general", text: "q", answer: { path: "A" }, rubric: "글" },
+        { kind: "data", text: "r", sql: ["SELECT a FROM t WHERE id = 'S-1'"] },
+        { kind: "relation", text: "u", sql: ["SELECT 1 FROM dual", "SELECT 2 FROM dual"], rubric: "둘을 잇는다" },
+        { kind: "advanced", text: "v", deferred: true },
+        { kind: "reliability", text: "w" },
+      ],
+    };
+    const put = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/verification-set", headers: { ...h, "if-match": rev }, payload: set });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json(), { agent: "s", rev: put.json().rev, ...set, warnings: [] });
+    assert.notEqual(put.json().rev, rev);
+    const log = execFileSync("git", ["-C", storeDir, "log", "-1", "--format=%an|%s"], { encoding: "utf8" }).trim();
+    assert.equal(log, "renoir|verification-set domain-skill/s");
+
+    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-set" })).json();
+    assert.deepEqual(got, put.json());
+    const md = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json().json.body.markdown;
+    assert.match(md, /## 도메인 지식\n\n### A\n\n글\n\n## 답변 품질 검증 Set\n\n### 설정\n\n- 라인: L1/);
+
+    // The object GET gave, edited, goes back as it is: its own rev is the base.
+    const edited = { ...got, questions: got.questions.filter((q) => q.kind !== "advanced") };
+    const again = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/verification-set", headers: h, payload: edited });
+    assert.equal(again.statusCode, 200, again.body);
+    assert.equal(again.json().questions.length, 4);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("verification set: PUT refuses a stale or missing rev, a bad shape, a rule break, a sub skill and a non-editor", async () => {
+  const { app, cleanup } = await setup();
+  const h = { authorization: "Bearer edtok" };
+  const put = (headers, payload) => app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/verification-set", headers, payload });
+  try {
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const ok = { questions: [{ kind: "reliability", text: "w" }] };
+    assert.equal((await put(h, ok)).statusCode, 428);
+    assert.equal((await put({ ...h, "if-match": "0".repeat(40) }, ok)).json().error, "unknown_base_rev");
+    const shape = await put({ ...h, "if-match": rev }, { questions: [{ kind: "nope", text: "w" }] });
+    assert.equal(shape.statusCode, 400);
+    assert.equal(shape.json().error, "invalid_body");
+    assert.equal((await put({ ...h, "if-match": rev }, { ...ok, agent: "other" })).json().error, "agent_mismatch");
+    const rule = await put({ ...h, "if-match": rev }, { questions: [{ kind: "data", text: "r", sql: ["SELECT 1", "SELECT 2"] }] });
+    assert.equal(rule.statusCode, 422, rule.body);
+    assert.equal(rule.json().error, "invalid_verification_set");
+    assert.equal((await put({ authorization: "Bearer agtok", "if-match": rev }, ok)).statusCode, 403);
+    assert.equal((await put({ "if-match": rev }, ok)).statusCode, 401);
+
+    const role = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/role", headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
+    assert.equal(role.statusCode, 200, role.body);
+    assert.equal((await put({ ...h, "if-match": role.json().rev }, ok)).json().error, "not_main");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("verification queries: this skill's queries then each active linked skill's, with where each bind's value comes from", async () => {
+  const { app, cleanup } = await setup();
+  const h = { authorization: "Bearer edtok" };
+  const skill = (id, markdown, extra = {}) =>
+    app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: { schema: "domain-skill/v1", id, keywords: [{ kw: id, inject: "full" }], status: "active", body: { name: id, markdown }, ...extra },
+    });
+  try {
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const own = [
+      "# s", "", "## 도메인 지식", "", "### A", "", "글", "", "## 데이터", "",
+      "### snsr_id — 센서 ID", "", "물을 센서 (예: S-0004) — 사람이 준다.", "", "```ask", "어느 센서인가요?", "```", "",
+      "### row — 센서 행 @g", "", "```sql", "SELECT a FROM t", " WHERE id = :snsr_id AND eqp = :EQP_ID", "   AND d BETWEEN :start_time AND :end_time", "```", "",
+    ].join("\n");
+    assert.equal((await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown: own } })).statusCode, 200);
+    const linkTo = { links: [{ type: "domain-skill", id: "s", rel: "related" }] };
+    const sub = "# sub\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### msg — 메시지\n\n```sql\nSELECT v FROM m WHERE id = :snsr_id AND k = :kind\n```\n\n### kind — 종류\n\n종류 (예: A)\n";
+    const made = await skill("sub", sub, { role: "sub", ...linkTo });
+    assert.equal(made.statusCode, 201, made.body);
+    assert.equal((await skill("off", "# off\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### gone — 꺼짐\n\n```sql\nSELECT 1 FROM dual\n```\n", { ...linkTo, status: "inactive" })).statusCode, 201);
+    assert.equal((await skill("far", "# far\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### far_q — 먼 조회\n\n```sql\nSELECT 1 FROM dual\n```\n")).statusCode, 201);
+
+    const r = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-queries" });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(r.json().queries, [
+      {
+        skill: "s", id: "row", title: "센서 행",
+        sql: "SELECT a FROM t\n WHERE id = :snsr_id AND eqp = :EQP_ID\n   AND d BETWEEN :start_time AND :end_time",
+        binds: [
+          { name: "snsr_id", from: "ask", title: "센서 ID", question: "어느 센서인가요?", text: "물을 센서 (예: S-0004) — 사람이 준다.", example: "S-0004" },
+          { name: "EQP_ID", from: "eqp" },
+          { name: "start_time", from: "start" },
+          { name: "end_time", from: "end" },
+        ],
+      },
+      {
+        skill: "sub", id: "msg", title: "메시지",
+        sql: "SELECT v FROM m WHERE id = :snsr_id AND k = :kind",
+        binds: [
+          { name: "snsr_id", from: "ask", title: "센서 ID", question: "어느 센서인가요?", text: "물을 센서 (예: S-0004) — 사람이 준다.", example: "S-0004" },
+          { name: "kind", from: "ask", title: "종류", question: "종류 (예: A)", text: "종류 (예: A)", example: "A" },
+        ],
+      },
+    ]);
+    assert.equal((await app.inject({ method: "GET", url: "/api/docs/domain-skill/none/verification-queries" })).statusCode, 404);
+  } finally {
+    await cleanup();
+  }
+});

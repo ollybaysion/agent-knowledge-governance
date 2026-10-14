@@ -286,15 +286,38 @@ export function toVerificationSet(agent, markdown, rev) {
     agent,
     rev,
     ...(settings ? { settings } : {}),
-    questions: parsed.questions.map((q) => {
-      const out = { kind: VERIFY_KINDS[q.kind - 1].wire, text: q.text };
-      if (q.path !== null) out.answer = { path: q.path };
-      if (q.sqls.length) out.sql = q.sqls;
-      if (q.rubric !== null) out.rubric = q.rubric;
-      if (q.deferred) out.deferred = true;
-      return out;
-    }),
+    questions: parsed.questions.map(toContractQuestion),
     warnings: checkVerifySet(markdown).warnings,
+  };
+}
+
+/** One question as parseVerifySet reads it, in the verification-set/v1 form. */
+export function toContractQuestion(q) {
+  const out = { kind: VERIFY_KINDS[q.kind - 1].wire, text: q.text };
+  if (q.path) out.answer = { path: q.path };
+  if (q.sqls?.length) out.sql = q.sqls;
+  if (q.rubric) out.rubric = q.rubric;
+  if (q.deferred) out.deferred = true;
+  return out;
+}
+
+/**
+ * A verification-set/v1 object's settings and questions in the form
+ * verifySetBody writes — the inverse of toVerificationSet, for a PUT.
+ * @returns {{settings: object|null, questions: object[]}}
+ */
+export function fromVerificationSet(set) {
+  const kindOf = new Map(VERIFY_KINDS.map((k) => [k.wire, k.kind]));
+  return {
+    settings: set.settings ?? null,
+    questions: (set.questions ?? []).map((q) => ({
+      kind: kindOf.get(q.kind),
+      text: q.text,
+      path: q.answer?.path ?? null,
+      sqls: q.sql ?? [],
+      rubric: q.rubric ?? null,
+      deferred: q.deferred === true,
+    })),
   };
 }
 
