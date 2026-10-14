@@ -11,7 +11,7 @@ const THEME_KEY = "akg_theme";
 let currentUser = null; // {id, role}
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual", "voc", "golden-set"];
+const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual", "voc"];
 const TIER_LABEL = {
   scaffold: "빈칸",
   inferred: "추정",
@@ -31,7 +31,6 @@ const TYPE_LABEL = {
   "screen-map": "screen-map",
   manual: "manual",
   voc: "voc",
-  "golden-set": "golden-set",
 };
 
 // ---------- DOM helper ----------
@@ -1813,6 +1812,10 @@ function inactiveBar(doc) {
 // served as a module). Null when it fails to load — the editor then falls
 // back to the whole md.
 const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
+// The verification-set reader (src/verify-set.mjs): template and counts.
+const verifyLib = import("/verify-set.mjs").catch(() => null);
+const VERIFY_KEY = "답변 품질 검증 Set";
+const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석" };
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
 // points at. An editor's click flips it (PUT …/role); the server refuses a sub
@@ -1859,17 +1862,20 @@ function dataIdConflictText(d) {
   return (d.conflicts || []).map((c) => `데이터 id "${c.id}" 가 ${c.doc} 과 겹칩니다`).join(" · ");
 }
 
-// The document part of an md view whose `##` sections are fixed (a skill, a
-// golden set). `sectionsOf(lib)` is its section list in src/skill-sections.mjs.
-function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty }) {
-  // Read: one block per `##` section (heading + its text as written — the
-  // dashboard does not render md, the consumer does). Each block has its own
-  // 편집, which turns that block alone into a textarea; 전체 md 편집 opens the
-  // whole text. A md the section splitter refuses is read and edited whole.
-  // Every save is one PUT of { name, markdown }, so the stored document is one
-  // md as before.
+// domain-skill: the body is the author's md, stored verbatim (user decision
+// 2026-09-21) — so the view is the text and one editor for it, not a per-field
+// form. The heading structure inside the text is the consumer's schema
+// (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
+// refuses a `##` section it does not know, and the error comes back here.
+// A main skill's screen always has the ## 답변 품질 검증 Set block; a skill
+// without it shows the block empty, and 편집 starts from the template.
+function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis, data) {
   const s = doc.body;
-  const url = `/api/docs/${doc.schema.split("/")[0]}/${encodeURIComponent(doc.id)}`;
+  const main = (doc.role ?? "main") === "main";
+  // A sub never has the section, so its screen leaves the block out.
+  const sectionsOf = (lib) => (main ? lib.SKILL_SECTIONS : lib.SKILL_SECTIONS.filter((x) => x.key !== VERIFY_KEY));
+  const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
+
   // One whole-body PUT (the body is the unit — no tiered slots). On success the
   // screen reloads so the next edit sees a fresh rev.
   async function commit(next) {
@@ -1899,11 +1905,54 @@ function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty
     return false;
   }
 
-  const docHolder = el("div", { class: "sk-doc" });
+  // The one-line summary is the first paragraph under `## 한 줄 설명` — the same
+  // rule the renderer uses for the SKILL.md description.
+  function summaryOf(markdown) {
+    let inSummary = false;
+    for (const line of String(markdown || "").split(/\r?\n/)) {
+      const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+      if (h) {
+        inSummary = h[1].length === 2 && /^한 줄 설명[?？:：\s]*$/.test(h[2].trim());
+        continue;
+      }
+      if (inSummary && line.trim() !== "") return line.trim();
+    }
+    return "";
+  }
 
+  const chips = viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen);
+  chips.insertBefore(roleChip(doc, rev, canEdit, reload), chips.children[1] ?? null);
+  const wrap = el("div", { class: "skwrap" }, [
+    el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
+    el("h1", { class: "sk-title", text: s.name }),
+    el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
+    chips,
+    inactiveBar(doc),
+  ]);
+
+  // ── 문서 ──────────────────────────────────────────────────────────────
+  // Read: one block per `##` section (heading + its text as written — the
+  // dashboard does not render md, the consumer does). Each block has its own
+  // 편집, which turns that block alone into a textarea; 전체 md 편집 opens the
+  // whole text. A md the section splitter refuses is read and edited whole.
+  // Every save is one PUT of { name, markdown }, so the stored document is one
+  // md as before.
+  const docHolder = el("div", { class: "sk-doc" });
+  const HINT =
+    "절은 다섯 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask) · ## 답변 품질 검증 Set(main 만). 모르는 ## 절은 저장이 거절됩니다.";
+  const VERIFY_HINT =
+    "답변 품질 검증 Set — ### 설정(- 라인 · - 설비 · - 기간: 시작 ~ 끝) · ### 일반 지식 · ### 데이터 설명 · ### 데이터 연관 · ### 고도화 분석. #### 하나가 질문 하나다. 일반 지식은 - 정답: ## 도메인 지식 소제목 경로(없으면 \"없음\") · - 채점표(선택), 데이터 설명은 ```sql 블록 하나(값이 다 들어간 SQL), 데이터 연관은 ```sql 블록 여럿 + - 채점표, 고도화 분석은 - 보류.";
+
+  let verifyTemplate = null;
+  let verifyCounts = null; // {1..4: n} when the md has the section
   async function read() {
-    const lib = await skillSectionsLib;
+    const [lib, vlib] = await Promise.all([skillSectionsLib, verifyLib]);
     if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
+    if (vlib) {
+      verifyTemplate = vlib.verifySetTemplate();
+      const parsed = vlib.parseVerifySet(s.markdown || "");
+      verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
+    }
     try {
       readSections(lib, lib.splitSkill(s.markdown || "", sectionsOf(lib)), null);
     } catch (e) {
@@ -1969,13 +2018,15 @@ function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty
           : editBtn("편집", () => readSections(lib, split, sec.key), editing !== null),
       ]);
       if (editing === sec.key) {
+        // An empty verification set opens on its template; saving it puts the section in.
+        const initial = sec.key === VERIFY_KEY && sec.body === "" && verifyTemplate ? verifyTemplate : sec.body;
         const ta = el("textarea", {
           class: "fld mono sk-sec-edit",
           spellcheck: "false",
-          rows: Math.min(24, Math.max(3, sec.body.split("\n").length + 1)),
+          rows: Math.min(24, Math.max(3, initial.split("\n").length + 1)),
           "aria-label": `## ${sec.heading}`,
         });
-        ta.value = sec.body;
+        ta.value = initial;
         queueMicrotask(() => ta.focus());
         return el("div", { class: "sk-sec editing" }, [
           head,
@@ -1998,14 +2049,36 @@ function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty
         sec.body.trim() === ""
           ? el("p", { class: "dim", text: "비어 있습니다" })
           : wikiText(el("pre", { class: "sk-md" }), sec.body, wikis),
+        ...(sec.key === VERIFY_KEY ? verifyExtras() : []),
       ]);
     });
     docHolder.replaceChildren(
       el("h2", { class: "sk-h" }, ["문서", editBtn("전체 md 편집", editWhole, editing !== null)]),
       el("p", { class: "sk-sec-title mono", text: `# ${name}` }),
       ...blocks,
-      el("p", { class: "dim", text: hint }),
+      el("p", { class: "dim", text: HINT }),
     );
+  }
+
+  // Under the verification block: questions per kind, the server's warnings, the rules.
+  function verifyExtras() {
+    const out = [];
+    if (verifyCounts)
+      out.push(
+        el("div", { class: "verify-counts" }, [1, 2, 3, 4].map((k) =>
+          el("span", { class: `chip${verifyCounts[k] ? "" : " none"}`, text: `${VERIFY_KIND_LABEL[k]} ${verifyCounts[k]}` }),
+        )),
+      );
+    const warnings = data?.warnings || [];
+    if (warnings.length)
+      out.push(
+        el("div", { class: "verify-warn" }, [
+          el("b", { text: `경고 ${warnings.length}` }),
+          el("ul", {}, warnings.map((w) => el("li", { text: w }))),
+        ]),
+      );
+    out.push(el("p", { class: "dim", text: VERIFY_HINT }));
+    return out;
   }
 
   function readWhole(note) {
@@ -2013,9 +2086,9 @@ function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty
       el("h2", { class: "sk-h" }, ["문서", editBtn("편집", editWhole, false)]),
       note ? el("p", { class: "dim", text: note }) : null,
       (s.markdown || "").trim() === ""
-        ? el("p", { class: "dim", text: empty })
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요." })
         : wikiText(el("pre", { class: "sk-md" }), s.markdown, wikis),
-      el("p", { class: "dim", text: hint }),
+      el("p", { class: "dim", text: HINT }),
     );
   }
 
@@ -2029,55 +2102,7 @@ function sectionedMd({ doc, rev, canEdit, reload, wikis, sectionsOf, hint, empty
     input.focus();
   }
   read();
-  return docHolder;
-}
-
-// domain-skill: the body is the author's md, stored verbatim (user decision
-// 2026-09-21) — so the view is the text and one editor for it, not a per-field
-// form. The heading structure inside the text is the consumer's schema
-// (## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터); the server
-// refuses a `##` section it does not know, and the error comes back here.
-function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis, data) {
-  const s = doc.body;
-
-  // The one-line summary is the first paragraph under `## 한 줄 설명` — the same
-  // rule the renderer uses for the SKILL.md description.
-  function summaryOf(markdown) {
-    let inSummary = false;
-    for (const line of String(markdown || "").split(/\r?\n/)) {
-      const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-      if (h) {
-        inSummary = h[1].length === 2 && /^한 줄 설명[?？:：\s]*$/.test(h[2].trim());
-        continue;
-      }
-      if (inSummary && line.trim() !== "") return line.trim();
-    }
-    return "";
-  }
-
-  const chips = viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen);
-  chips.insertBefore(roleChip(doc, rev, canEdit, reload), chips.children[1] ?? null);
-  chips.insertBefore(goldenChip(doc, data, canEdit), chips.children[2] ?? null);
-  const wrap = el("div", { class: "skwrap" }, [
-    el("p", { class: "sk-eyebrow", text: "domain-skill · 스킬 문서(md)" }),
-    el("h1", { class: "sk-title", text: s.name }),
-    el("p", { class: "sk-sub", text: summaryOf(s.markdown) }),
-    chips,
-    inactiveBar(doc),
-  ]);
-
-  wrap.appendChild(
-    sectionedMd({
-      doc,
-      rev,
-      canEdit,
-      reload,
-      wikis,
-      sectionsOf: (lib) => lib.SKILL_SECTIONS,
-      hint: "절은 넷 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask). 모르는 ## 절은 저장이 거절됩니다.",
-      empty: "아직 본문이 없습니다 — 편집을 눌러 스킬 md 를 붙여 넣으세요.",
-    }),
-  );
+  wrap.appendChild(docHolder);
 
   // 설치 — 다운로드와 놓을 위치를 한 카드에. Claude Code와 opencode 모두
   // ~/.claude/skills/<name>/ 를 읽으므로 경로 하나로 끝난다 (install-skills.mjs).
@@ -2130,87 +2155,6 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   }
 
   return wrap;
-}
-
-// A skill's golden set (the questions its answers are scored against) is the
-// golden-set document of the same id, found as a backlink. The server makes
-// one with every new skill; for a skill that still has none, an editor starts
-// a draft from the same empty template.
-function goldenChip(doc, data, canEdit) {
-  const has = (data?.backlinks || []).some((b) => b.type === "golden-set" && b.id === doc.id);
-  if (has)
-    return el("a", {
-      class: "chip golden-chip",
-      href: `#/doc/golden-set/${encodeURIComponent(doc.id)}`,
-      title: "이 에이전트의 골든 셋 문서로 갑니다.",
-      text: "골든 셋",
-    });
-  if (!canEdit) return el("span", { class: "chip golden-chip none", text: "골든 셋 없음" });
-  return el("button", {
-    type: "button",
-    class: "chip golden-chip none st-toggle",
-    text: "+ 골든 셋",
-    title: "이 에이전트의 골든 셋 드래프트를 빈 틀로 만듭니다.",
-    onclick: async () => {
-      const lib = await goldenLib;
-      startDraft("golden-set", { name: doc.id, markdown: lib ? lib.goldenTemplate(doc.id) : "" });
-    },
-  });
-}
-
-// The golden-set reader and template (src/golden-set.mjs).
-const goldenLib = import("/golden-set.mjs").catch(() => null);
-const GOLDEN_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석" };
-
-// golden-set: one agent's golden md, read and edited by section like a skill.
-// The head counts questions per kind and lists the server's warnings (정답
-// paths the skill md lacks, data questions with no 설정).
-function renderGoldenView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis, data) {
-  const b = doc.body;
-  const counts = el("div", { class: "golden-counts" });
-  goldenLib.then((lib) => {
-    if (!lib) return;
-    const n = lib.countByKind(lib.parseGolden(b.markdown || "").questions);
-    counts.replaceChildren(
-      ...[1, 2, 3, 4].map((k) =>
-        el("span", { class: `chip golden-kind${n[k] ? "" : " none"}`, text: `${GOLDEN_KIND_LABEL[k]} ${n[k]}` }),
-      ),
-    );
-  });
-  const chips = viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen);
-  chips.insertBefore(
-    el("a", {
-      class: "chip golden-chip",
-      href: `#/doc/domain-skill/${encodeURIComponent(doc.id)}`,
-      title: "채점 대상 에이전트(스킬 문서)로 갑니다.",
-      text: `에이전트 ${doc.id}`,
-    }),
-    chips.children[1] ?? null,
-  );
-  const warnings = data?.warnings || [];
-  return el("div", { class: "skwrap" }, [
-    el("p", { class: "sk-eyebrow", text: "golden-set · 골든 셋(md)" }),
-    el("h1", { class: "sk-title", text: b.name }),
-    chips,
-    counts,
-    warnings.length
-      ? el("div", { class: "golden-warn" }, [
-          el("b", { text: `경고 ${warnings.length}` }),
-          el("ul", {}, warnings.map((w) => el("li", { text: w }))),
-        ])
-      : null,
-    inactiveBar(doc),
-    sectionedMd({
-      doc,
-      rev,
-      canEdit,
-      reload,
-      wikis,
-      sectionsOf: (lib) => lib.GOLDEN_SECTIONS,
-      hint: "절은 ## 설정 · ## 일반 지식 · ## 데이터 설명 · ## 데이터 연관 · ## 고도화 분석. 종류 절의 ### 하나가 질문 하나, 칸은 \"- 이름: 값\" — 일반 지식은 정답(스킬 md 의 ## 도메인 지식 소제목 경로, 없으면 \"없음\") · 채점표, 데이터 설명은 조회(## 데이터 의 조회 id) · 입력(키=값), 데이터 연관은 조회 · 채점표 · 입력, 고도화 분석은 \"- 보류\". 조회 id 가 스킬 md 에 없으면 저장이 거절됩니다.",
-      empty: "아직 본문이 없습니다 — 편집을 눌러 골든 셋 md 를 붙여 넣으세요.",
-    }),
-  ]);
 }
 
 // voc: one md note, read whole and edited whole (no section structure). Its
@@ -2540,7 +2484,6 @@ function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
 const BODY_VIEWS = {
   "domain-skill": renderSkillView,
   voc: renderVocView,
-  "golden-set": renderGoldenView,
   "screen-map": renderScreenMapView,
   manual: renderManualView,
 };
@@ -3062,10 +3005,10 @@ function nextDraftId() {
   localStorage.setItem("akg_draft_seq", String(n));
   return `d${n}`;
 }
-function createDraft(type, body = {}) {
+function createDraft(type) {
   const all = loadDrafts();
   const localId = nextDraftId();
-  all[localId] = { type, body };
+  all[localId] = { type, body: {} };
   saveDrafts(all);
   return localId;
 }
@@ -3103,7 +3046,7 @@ function deriveDraftId(type, body) {
   if (type === "domain-skill")
     return body.name ? String(body.name).toLowerCase() : "";
   if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
-  if (type === "voc" || type === "golden-set") return body.name ? String(body.name).toLowerCase() : "";
+  if (type === "voc") return body.name ? String(body.name).toLowerCase() : "";
   return "";
 }
 
@@ -3136,7 +3079,6 @@ const NEW_DOC_OPTS = [
   { type: "domain-skill", desc: "스킬 문서(md)" },
   { type: "manual", desc: "화면 매뉴얼(캡처)" },
   { type: "voc", desc: "VOC(md)" },
-  { type: "golden-set", desc: "에이전트 골든 셋(md)" },
 ];
 function toggleFlyout(host, btn) {
   if (document.querySelector(".nd-flyout")) {
@@ -3178,9 +3120,9 @@ function toggleFlyout(host, btn) {
 }
 
 // 포맷을 고를 때마다 새 빈 드래프트를 하나 더 만든다 — 트리에 "(빈 문서)",
-// "(빈 문서2)"… 로 늘어난다. body 는 미리 채울 칸(골든 셋 칩의 이름 · 빈 틀).
-function startDraft(type, body) {
-  const localId = createDraft(type, body);
+// "(빈 문서2)"… 로 늘어난다.
+function startDraft(type) {
+  const localId = createDraft(type);
   renderDocTree(); // 왼쪽 트리에 바로 뜨게
   location.hash = `#/draft/${type}/${localId}`;
 }
@@ -3217,9 +3159,7 @@ function idSourceField(type, body, onIdChange) {
     placeholder:
       type === "voc"
         ? "VOC 이름 클릭해서 입력 (예: line-a-rf-power-drift)"
-        : type === "golden-set"
-          ? "에이전트(스킬) 이름 클릭해서 입력 — 골든 셋 id 는 그 스킬 id 와 같습니다"
-          : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+        : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
   });
 }
@@ -3295,9 +3235,7 @@ function renderDraftScreen(type, localId) {
           ? draftManual(body, persist)
           : type === "voc"
             ? draftVoc(body, persist)
-            : type === "golden-set"
-              ? draftGoldenSet(body, persist, rerender)
-              : draftDomainSkill(body, onIdChange, persist, rerender);
+            : draftDomainSkill(body, onIdChange, persist, rerender);
 
   section.replaceChildren(head, note, fields);
   updateSave();
@@ -3524,13 +3462,13 @@ function draftDomainSkill(body, onIdChange, persist, rerender) {
       eField(() => body.markdown, (v) => (body.markdown = v), {
         area: true,
         mono: true,
-        placeholder: "스킬 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터",
+        placeholder: "스킬 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터 / ## 답변 품질 검증 Set",
         onChange: persist,
       }),
     ),
   );
   wrap.append(
-    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 넷만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 다섯만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · main 만 ## 답변 품질 검증 Set), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }
@@ -3565,30 +3503,6 @@ function draftVoc(body, persist) {
       }),
     ),
     el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 활성화하려면 본문이 있어야 합니다." }),
-  );
-  return wrap;
-}
-function draftGoldenSet(body, persist, rerender) {
-  if (!body.markdown)
-    goldenLib.then((lib) => {
-      if (lib && !body.markdown) {
-        body.markdown = lib.goldenTemplate(body.name || "이름");
-        rerender();
-      }
-    });
-  const wrap = el("div", { class: "dfwrap" });
-  wrap.append(
-    dfRow(
-      "markdown",
-      false,
-      eField(() => body.markdown, (v) => (body.markdown = v), {
-        area: true,
-        mono: true,
-        placeholder: "골든 셋 md — ## 설정 · ## 일반 지식 · ## 데이터 설명 · ## 데이터 연관 · ## 고도화 분석",
-        onChange: persist,
-      }),
-    ),
-    el("p", { class: "fhint", text: "이름은 채점할 에이전트(domain-skill) id 와 같아야 하고, 그 스킬 문서가 있어야 저장됩니다. 활성화 때 질문 칸 규칙과 조회 id 를 검사합니다." }),
   );
   return wrap;
 }
@@ -3629,7 +3543,7 @@ function finalizeDraftBody(type, body) {
     };
   }
   if (type === "manual") return body.title ? { title: body.title } : {};
-  if (type === "voc" || type === "golden-set") {
+  if (type === "voc") {
     const b = { name: body.name };
     if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;
     return b;

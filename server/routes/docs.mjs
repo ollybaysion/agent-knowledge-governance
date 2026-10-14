@@ -2,7 +2,7 @@
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
 import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
 import { skillDataIds } from "../../src/skill-data-ids.mjs";
-import { checkGolden } from "../../src/golden-set.mjs";
+import { checkVerifySet } from "../../src/verify-set.mjs";
 import {
   readJson,
   readText,
@@ -31,7 +31,6 @@ import {
   resolveWikilinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
-import { missingGoldenWrites } from "../golden-auto.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -40,14 +39,12 @@ const DOC_TYPES = [
   "screen-map",
   "manual",
   "voc",
-  "golden-set",
 ];
 
 function mdRelPath(type, doc) {
   if (type === "domain-skill")
     return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
   if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
-  if (type === "golden-set") return `rendered/golden-set/${doc.body.name}/GOLDEN.md`;
   return `rendered/${type}/docs/${doc.id}.md`;
 }
 
@@ -87,17 +84,14 @@ export function registerDocsRoutes(app) {
   const inStore = {
     assetExists: (sha256) => hasAsset(storeDir, sha256),
     dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
-    skillOf: (id) => {
-      const skill = readJson(storeDir, `domain-skill/${id}.json`);
-      return skill && skill.status !== "archived" ? skill : null;
-    },
   };
-  // A golden set's 조각 paths its skill md lacks: saved anyway (the author may
-  // be renaming a heading), shown beside the document.
-  const warningsOf = (type, doc) =>
-    type === "golden-set" && typeof doc.body?.markdown === "string"
-      ? { warnings: checkGolden(doc.body.markdown, inStore.skillOf(doc.id)?.body?.markdown ?? null).warnings }
-      : {};
+  // A verification set's 정답 paths the skill md lacks: saved anyway (the
+  // author may be renaming a heading), shown beside the document.
+  const warningsOf = (type, doc) => {
+    if (type !== "domain-skill" || typeof doc.body?.markdown !== "string") return {};
+    const { present, warnings } = checkVerifySet(doc.body.markdown);
+    return present ? { warnings } : {};
+  };
   // Run inside the queue, like already_exists: the other side is in the store.
   const dataIdConflict = (doc) => {
     const conflicts = dataIdConflicts(doc, inStore.dataIdOwners);
@@ -234,14 +228,9 @@ export function registerDocsRoutes(app) {
             return { status: 409, body: { error: "already_exists" } };
           const conflict = dataIdConflict(doc);
           if (conflict) return conflict;
-          // A new agent gets its golden set (the empty template) in the same commit.
-          const golden = type === "domain-skill" ? missingGoldenWrites(storeDir, [doc.id]) : null;
-          const own = docWrites(storeDir, type, doc);
-          const rev = commitFiles(storeDir, {
+          const rev = persistDoc(storeDir, type, doc, {
             author: request.user.id,
-            message: `create ${type}/${doc.id}${golden?.ids.length ? " (+ golden-set 빈 틀)" : ""}`,
-            writes: [...own.writes, ...(golden?.writes ?? [])],
-            removes: [...own.removes, ...(golden?.removes ?? [])],
+            message: `create ${type}/${doc.id}`,
           });
           return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc) } };
         },
@@ -489,12 +478,10 @@ export function registerDocsRoutes(app) {
             for (const write of w.writes) byPath.set(write.relpath, write);
             removes.push(...w.removes);
           }
-          const golden = type === "domain-skill" ? missingGoldenWrites(storeDir, docs.map((d) => d.id)) : null;
-          const writes = [...byPath.values(), ...(golden?.writes ?? [])];
-          removes.push(...(golden?.removes ?? []));
+          const writes = [...byPath.values()];
           const rev = commitFiles(storeDir, {
             author: request.user.id,
-            message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}${golden?.ids.length ? ` (+ golden-set 빈 틀 ${golden.ids.length}개)` : ""}`,
+            message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}`,
             writes,
             removes,
           });

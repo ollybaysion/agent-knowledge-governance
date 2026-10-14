@@ -8,7 +8,6 @@ import { renderMsgFormatMd } from "./msg-format.mjs";
 import { renderDomainSkillMd } from "./domain-skill.mjs";
 import { renderManualMd } from "./manual.mjs";
 import { renderVocMd } from "./voc.mjs";
-import { renderGoldenSetMd } from "./golden-set.mjs";
 
 // domain-skill renders to rendered/domain-skill/<name>/SKILL.md (json-spec
 // §4.4) and is distributed via `akg sync --skills`, not the keyword-docs
@@ -19,7 +18,6 @@ const RENDERERS = {
   "msg-format/v1": renderMsgFormatMd,
   "manual/v1": renderManualMd,
   "voc/v1": renderVocMd,
-  "golden-set/v1": renderGoldenSetMd,
 };
 
 function rendererFor(type, doc) {
@@ -51,6 +49,5 @@ export function docMdPath(type, doc) {
   if (type === "domain-skill")
     return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
   if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
-  if (type === "golden-set") return `rendered/golden-set/${doc.body.name}/GOLDEN.md`;
   return `rendered/${type}/docs/${doc.id}.md`;
 }

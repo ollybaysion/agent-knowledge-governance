@@ -14,7 +14,7 @@ import {
   skillSections,
 } from "./skill-sections.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
-import { checkGolden } from "./golden-set.mjs";
+import { checkVerifySet, VERIFY_SECTION } from "./verify-set.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -29,7 +29,6 @@ const SCHEMA_FILES = {
   "screen-map/v1": "screen-map/v1.schema.json",
   "manual/v1": "manual/v1.schema.json",
   "voc/v1": "voc/v1.schema.json",
-  "golden-set/v1": "golden-set/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -107,7 +106,6 @@ export function deriveId(schema, body) {
         : null;
     case "domain-skill/v1":
     case "voc/v1":
-    case "golden-set/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -134,7 +132,6 @@ const ID_SOURCE = {
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
   "voc/v1": () => "== body.name",
-  "golden-set/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
@@ -246,24 +243,6 @@ const SEMANTIC_CHECKS = {
   "voc/v1"(doc, errors) {
     checkDerivedId(doc, errors);
   },
-  // A golden set scores one agent, so the domain-skill of the same id must
-  // exist, and a 조회 must name a query that skill has. Whether the skill
-  // exists is a store question: the server passes `skillOf`, an offline caller
-  // does not and gets the md rules alone.
-  "golden-set/v1"(doc, errors, { skillOf } = {}) {
-    checkDerivedId(doc, errors);
-    if (typeof doc.body?.markdown !== "string") return;
-    let skill = null;
-    if (skillOf) {
-      skill = skillOf(doc.id);
-      if (!skill) {
-        fail(errors, `$.id: 같은 id 의 domain-skill 문서가 없습니다 — ${doc.id}`);
-        return;
-      }
-    }
-    for (const e of checkGolden(doc.body.markdown, skill?.body?.markdown ?? null).errors)
-      fail(errors, `$.body.markdown: ${e}`);
-  },
   "screen-map/v1"(doc, errors) {
     checkDerivedId(doc, errors);
     // A column named in both lists is a contradiction the schema cannot see:
@@ -313,9 +292,13 @@ const SEMANTIC_CHECKS = {
     if (typeof doc.body?.markdown !== "string") return;
     const titles = skillSections(doc.body.markdown);
     // A sub is knowledge a main reads, so 도메인 지식 is the one section it
-    // must have. A main keeps the rule it had: any of the four.
+    // must have. A main keeps the rule it had: any of the five.
     if (doc.role === "sub" && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
       fail(errors, '$.body.markdown: sub 스킬에는 "## 도메인 지식" 절이 있어야 합니다');
+    // The verification set scores an agent, and only a main is one.
+    if (doc.role === "sub" && titles.some((t) => normalizeHeading(t) === VERIFY_SECTION))
+      fail(errors, `$.body.markdown: "## ${VERIFY_SECTION}" 은 main 스킬에만 둡니다`);
+    for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
     for (const title of titles) {
       if (!isSkillSection(title))
         fail(
@@ -374,14 +357,12 @@ function relaxedOf(schema) {
  * Validate a full document (envelope + body, or unclassified's flat meta).
  * @param {object} doc
  * @param {object} refs from loadSchemas()
- * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean,
- *   skillOf?: (id: string) => object|null}} [opts]
- *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists and
- *   skillOf = the store lookups the manual and golden-set checks need
- *   (omitted offline)
+ * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean}} [opts]
+ *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists = the
+ *   store lookup the manual check needs (omitted offline)
  * @returns {string[]} empty when valid
  */
-export function validateDocument(doc, refs, { draft = false, ...store } = {}) {
+export function validateDocument(doc, refs, { draft = false, assetExists } = {}) {
   const errors = [];
   if (!doc || typeof doc !== "object" || typeof doc.schema !== "string") {
     return ['$: missing or invalid "schema" field'];
@@ -428,7 +409,7 @@ export function validateDocument(doc, refs, { draft = false, ...store } = {}) {
           `$.id: expected "${want}" (${ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body"}), got "${doc.id}"`,
         );
     } else {
-      SEMANTIC_CHECKS[doc.schema]?.(doc, errors, store);
+      SEMANTIC_CHECKS[doc.schema]?.(doc, errors, { assetExists });
     }
   }
   return errors;
@@ -438,8 +419,11 @@ export function validateDocument(doc, refs, { draft = false, ...store } = {}) {
 // draft (relaxed — build it up over time), an active one must be complete. This
 // single rule is shared by every write route, and the activate route relies on
 // it as the completeness gate — flipping a doc to active re-runs the full schema.
-export function validateForStore(doc, refs, store = {}) {
-  return validateDocument(doc, refs, { ...store, draft: doc.status === "inactive" });
+export function validateForStore(doc, refs, { assetExists } = {}) {
+  return validateDocument(doc, refs, {
+    draft: doc.status === "inactive",
+    assetExists,
+  });
 }
 
 export function assertValidDocument(doc, refs, label = doc?.id ?? "document") {

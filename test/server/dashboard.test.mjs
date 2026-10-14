@@ -72,14 +72,12 @@ test("GET /wikilinks.mjs serves the server's own [[ ]] parser, byte for byte, pu
   await cleanup();
 });
 
-test("GET /golden-set.mjs and the /skill-data-ids.mjs it imports are served byte for byte, publicly", async () => {
+test("GET /verify-set.mjs serves the validator's own verification-set reader, byte for byte, publicly", async () => {
   const { app, cleanup } = await setup();
-  for (const name of ["golden-set.mjs", "skill-data-ids.mjs"]) {
-    const res = await app.inject({ method: "GET", url: `/${name}` });
-    assert.equal(res.statusCode, 200);
-    assert.match(res.headers["content-type"], /javascript/);
-    assert.equal(res.body, readFileSync(new URL(`../../src/${name}`, import.meta.url), "utf8"));
-  }
+  const res = await app.inject({ method: "GET", url: "/verify-set.mjs" });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /javascript/);
+  assert.equal(res.body, readFileSync(new URL("../../src/verify-set.mjs", import.meta.url), "utf8"));
   await cleanup();
 });
 

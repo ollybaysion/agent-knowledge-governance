@@ -7,8 +7,6 @@ import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
 import { saveUsers, hashToken } from "../../server/auth.mjs";
-import { commitFiles, initStore } from "../../server/store.mjs";
-import { execFileSync } from "node:child_process";
 import { pngBytes } from "../fixtures/images.mjs";
 
 function freshHome() {
@@ -892,114 +890,35 @@ test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as writte
   }
 });
 
-test("golden-set: a new skill gets its golden set (empty template, inactive) in the same commit; the skill finds it as a backlink", async () => {
-  const { app, home, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "boss", role: "approver", tokenHash: hashToken("aptok") },
-  ]);
+test("verification set: a skill save names unknown 정답 paths as warnings and refuses a rule break", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
   const h = auth("edtok");
-  const skillMd = "# s\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### q1 — 조회\n\n```sql\nSELECT 1\n```\n";
-  const ok = "# s 골든 셋\n\n## 일반 지식\n\n### a?\n\n- 정답: A\n\n## 데이터 설명\n\n### b?\n\n- 조회: q1\n";
+  const base = "# s\n\n## 도메인 지식\n\n### A\n\n글\n";
+  const withSet = (set) => `${base}\n## 답변 품질 검증 Set\n\n${set}\n`;
   try {
-    const noSkill = await app.inject({
-      method: "POST",
-      url: "/api/docs/golden-set",
-      headers: h,
-      payload: { schema: "golden-set/v1", id: "t", keywords: [{ kw: "t", inject: "pointer" }], status: "active", body: { name: "t", markdown: ok } },
-    });
-    assert.equal(noSkill.statusCode, 400);
-    assert.ok(noSkill.json().details.some((d) => d.includes("같은 id 의 domain-skill 문서가 없습니다")));
-
     const created = await app.inject({
       method: "POST",
       url: "/api/docs/domain-skill",
       headers: h,
-      payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: skillMd } },
+      payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: base } },
     });
     assert.equal(created.statusCode, 201, created.body);
-    const auto = (await app.inject({ method: "GET", url: "/api/docs/golden-set/s" })).json();
-    assert.equal(auto.json.status, "inactive");
-    assert.deepEqual(auto.json.links, [link("domain-skill", "s", "skill")]);
-    assert.equal(auto.json.body.markdown, "# s 골든 셋\n\n## 설정\n\n## 일반 지식\n\n## 데이터 설명\n\n## 데이터 연관\n\n## 고도화 분석\n");
-    assert.equal(auto.rev, created.json().rev, "skill and golden set are one commit");
-    const skill = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
-    assert.deepEqual(skill.backlinks, [{ type: "golden-set", id: "s", rel: "skill", status: "inactive" }]);
-    assert.equal("warnings" in skill, false);
+    assert.equal("warnings" in created.json(), false, "no set, no warnings");
 
     const put = (rev, markdown) =>
-      app.inject({ method: "PUT", url: "/api/docs/golden-set/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown } });
-    // A draft saves anything well-typed; activation runs the full check.
-    const bad = await put(auto.rev, ok.replace("조회: q1", "조회: q9"));
-    assert.equal(bad.statusCode, 200, bad.body);
-    const r = await put(bad.json().rev, ok);
-    assert.equal(r.statusCode, 200, r.body);
-    assert.deepEqual(r.json().warnings, ["## 설정 에 라인 · 설비가 없어 데이터 질문 1개를 돌릴 수 없습니다"]);
-    const appr = auth("aptok");
-    const activate = await app.inject({ method: "POST", url: "/api/docs/golden-set/s/activate", headers: { ...appr, "if-match": r.json().rev } });
-    assert.equal(activate.statusCode, 200, activate.body);
-    assert.equal(readFileSync(join(home, "store", "rendered", "golden-set", "s", "GOLDEN.md"), "utf8"), ok);
-
-    // Active now: an unknown 조회 id is refused, an unknown 정답 path saves with a warning.
-    const refused = await put(activate.json().rev, ok.replace("조회: q1", "조회: q9"));
+      app.inject({ method: "PUT", url: "/api/docs/domain-skill/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown } });
+    const refused = await put(created.json().rev, withSet("### 데이터 설명\n\n#### r\n\n```sql\n```"));
     assert.equal(refused.statusCode, 400);
-    assert.ok(refused.json().details.some((d) => d.includes("없는 조회 id 입니다 — q9")));
-    const edited = ok.replace("정답: A", "정답: 옛 제목").replace("# s 골든 셋", "# s 골든 셋\n\n## 설정\n\n- 라인: L1\n- 설비: E1");
-    const warned = await put(activate.json().rev, edited);
-    assert.equal(warned.statusCode, 200, warned.body);
-    assert.deepEqual(warned.json().warnings, ['10행 "### a?": 스킬 md 의 ## 도메인 지식 에 없는 조각입니다 — 옛 제목']);
-    const got = (await app.inject({ method: "GET", url: "/api/docs/golden-set/s" })).json();
-    assert.deepEqual(got.warnings, warned.json().warnings);
+    assert.ok(refused.json().details.some((d) => d.includes("SQL 블록이 비었습니다")), refused.body);
 
-    const links = await app.inject({
-      method: "PUT",
-      url: "/api/docs/golden-set/s/links",
-      headers: { ...h, "if-match": got.rev },
-      payload: { links: [] },
-    });
-    assert.deepEqual(links.json().json.links, [link("domain-skill", "s", "skill")]);
-
-    const list = (await app.inject({ method: "GET", url: "/api/docs?type=golden-set" })).json().docs;
-    assert.deepEqual(list.map((d) => [d.id, d.title, d.status]), [["s", "s", "active"]]);
+    const ok = await put(created.json().rev, withSet("### 일반 지식\n\n#### q\n\n- 정답: 옛 제목\n\n### 데이터 설명\n\n#### r\n\n```sql\nSELECT 1\n```"));
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.equal(ok.json().warnings.length, 2);
+    assert.match(ok.json().warnings[0], /없는 정답 경로입니다 — 옛 제목/);
+    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    assert.deepEqual(got.warnings, ok.json().warnings);
+    assert.deepEqual(got.backlinks, []);
   } finally {
     await cleanup();
-  }
-});
-
-test("golden-set: a batch of skills gets one golden set each in the batch commit; an existing one is kept", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
-  const h = auth("edtok");
-  const skill = (id) => ({ schema: "domain-skill/v1", id, keywords: [{ kw: id, inject: "full" }], status: "inactive", body: { name: id, markdown: `# ${id}\n` } });
-  try {
-    const r = await app.inject({ method: "POST", url: "/api/docs/domain-skill/batch", headers: h, payload: { docs: [skill("a"), skill("b")] } });
-    assert.equal(r.statusCode, 201, r.body);
-    const list = (await app.inject({ method: "GET", url: "/api/docs?type=golden-set" })).json().docs;
-    assert.deepEqual(list.map((d) => [d.id, d.status, d.rev]), [["a", "inactive", r.json().rev], ["b", "inactive", r.json().rev]]);
-  } finally {
-    await cleanup();
-  }
-});
-
-test("golden-set: at boot every stored skill without one gets the empty template, in one akg-auto commit", async () => {
-  const home = freshHome();
-  const storeDir = join(home, "store");
-  initStore(storeDir);
-  const skill = { schema: "domain-skill/v1", id: "old", keywords: [{ kw: "old", inject: "full" }], status: "active", body: { name: "old", markdown: "# old\n" } };
-  commitFiles(storeDir, { author: "renoir", message: "seed", writes: [{ relpath: "domain-skill/old.json", content: JSON.stringify(skill) }] });
-  saveUsers(join(home, "users.json"), [{ id: "renoir", role: "viewer", tokenHash: hashToken("t") }]);
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
-  try {
-    const golden = (await app.inject({ method: "GET", url: "/api/docs/golden-set/old" })).json();
-    assert.equal(golden.json.status, "inactive");
-    const log = execFileSync("git", ["-C", storeDir, "log", "-1", "--format=%an|%s"], { encoding: "utf8" }).trim();
-    assert.match(log, /^akg-auto\|auto: golden-set 빈 틀 1개 자동 생성/);
-
-    const count = () => execFileSync("git", ["-C", storeDir, "rev-list", "--count", "HEAD"], { encoding: "utf8" }).trim();
-    const before = count();
-    const again = await buildApp({ storeDir, usersPath: join(home, "users.json") });
-    await again.close();
-    assert.equal(count(), before, "a second boot has nothing to fill");
-  } finally {
-    await app.close();
-    rmSync(home, { recursive: true, force: true });
   }
 });

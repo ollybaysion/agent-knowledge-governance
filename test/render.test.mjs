@@ -22,8 +22,6 @@ import { migrateMsgFormatMd } from "../src/migrate/msg-format.mjs";
 import { renderDomainSkillMd, skillSummary } from "../src/render/domain-skill.mjs";
 import { renderManualMd } from "../src/render/manual.mjs";
 import { renderVocMd } from "../src/render/voc.mjs";
-import { renderGoldenSetMd } from "../src/render/golden-set.mjs";
-import { docMdPath } from "../src/render/index.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "schemas"));
@@ -271,11 +269,4 @@ test("voc: the example renders byte-identically to its golden", () => {
   const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));
   assert.deepEqual(validateDocument(doc, refs), []);
   assert.equal(renderVocMd(doc), readFileSync(join(__dirname, "fixtures", "voc-golden-VOC.md"), "utf8"));
-});
-
-// A golden set renders to its text as written, at rendered/golden-set/<name>/GOLDEN.md.
-test("golden-set: the example renders byte-identically to its golden", () => {
-  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "golden-set", "fdc-explain-sensor-origin.json"), "utf8"));
-  assert.equal(renderGoldenSetMd(doc), readFileSync(join(__dirname, "fixtures", "golden-set-golden-GOLDEN.md"), "utf8"));
-  assert.equal(docMdPath("golden-set", doc), "rendered/golden-set/fdc-explain-sensor-origin/GOLDEN.md");
 });

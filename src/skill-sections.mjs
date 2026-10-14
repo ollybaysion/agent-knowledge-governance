@@ -12,18 +12,10 @@ export const SKILL_SECTIONS = [
   { key: "언제 호출되는가", heading: "언제 호출되는가?" },
   { key: "도메인 지식", heading: "도메인 지식" },
   { key: "데이터", heading: "데이터" },
+  // main only: the questions the agent is scored against (src/verify-set.mjs).
+  { key: "답변 품질 검증 Set", heading: "답변 품질 검증 Set" },
 ];
 const KEYS = new Set(SKILL_SECTIONS.map((s) => s.key));
-
-// A golden-set md (the answers an agent is scored against): 설정 and the four
-// question kinds, in this order. src/golden-set.mjs reads what is inside them.
-export const GOLDEN_SECTIONS = [
-  { key: "설정", heading: "설정" },
-  { key: "일반 지식", heading: "일반 지식" },
-  { key: "데이터 설명", heading: "데이터 설명" },
-  { key: "데이터 연관", heading: "데이터 연관" },
-  { key: "고도화 분석", heading: "고도화 분석" },
-];
 
 /** A trailing `?`/`:` is noise, as it is for the consumer. */
 export const normalizeHeading = (title) =>
