@@ -12,7 +12,7 @@ export const VERIFY_SECTION = "답변 품질 검증 Set";
 const SETTINGS = "설정";
 
 /**
- * The four question kinds, numbered as the scoring design numbers them. `sql`
+ * The question kinds, numbered as the scoring design numbers them. `sql`
  * is how many ```sql blocks a question takes: "none", "one" or "many" (one or
  * more). A data question's answer is its SQL with every value bound.
  */
@@ -21,13 +21,15 @@ export const VERIFY_KINDS = [
   { kind: 2, key: "데이터 설명", fields: [], required: [], sql: "one" },
   { kind: 3, key: "데이터 연관", fields: ["채점표"], required: ["채점표"], sql: "many" },
   { kind: 4, key: "고도화 분석", fields: ["보류"], required: ["보류"], sql: "none" },
+  // The answer is not in what the agent can reach: it should say it does not know.
+  { kind: 5, key: "신뢰성", fields: ["채점표"], required: [], sql: "none" },
 ];
 const KIND_BY_KEY = new Map(VERIFY_KINDS.map((k) => [k.key, k]));
 const PARTS = [SETTINGS, ...VERIFY_KINDS.map((k) => k.key)];
 const SETTING_FIELDS = { 라인: "line", 설비: "eqp", 기간: "duration" };
 
-/** `정답: 없음` — the author marks knowledge the skill md does not have. */
-export const NO_KNOWLEDGE = "없음";
+/** Refused as a 정답: a 일반 지식 answer is always a heading path; a question the md cannot answer is 신뢰성. */
+const NO_ANSWER = "없음";
 
 const MINUTE = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}";
 const DURATION = new RegExp(`^(${MINUTE})\\s*~\\s*(${MINUTE})$`);
@@ -66,7 +68,7 @@ export function verifySetTemplate() {
  *   present: boolean,
  *   settings: {line?: string, eqp?: string, duration?: {from: string, to: string}} | null,
  *   questions: {kind: number, text: string, line: number, pieces: string[],
- *     noKnowledge: boolean, sqls: string[], rubric: string|null, deferred: boolean}[],
+ *     sqls: string[], rubric: string|null, deferred: boolean}[],
  *   errors: string[],
  * }}
  */
@@ -110,8 +112,9 @@ export function parseVerifySet(markdown) {
     }
     if (value === "") return errors.push(`${at(i, raw)}: 칸 "${name}" 의 값이 비었습니다`);
     if (name === "정답") {
-      if (value === NO_KNOWLEDGE) question.noKnowledge = true;
-      else question.pieces = value.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+      if (value === NO_ANSWER)
+        return errors.push(`${at(i, raw)}: 정답은 ## 도메인 지식 소제목 경로입니다 — 답이 없는 질문은 ### 신뢰성 에 둡니다`);
+      question.pieces = value.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
     } else {
       question.rubric = value;
     }
@@ -182,7 +185,7 @@ export function parseVerifySet(markdown) {
     if (h && h[1].length === 4) {
       if (part === SETTINGS) return errors.push(`${at(i, raw)}: 질문은 종류(### 일반 지식 …) 아래에 둡니다`);
       close();
-      question = { kind: part.kind, text: h[2], line: i + 1, pieces: [], noKnowledge: false, sqls: [], rubric: null, deferred: false };
+      question = { kind: part.kind, text: h[2], line: i + 1, pieces: [], sqls: [], rubric: null, deferred: false };
       return;
     }
     if (h) return errors.push(`${at(i, raw)}: 질문은 #### 한 단계입니다`);
@@ -264,9 +267,9 @@ export function checkVerifySet(markdown) {
   return { present, errors, warnings };
 }
 
-/** Questions per kind, for a header: {1: n, 2: n, 3: n, 4: n}. */
+/** Questions per kind, for a header: {1: n, …, 5: n}. */
 export function countByKind(questions) {
-  const out = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const out = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   for (const q of questions) out[q.kind] += 1;
   return out;
 }

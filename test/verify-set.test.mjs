@@ -29,9 +29,9 @@ const SET = [
   "",
   "- 정답: FDC_SENSOR",
   "",
-  "#### 센서 값의 단위 환산 규칙은?",
+  "#### 가상 센서의 입력 센서는 어디에 있나?",
   "",
-  "- 정답: 없음",
+  "- 정답: FDC_SENSOR",
   "",
   "### 데이터 설명",
   "",
@@ -68,21 +68,28 @@ const SET = [
   "",
   "- 보류",
   "",
+  "### 신뢰성",
+  "",
+  "#### 센서 값의 단위 환산 규칙은?",
+  "",
+  "- 채점표: 환산 규칙은 자료에 없다고 말한다",
+  "",
 ].join("\n");
 const withSet = `${skill.trimEnd()}\n\n${SET}`;
 const sectionOf = (body) => `# s\n\n## 답변 품질 검증 Set\n\n${body}\n`;
 const errs = (body) => parseVerifySet(sectionOf(body)).errors;
 
-test("the section reads into settings and seven questions, one per ####, SQL answers verbatim", () => {
+test("the section reads into settings and eight questions, one per ####, SQL answers verbatim", () => {
   const { present, settings, questions, errors } = parseVerifySet(withSet);
   assert.deepEqual(errors, []);
   assert.equal(present, true);
   assert.deepEqual(settings, { line: "L1", eqp: "EQP01", duration: { from: "2026-10-01T00:00", to: "2026-10-01T06:00" } });
-  assert.deepEqual(countByKind(questions), { 1: 3, 2: 2, 3: 1, 4: 1 });
-  const [first, , none, explain, , relate, deferred] = questions;
+  assert.deepEqual(countByKind(questions), { 1: 3, 2: 2, 3: 1, 4: 1, 5: 1 });
+  const [first, , , explain, , relate, deferred, reliable] = questions;
   assert.deepEqual(first.pieces, ["FDC_SENSOR"]);
   assert.equal(first.rubric, "다른 센서 값으로 수식을 계산해 얻는다");
-  assert.equal(none.noKnowledge, true);
+  assert.equal(reliable.kind, 5);
+  assert.equal(reliable.rubric, "환산 규칙은 자료에 없다고 말한다");
   assert.deepEqual(explain.sqls, ["SELECT snsr_id, eqp_id, snsr_kind, snsr_type_cd, unit_cd\n  FROM fdc_sensor WHERE snsr_id = 'S-0004'"]);
   assert.equal(relate.sqls.length, 2);
   assert.equal(relate.kind, 3);
@@ -106,11 +113,14 @@ test("each kind takes its own fields and SQL blocks; a break names the line", ()
   assert.match(errs("### 데이터 연관\n\n#### q\n\n- 채점표: x")[0], /하나 이상 있어야/);
   assert.match(errs("### 데이터 연관\n\n#### q\n\n```sql\nSELECT 1\n```")[0], /"채점표" 칸이 있어야/);
   assert.match(errs("### 고도화 분석\n\n#### q\n\n- 보류: 나중")[0], /값 없이 "- 보류"/);
+  assert.match(errs("### 일반 지식\n\n#### q\n\n- 정답: 없음")[0], /### 신뢰성 에 둡니다/);
+  assert.match(errs("### 신뢰성\n\n#### q\n\n```sql\nSELECT 1\n```")[0], /SQL 을 쓰지 않습니다/);
+  assert.deepEqual(errs("### 신뢰성\n\n#### q"), []);
   assert.match(errs("### 일반 지식\n\n#### q\n\n아무 글")[0], /"- 이름: 값" 줄/);
 });
 
 test("parts: 설정 and the four kinds, each once; a question is #### under a kind", () => {
-  assert.deepEqual(errs("### 설정:\n\n- 라인: L1\n\n### 일반 지식?\n\n#### q\n\n- 정답: 없음"), []);
+  assert.deepEqual(errs("### 설정:\n\n- 라인: L1\n\n### 일반 지식?\n\n#### q\n\n- 정답: A"), []);
   assert.match(errs("### 데이터\n")[0], /### 는 설정 · 일반 지식/);
   assert.match(errs("### 일반 지식\n\n### 일반 지식")[0], /두 번/);
   assert.match(errs("### 설정\n\n#### q")[0], /종류\(### 일반 지식 …\) 아래에/);
@@ -142,9 +152,9 @@ test("an unknown 정답 path and data questions with nowhere to run are warnings
   assert.match(warnings[1], /데이터 질문 1개를 돌릴 수 없습니다/);
 });
 
-test("the template is the five parts and no question — valid as it is", () => {
+test("the template is the six parts and no question — valid as it is", () => {
   const body = verifySetTemplate();
-  assert.equal(body, "### 설정\n\n### 일반 지식\n\n### 데이터 설명\n\n### 데이터 연관\n\n### 고도화 분석");
+  assert.equal(body, "### 설정\n\n### 일반 지식\n\n### 데이터 설명\n\n### 데이터 연관\n\n### 고도화 분석\n\n### 신뢰성");
   const r = parseVerifySet(sectionOf(body));
   assert.deepEqual([r.present, r.questions, r.errors], [true, [], []]);
 });

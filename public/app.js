@@ -1815,7 +1815,7 @@ const skillSectionsLib = import("/skill-sections.mjs").catch(() => null);
 // The verification-set reader (src/verify-set.mjs): template and counts.
 const verifyLib = import("/verify-set.mjs").catch(() => null);
 const VERIFY_KEY = "답변 품질 검증 Set";
-const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석" };
+const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석", 5: "신뢰성" };
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
 // points at. An editor's click flips it (PUT …/role); the server refuses a sub
@@ -1941,18 +1941,27 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   const HINT =
     "절은 다섯 — ## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터(### id — 제목, ```sql 또는 ```ask) · ## 답변 품질 검증 Set(main 만). 모르는 ## 절은 저장이 거절됩니다.";
   const VERIFY_HINT =
-    "답변 품질 검증 Set — ### 설정(- 라인 · - 설비 · - 기간: 시작 ~ 끝) · ### 일반 지식 · ### 데이터 설명 · ### 데이터 연관 · ### 고도화 분석. #### 하나가 질문 하나다. 일반 지식은 - 정답: ## 도메인 지식 소제목 경로(없으면 \"없음\") · - 채점표(선택), 데이터 설명은 ```sql 블록 하나(값이 다 들어간 SQL), 데이터 연관은 ```sql 블록 여럿 + - 채점표, 고도화 분석은 - 보류.";
+    "답변 품질 검증 Set — ### 설정(- 라인 · - 설비 · - 기간: 시작 ~ 끝) · ### 일반 지식 · ### 데이터 설명 · ### 데이터 연관 · ### 고도화 분석 · ### 신뢰성. #### 하나가 질문 하나다. 일반 지식은 - 정답: ## 도메인 지식 소제목 경로 · - 채점표(선택), 데이터 설명은 ```sql 블록 하나(값이 다 들어간 SQL), 데이터 연관은 ```sql 블록 여럿 + - 채점표, 고도화 분석은 - 보류, 신뢰성은 답이 자료에 없는 질문(\"모른다\" 가 맞는 답) · - 채점표(선택).";
 
   let verifyTemplate = null;
-  let verifyCounts = null; // {1..4: n} when the md has the section
+  let verifyCounts = null; // {1..5: n} when the md has the section
+  let verifyQuestions = []; // the section's questions, written order
+  let scoreLines = null; // GET /api/score/:agent lines, oldest first; null when not loaded
   async function read() {
-    const [lib, vlib] = await Promise.all([skillSectionsLib, verifyLib]);
+    const [lib, vlib, scores] = await Promise.all([
+      skillSectionsLib,
+      verifyLib,
+      main ? api(`/api/score/${encodeURIComponent(doc.id)}`) : null,
+    ]);
     if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
     if (vlib) {
       verifyTemplate = vlib.verifySetTemplate();
       const parsed = vlib.parseVerifySet(s.markdown || "");
       verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
+      verifyQuestions = parsed.questions;
     }
+    scoreLines = scores?.ok ? scores.data.lines : null;
+    showLastScore();
     try {
       readSections(lib, lib.splitSkill(s.markdown || "", sectionsOf(lib)), null);
     } catch (e) {
@@ -2065,7 +2074,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     const out = [];
     if (verifyCounts)
       out.push(
-        el("div", { class: "verify-counts" }, [1, 2, 3, 4].map((k) =>
+        el("div", { class: "verify-counts" }, [1, 2, 3, 4, 5].map((k) =>
           el("span", { class: `chip${verifyCounts[k] ? "" : " none"}`, text: `${VERIFY_KIND_LABEL[k]} ${verifyCounts[k]}` }),
         )),
       );
@@ -2077,8 +2086,109 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
           el("ul", {}, warnings.map((w) => el("li", { text: w }))),
         ]),
       );
+    if (verifyQuestions.length) out.push(verifyResults());
+    if (scoreLines?.length) out.push(verifyHistory());
     out.push(el("p", { class: "dim", text: VERIFY_HINT }));
     return out;
+  }
+
+  const questionKey = (kind, question) => `${kind}\n${question}`;
+  // The last machine and human line of each question, by 종류 + 질문 문장.
+  function lastLines() {
+    const machine = new Map();
+    const human = new Map();
+    for (const l of scoreLines || []) {
+      const key = questionKey(l.kind, l.question);
+      if (l.machine) machine.set(key, l);
+      if (l.human) human.set(key, l);
+    }
+    return { machine, human };
+  }
+
+  // The agent's last Score, next to the role chip.
+  const scoreChip = el("span", { class: "chip verify-score none", text: "Score 기록 없음" });
+  if (main) chips.appendChild(scoreChip);
+  function showLastScore() {
+    const last = [...(scoreLines || [])].reverse().find((l) => l.machine && l.score);
+    if (!last) return;
+    scoreChip.className = "chip verify-score";
+    scoreChip.textContent = `Score ${last.score.percent}${last.score.band ? ` · ${last.score.band}` : ""} · ${last.at}`;
+    scoreChip.title = `G ${last.score.g ?? "—"} · A ${last.score.a} · ${last.model}`;
+  }
+
+  // One row per question: its last machine verdict and the person's score, editable.
+  function verifyResults() {
+    const { machine, human } = lastLines();
+    const rows = verifyQuestions.map((q) => {
+      const kind = VERIFY_KIND_LABEL[q.kind];
+      const m = machine.get(questionKey(kind, q.text));
+      const h = human.get(questionKey(kind, q.text));
+      const input = el("input", { type: "number", min: "0", max: "100", step: "1", class: "fld verify-human-in", "aria-label": `${q.text} 사람 점수` });
+      if (h) input.value = String(h.human.score);
+      const save = el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        text: "저장",
+        onclick: async () => {
+          const score = Number(input.value);
+          if (input.value === "" || !Number.isInteger(score) || score < 0 || score > 100) {
+            toast("사람 점수는 0~100 정수입니다", "error");
+            return;
+          }
+          save.disabled = true;
+          const r = await api(`/api/score/${encodeURIComponent(doc.id)}`, {
+            method: "POST",
+            body: { lines: [{ kind, question: q.text, human: { score } }] },
+          });
+          if (r.ok) {
+            toast("사람 점수를 남겼습니다", "ok");
+            reload();
+            return;
+          }
+          save.disabled = false;
+          toast(`남기지 못했습니다 (${r.status})`, "error");
+        },
+      });
+      return el("tr", {}, [
+        el("td", { class: "dim", text: kind }),
+        el("td", { text: q.text }),
+        el("td", {}, m
+          ? [
+              el("b", { class: m.machine.answered ? "verify-ok" : "verify-no", text: m.machine.answered ? "✓" : "✗" }),
+              ` ${m.at}`,
+              m.machine.reason ? el("span", { class: "dim", text: ` · ${m.machine.reason}` }) : null,
+            ]
+          : el("span", { class: "dim", text: "—" })),
+        el("td", {}, h ? [el("b", { text: String(h.human.score) }), el("span", { class: "dim", text: ` · ${h.human.by} · ${h.human.at}` })] : el("span", { class: "dim", text: "—" })),
+        el("td", {}, canEdit ? [input, save] : null),
+      ]);
+    });
+    return el("div", { class: "verify-results" }, [
+      el("table", {}, [
+        el("thead", {}, el("tr", {}, ["종류", "질문", "마지막 기계 판정", "사람 점수", canEdit ? "사람 점수 적기" : ""].map((t) => el("th", { text: t })))),
+        el("tbody", {}, rows),
+      ]),
+    ]);
+  }
+
+  // Every record line, newest first.
+  function verifyHistory() {
+    const lines = [...scoreLines].reverse();
+    return el("details", { class: "verify-history" }, [
+      el("summary", { text: `기록 ${lines.length}줄` }),
+      el("table", {}, [
+        el("thead", {}, el("tr", {}, ["시각", "종류", "질문", "기계", "사람"].map((t) => el("th", { text: t })))),
+        el("tbody", {}, lines.map((l) =>
+          el("tr", {}, [
+            el("td", { class: "mono", text: l.at }),
+            el("td", { class: "dim", text: l.kind }),
+            el("td", { text: l.question }),
+            el("td", { text: l.machine ? `${l.machine.answered ? "✓" : "✗"}${l.machine.reason ? ` ${l.machine.reason}` : ""} · Score ${l.score?.percent ?? "—"}` : "" }),
+            el("td", { text: l.human ? `${l.human.score} · ${l.human.by}` : "" }),
+          ]),
+        )),
+      ]),
+    ]);
   }
 
   function readWhole(note) {

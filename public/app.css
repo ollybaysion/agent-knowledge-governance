@@ -3014,3 +3014,45 @@ a.wiki {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+/* 검증 Set 결과: 질문마다 마지막 기계 판정 · 사람 점수, 기록 이력 */
+.verify-results,
+.verify-history {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+}
+.verify-results table,
+.verify-history table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.verify-results th,
+.verify-results td,
+.verify-history th,
+.verify-history td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.verify-results th,
+.verify-history th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.verify-human-in {
+  width: 4.5em;
+  margin-right: 6px;
+}
+.verify-ok {
+  color: var(--teal-ink);
+}
+.verify-no {
+  color: var(--error-ink);
+}
+.verify-history summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.chip.verify-score.none {
+  color: var(--muted);
+}
