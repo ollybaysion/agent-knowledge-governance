@@ -3201,3 +3201,11 @@ button.chip.verify-path:hover {
   gap: 5px;
   margin-bottom: 8px;
 }
+.verify-paths-groups {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 8px;
+}
+.verify-paths-groups .verify-paths {
+  margin: 0 0 2px;
+}

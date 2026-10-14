@@ -1,5 +1,6 @@
 import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { isEqpBind, START_TIME, END_TIME, varsOf } from "../src/sql-bind.mjs";
+import { knowledgePaths } from "../src/verify-set.mjs";
 import { listIds, readJson } from "./store.mjs";
 
 const SKILL = "domain-skill";
@@ -8,13 +9,13 @@ const skillLinks = (doc) =>
   (doc.links ?? []).filter((l) => l?.type === SKILL && typeof l.id === "string").map((l) => l.id.trim());
 
 /**
- * The active skills one link away from `selfId`, either direction — the
- * consumer's LINK1 (KnowledgeService.tiers) — in store order.
- * @returns {{id: string, markdown: string}[]}
+ * The active skills a link or two away from `selfId`, links counted both
+ * ways — the consumer's LINK1 and LINK2 (KnowledgeService.tiers) — each in
+ * store order.
+ * @returns {{link1: {id: string, markdown: string}[], link2: {id: string, markdown: string}[]}}
  */
 export function linkedSkills(storeDir, selfId, selfDoc) {
-  const mine = new Set(skillLinks(selfDoc));
-  const out = [];
+  const active = new Map();
   for (const id of listIds(storeDir, SKILL)) {
     if (id === selfId) continue;
     let doc;
@@ -23,11 +24,36 @@ export function linkedSkills(storeDir, selfId, selfDoc) {
     } catch {
       continue;
     }
-    if (!doc || doc.status !== "active" || typeof doc.body?.markdown !== "string") continue;
-    if (mine.has(id) || skillLinks(doc).includes(selfId)) out.push({ id, markdown: doc.body.markdown });
+    if (doc && doc.status === "active" && typeof doc.body?.markdown === "string") active.set(id, doc);
   }
-  return out;
+  const links = new Map(); // id -> ids linked either way
+  const join = (a, b) => {
+    if (a === b) return;
+    for (const [x, y] of [[a, b], [b, a]]) links.set(x, (links.get(x) ?? new Set()).add(y));
+  };
+  for (const [id, doc] of [[selfId, selfDoc], ...active]) for (const to of skillLinks(doc)) join(id, to);
+  const near = links.get(selfId) ?? new Set();
+  const far = new Set([...near].flatMap((id) => [...(links.get(id) ?? [])]));
+  const pick = (ids) => [...active].filter(([id]) => ids.has(id)).map(([id, doc]) => ({ id, markdown: doc.body.markdown }));
+  return { link1: pick(near), link2: pick(new Set([...far].filter((id) => !near.has(id)))) };
 }
+
+/**
+ * The knowledge pieces a 일반 지식 정답 can name: `own`'s, then the LINK1 and
+ * LINK2 skills' — the consumer's reachableDocuments — each skill's paths as
+ * knowledgePaths reads them. A piece id is `<skill>/<path>`.
+ * @returns {{skill: string, tier: "own"|"link1"|"link2", paths: string[]}[]}
+ */
+export function pieceChoices(own, { link1, link2 }) {
+  return [
+    { skill: own.id, tier: "own", paths: knowledgePaths(own.markdown) },
+    ...link1.map((s) => ({ skill: s.id, tier: "link1", paths: knowledgePaths(s.markdown) })),
+    ...link2.map((s) => ({ skill: s.id, tier: "link2", paths: knowledgePaths(s.markdown) })),
+  ];
+}
+
+/** Every piece id of pieceChoices, for the 정답 check. */
+export const pieceIds = (choices) => new Set(choices.flatMap((c) => c.paths.map((p) => `${c.skill}/${p}`)));
 
 const EXAMPLE = /예\s*[:：]\s*([^\s),·]+)/;
 

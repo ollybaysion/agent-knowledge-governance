@@ -914,7 +914,7 @@ test("verification set: a skill save names unknown 정답 paths as warnings and 
     const ok = await put(created.json().rev, withSet("### 일반 지식\n\n#### q\n\n- 정답: 옛 제목\n\n### 데이터 설명\n\n#### r\n\n```sql\nSELECT 1\n```"));
     assert.equal(ok.statusCode, 200, ok.body);
     assert.equal(ok.json().warnings.length, 2);
-    assert.match(ok.json().warnings[0], /없는 정답 경로입니다 — 옛 제목/);
+    assert.match(ok.json().warnings[0], /닿는 지식 조각에 없는 정답입니다 — 옛 제목/);
     const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
     assert.deepEqual(got.warnings, ok.json().warnings);
     assert.deepEqual(got.backlinks, []);

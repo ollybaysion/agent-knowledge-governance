@@ -41,7 +41,7 @@ import {
   resolveWikilinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
-import { linkedSkills, queryChoices } from "../verify-queries.mjs";
+import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -100,9 +100,12 @@ export function registerDocsRoutes(app) {
   // author may be renaming a heading), shown beside the document.
   const warningsOf = (type, doc) => {
     if (type !== "domain-skill" || typeof doc.body?.markdown !== "string") return {};
-    const { present, warnings } = checkVerifySet(doc.body.markdown);
+    const { present, warnings } = checkVerifySet(doc.body.markdown, { agent: doc.id, known: knownPieces(doc.id, doc) });
     return present ? { warnings } : {};
   };
+  // The piece ids a 정답 can name: this skill's and its linked skills' (LINK1 · LINK2).
+  const knownPieces = (id, doc) =>
+    pieceIds(pieceChoices({ id, markdown: doc.body?.markdown ?? "" }, linkedSkills(storeDir, id, doc)));
   // Run inside the queue, like already_exists: the other side is in the store.
   const dataIdConflict = (doc) => {
     const conflicts = dataIdConflicts(doc, inStore.dataIdOwners);
@@ -186,7 +189,8 @@ export function registerDocsRoutes(app) {
 
   // A main skill's verification set as the verification-set/v1 object, read
   // with the parser the save check uses. Cached per document rev.
-  const verificationSets = new Map(); // id -> {rev, set}
+  // Keyed by the skills' last commit too: the 정답 warnings read the linked skills.
+  const verificationSets = new Map(); // id -> {key, set}
   app.get(
     "/api/docs/domain-skill/:id/verification-set",
     { config: { roles: ["viewer"], anonOk: true } },
@@ -196,16 +200,17 @@ export function registerDocsRoutes(app) {
       const doc = readJson(storeDir, relpath);
       if (!doc) return reply.code(404).send({ error: "not_found" });
       const rev = revOfPath(storeDir, relpath);
+      const key = `${rev}:${revOfPath(storeDir, "domain-skill")}`;
       const cached = verificationSets.get(id);
-      let set = cached && cached.rev === rev ? cached.set : undefined;
+      let set = cached && cached.key === key ? cached.set : undefined;
       if (set === undefined) {
         try {
-          set = toVerificationSet(id, doc.body?.markdown ?? "", rev);
+          set = toVerificationSet(id, doc.body?.markdown ?? "", rev, knownPieces(id, doc));
         } catch (err) {
           if (!(err instanceof VerifySetError)) throw err;
           return reply.code(422).send({ error: "invalid_verification_set", details: err.errors });
         }
-        verificationSets.set(id, { rev, set });
+        verificationSets.set(id, { key, set });
       }
       if (set === null) return reply.code(404).send({ error: "no_verification_set" });
       if (rev) reply.header("etag", rev);
@@ -284,7 +289,7 @@ export function registerDocsRoutes(app) {
             author: request.user.id,
             message: `verification-set domain-skill/${id}`,
           });
-          return { status: 200, body: toVerificationSet(id, newDoc.body.markdown, rev) };
+          return { status: 200, body: toVerificationSet(id, newDoc.body.markdown, rev, knownPieces(id, newDoc)) };
         },
         { priority: priorityOf(request.user) },
       );
@@ -292,11 +297,12 @@ export function registerDocsRoutes(app) {
     },
   );
 
-  // The queries a 데이터 설명 · 데이터 연관 question can name: this skill's
-  // and its linked skills', each with its SQL and where each bind's value
-  // comes from — the editor fills the 정답 SQL from them.
+  // What a question's 정답 can name — the editor's pickers. `queries`: the
+  // 데이터 설명 · 데이터 연관 SQL, this skill's and its LINK1 skills', each
+  // with where each bind's value comes from. `pieces`: the 일반 지식 knowledge
+  // paths, this skill's and its LINK1 · LINK2 skills'.
   app.get(
-    "/api/docs/domain-skill/:id/verification-queries",
+    "/api/docs/domain-skill/:id/verification-choices",
     { config: { roles: ["viewer"], anonOk: true } },
     async (request, reply) => {
       const { id } = request.params;
@@ -304,7 +310,8 @@ export function registerDocsRoutes(app) {
       const doc = readJson(storeDir, `domain-skill/${id}.json`);
       if (!doc) return reply.code(404).send({ error: "not_found" });
       const own = { id, markdown: doc.body?.markdown ?? "" };
-      return { queries: queryChoices(own, linkedSkills(storeDir, id, doc)) };
+      const linked = linkedSkills(storeDir, id, doc);
+      return { queries: queryChoices(own, linked.link1), pieces: pieceChoices(own, linked) };
     },
   );
 

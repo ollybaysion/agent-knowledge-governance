@@ -144,6 +144,24 @@
         "band": {
           "type": "string"
         },
+        "raw": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "S: the geometric mean × 100 before the human gate, unrounded."
+        },
+        "humanRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "h: questions with a human score / questions judged (all but 고도화 분석)."
+        },
+        "gate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "σ̃(h): the share of S above the gate start that score keeps."
+        },
         "general": {
           "type": "object",
           "additionalProperties": false,

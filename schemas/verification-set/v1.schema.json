@@ -41,8 +41,8 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["path"],
-            "description": "general only: the `## 도메인 지식` heading path the answer is in.",
-            "properties": { "path": { "type": "string", "minLength": 1 } }
+            "description": "general only: the piece the answer is in, as `<skill-id>/<## 도메인 지식 heading path>` — this skill's or a skill one or two links away. A `- 정답:` written without a skill is this skill's.",
+            "properties": { "path": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*/" } }
           },
           "sql": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "data: one, relation: one or more — SQL with every value bound." },
           "rubric": { "type": "string", "minLength": 1, "description": "What the answer has to say." },

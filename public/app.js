@@ -1951,31 +1951,39 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
   let verifyTemplate = null;
   let verifyCounts = null; // {1..5: n} when the md has the section
   let verifyQuestions = []; // the section's questions, written order
-  let answerPaths = []; // the ## 도메인 지식 heading paths a 정답 can name
+  // The pieces a 정답 can name, by skill (own · link1 · link2). Own paths go in
+  // bare; another skill's as <skill>/<path>.
+  let answerGroups = [];
   let vlib = null; // src/verify-set.mjs once loaded
   let verifyParsed = null; // parseVerifySet of the md
   let scoreLines = null; // GET /api/score/:agent lines, oldest first; null when not loaded
-  let verifyQueries = []; // GET …/verification-queries: the queries a 정답 SQL can come from
+  let verifyQueries = []; // GET …/verification-choices: the queries a 정답 SQL can come from
   let blib = null; // src/sql-bind.mjs once loaded
   async function read() {
     const [lib, verifyModule, scores, queries, bindModule] = await Promise.all([
       skillSectionsLib,
       verifyLib,
       main ? api(`/api/score/${encodeURIComponent(doc.id)}`) : null,
-      main && canEdit ? api(`${url}/verification-queries`) : null,
+      main ? api(`${url}/verification-choices`) : null,
       sqlBindLib,
     ]);
     if (!lib) return readWhole("절 편집기를 불러오지 못해 전체 md 로 보입니다.");
     vlib = verifyModule;
     blib = bindModule;
     verifyQueries = queries?.ok ? queries.data.queries : [];
+    answerGroups = (queries?.ok ? queries.data.pieces : [])
+      .filter((g) => g.paths.length)
+      .map((g) => ({ ...g, values: g.paths.map((p) => (g.tier === "own" ? p : `${g.skill}/${p}`)) }));
     if (vlib) {
       verifyTemplate = vlib.verifySetTemplate();
       const parsed = vlib.parseVerifySet(s.markdown || "");
       verifyParsed = parsed;
       verifyCounts = parsed.present ? vlib.countByKind(parsed.questions) : null;
       verifyQuestions = parsed.questions;
-      answerPaths = vlib.knowledgePaths(s.markdown || "");
+      if (!answerGroups.length) {
+        const own = vlib.knowledgePaths(s.markdown || "");
+        answerGroups = own.length ? [{ skill: doc.id, tier: "own", paths: own, values: own }] : [];
+      }
     }
     scoreLines = scores?.ok ? scores.data.lines : null;
     showLastScore();
@@ -2068,26 +2076,15 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
         fitHeight(ta);
         // 정답 paths to click in at the cursor; typing them works the same.
         const paths =
-          sec.key === VERIFY_KEY && answerPaths.length
-            ? el("div", { class: "verify-paths" }, [
-                el("span", { class: "dim", text: "정답 경로 넣기 — " }),
-                ...answerPaths.map((p) =>
-                  el("button", {
-                    type: "button",
-                    class: "chip verify-path",
-                    text: p,
-                    title: `커서 자리에 "- 정답: ${p}" 를 넣습니다`,
-                    onclick: () => {
-                      const at = ta.selectionStart ?? ta.value.length;
-                      const before = ta.value.slice(0, at);
-                      const line = `${before === "" || before.endsWith("\n") ? "" : "\n"}- 정답: ${p}\n`;
-                      ta.setRangeText(line, at, ta.selectionEnd ?? at, "end");
-                      ta.dispatchEvent(new Event("input", { bubbles: true }));
-                      ta.focus();
-                    },
-                  }),
-                ),
-              ])
+          sec.key === VERIFY_KEY
+            ? pathPicker("정답 경로 넣기", (p) => {
+                const at = ta.selectionStart ?? ta.value.length;
+                const before = ta.value.slice(0, at);
+                const line = `${before === "" || before.endsWith("\n") ? "" : "\n"}- 정답: ${p}\n`;
+                ta.setRangeText(line, at, ta.selectionEnd ?? at, "end");
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+                ta.focus();
+              })
             : null;
         queueMicrotask(() => ta.focus());
         return el("div", { class: "sk-sec editing sk-wide" }, [
@@ -2125,6 +2122,19 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       ...blocks,
       el("p", { class: "dim", text: HINT }),
     );
+  }
+
+  // The pieces a 정답 can name, one row per skill: own first, then the linked skills.
+  const TIER_LABEL = { own: "이 스킬", link1: "연결 1단", link2: "연결 2단" };
+  function pathPicker(label, onPick) {
+    if (!answerGroups.length) return null;
+    return el("div", { class: "verify-paths-groups" }, answerGroups.map((g) =>
+      el("div", { class: "verify-paths" }, [
+        el("span", { class: "dim", text: `${label} · ${TIER_LABEL[g.tier]}${g.tier === "own" ? "" : ` ${g.skill}`} — ` }),
+        ...g.values.map((v, i) =>
+          el("button", { type: "button", class: "chip verify-path", text: g.paths[i], title: `- 정답: ${v}`, onclick: () => onPick(v) })),
+      ]),
+    ));
   }
 
   // Under the verification block: questions per kind, the server's warnings, the rules.
@@ -2170,7 +2180,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     if (!last) return;
     scoreChip.className = "chip verify-score";
     scoreChip.textContent = `Score ${last.run.score}${last.run.band ? ` · ${last.run.band}` : ""} · ${last.at}`;
-    scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"} · ${last.model}`;
+    const r2 = (x, d = 2) => (typeof x === "number" ? x.toFixed(d) : "—");
+    scoreChip.title = `G ${last.run.G ?? "—"} · A ${last.run.A} · R ${last.run.R ?? "—"}`
+      + ` · 문 앞 S ${r2(last.run.raw, 1)} · 사람 점수 비율 h ${r2(last.run.humanRatio)} · σ̃(h) ${r2(last.run.gate)} · ${last.model}`;
   }
 
   // The person's 0~100 score for one question: last value, who · when, input · 저장.
@@ -2407,14 +2419,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
       let collect = () => ({});
       const shared = {};
       if (q.kind === 1) {
-        const path = input(q.path, "## 도메인 지식 소제목 경로");
+        const path = input(q.path, "소제목 경로 — 다른 스킬 조각은 <스킬>/<소제목 경로>");
         const rubric = area(q.rubric);
         parts.push(field("정답 경로", path));
-        if (answerPaths.length)
-          parts.push(el("div", { class: "verify-paths" }, [
-            el("span", { class: "dim", text: "경로 고르기 — " }),
-            ...answerPaths.map((p) => el("button", { type: "button", class: "chip verify-path", text: p, onclick: () => { path.value = p; path.focus(); } })),
-          ]));
+        parts.push(pathPicker("경로 고르기", (p) => { path.value = p; path.focus(); }));
         parts.push(field("채점표(선택)", rubric));
         collect = () => ({ path: path.value.trim() || null, rubric: rubric.value.trim() || null });
       } else if (q.kind === 2) {

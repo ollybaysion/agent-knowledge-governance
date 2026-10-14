@@ -253,13 +253,14 @@ export function knowledgePaths(markdown) {
  * renaming it), or data questions with no 라인 · 설비 to run in.
  * @returns {{present: boolean, errors: string[], warnings: string[]}}
  */
-export function checkVerifySet(markdown) {
+export function checkVerifySet(markdown, { agent, known } = {}) {
   const { present, settings, questions, errors } = parseVerifySet(markdown);
   const warnings = [];
-  const paths = new Set(knowledgePaths(markdown));
+  const paths = known ?? new Set(knowledgePaths(markdown));
   for (const q of questions) {
-    if (q.path !== null && !paths.has(q.path))
-      warnings.push(`${q.line}행 "#### ${q.text}": ## 도메인 지식 에 없는 정답 경로입니다 — ${q.path}`);
+    if (q.path === null) continue;
+    if (known && agent ? !paths.has(answerId(agent, q.path)) : !paths.has(q.path))
+      warnings.push(`${q.line}행 "#### ${q.text}": 에이전트가 닿는 지식 조각에 없는 정답입니다 — ${q.path}`);
   }
   const data = questions.filter((q) => q.kind === 2 || q.kind === 3).length;
   if (data && !(settings?.line && settings?.eqp))
@@ -267,12 +268,23 @@ export function checkVerifySet(markdown) {
   return { present, errors, warnings };
 }
 
+/** A written 정답 already naming its skill: a lowercase skill id and `/` with no space after (a heading path joins with " / "). */
+const SKILL_PREFIX = /^[a-z][a-z0-9_-]*\/(?! )/;
+
+/**
+ * The piece id a written 정답 names: as written when it starts with a skill,
+ * else `agent`'s own piece. (fdc-agent-be-spring VerificationSetMessage.Answer.of)
+ */
+export function answerId(agent, written) {
+  return SKILL_PREFIX.test(written) ? written : `${agent}/${written}`;
+}
+
 /**
  * The section as the verification-set/v1 contract (schemas/verification-set/v1.schema.json) — what
  * GET /api/docs/domain-skill/:id/verification-set returns and the scorer reads. Null when the md has
  * no section; throws a VerifySetError with every rule break when it does not parse.
  */
-export function toVerificationSet(agent, markdown, rev) {
+export function toVerificationSet(agent, markdown, rev, known) {
   const parsed = parseVerifySet(markdown);
   if (!parsed.present) return null;
   if (parsed.errors.length) throw new VerifySetError(parsed.errors);
@@ -286,8 +298,8 @@ export function toVerificationSet(agent, markdown, rev) {
     agent,
     rev,
     ...(settings ? { settings } : {}),
-    questions: parsed.questions.map(toContractQuestion),
-    warnings: checkVerifySet(markdown).warnings,
+    questions: parsed.questions.map((q) => toContractQuestion(q.path ? { ...q, path: answerId(agent, q.path) } : q)),
+    warnings: checkVerifySet(markdown, { agent, known }).warnings,
   };
 }
 

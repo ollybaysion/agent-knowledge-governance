@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { checkVerifySet, countByKind, knowledgePaths, parseVerifySet, toVerificationSet, verifySetTemplate, withoutVerifySet, VerifySetError, verifySetBody } from "../src/verify-set.mjs";
+import { answerId, checkVerifySet, countByKind, knowledgePaths, parseVerifySet, toVerificationSet, verifySetTemplate, withoutVerifySet, VerifySetError, verifySetBody } from "../src/verify-set.mjs";
 import { loadContractSchemas } from "../src/envelope.mjs";
 import { validate } from "../src/validate.mjs";
 import { renderDomainSkillMd } from "../src/render/domain-skill.mjs";
@@ -150,8 +150,22 @@ test("an unknown 정답 path and data questions with nowhere to run are warnings
   const { errors, warnings } = checkVerifySet(md);
   assert.deepEqual(errors, []);
   assert.equal(warnings.length, 2);
-  assert.match(warnings[0], /#### q": ## 도메인 지식 에 없는 정답 경로입니다 — 옛 제목/);
+  assert.match(warnings[0], /#### q": 에이전트가 닿는 지식 조각에 없는 정답입니다 — 옛 제목/);
   assert.match(warnings[1], /데이터 질문 1개를 돌릴 수 없습니다/);
+});
+
+test("a 정답 names a piece id: a lowercase skill and / as written, else the agent's own; the check reads the known ids", () => {
+  assert.equal(answerId("s", "DB / SPEC_INFO"), "s/DB / SPEC_INFO");
+  assert.equal(answerId("s", "fdc-sub/FDC_SENSOR"), "fdc-sub/FDC_SENSOR");
+  assert.equal(answerId("s", "I/O"), "s/I/O");
+  assert.equal(answerId("s", "db / x"), "s/db / x");
+  const md = `# s\n\n## 답변 품질 검증 Set\n\n### 일반 지식\n\n#### q\n\n- 정답: sub/A\n\n#### r\n\n- 정답: B\n\n#### t\n\n- 정답: far/C\n`;
+  const { warnings } = checkVerifySet(md, { agent: "s", known: new Set(["sub/A", "s/B"]) });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /#### t": .* — far\/C/);
+  const set = toVerificationSet("s", md, "r1", new Set(["sub/A", "s/B", "far/C"]));
+  assert.deepEqual(set.questions.map((q) => q.answer.path), ["sub/A", "s/B", "far/C"]);
+  assert.deepEqual(set.warnings, []);
 });
 
 test("the template is the six parts and no question — valid as it is", () => {

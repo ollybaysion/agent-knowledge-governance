@@ -33,7 +33,7 @@ const machine = (text, at, ok = true) => ({
   mdRev: "md1",
   machine: { ok, reason: ok ? null : "검색 놓침", detail: null, pieces: ["s/A"] },
   run: {
-    G: 0.5, A: 0.25, R: null, score: 35, band: "기본적인 질의응답 가능",
+    G: 0.5, A: 0.25, R: null, score: 35, band: "기본적인 질의응답 가능", raw: 35.36, humanRatio: 0.5, gate: 0.5,
     general: { m: 1, n: 2 }, data: { m: 0, n: 0 }, relation: { m: 0, n: 0 }, reliability: { m: 0, n: 0 },
     pieces: { count: 12, level: 1 }, queries: { count: 3, level: 1 },
   },
@@ -145,7 +145,7 @@ test("verification set: GET …/verification-set is the section as the contract 
       rev: put.json().rev,
       settings: { line: "L1", eqp: "E1" },
       questions: [
-        { kind: "general", text: "q", answer: { path: "A" } },
+        { kind: "general", text: "q", answer: { path: "s/A" } },
         { kind: "data", text: "r", sql: ["SELECT 1"] },
         { kind: "reliability", text: "t" },
       ],
@@ -164,7 +164,7 @@ test("verification set: PUT …/verification-set writes the section from the con
     const set = {
       settings: { line: "L1", eqp: "E1", duration: { start: "2026-10-01T00:00", end: "2026-10-01T06:00" } },
       questions: [
-        { kind: "general", text: "q", answer: { path: "A" }, rubric: "글" },
+        { kind: "general", text: "q", answer: { path: "s/A" }, rubric: "글" },
         { kind: "data", text: "r", sql: ["SELECT a FROM t WHERE id = 'S-1'"] },
         { kind: "relation", text: "u", sql: ["SELECT 1 FROM dual", "SELECT 2 FROM dual"], rubric: "둘을 잇는다" },
         { kind: "advanced", text: "v", deferred: true },
@@ -245,7 +245,7 @@ test("verification queries: this skill's queries then each active linked skill's
     assert.equal((await skill("off", "# off\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### gone — 꺼짐\n\n```sql\nSELECT 1 FROM dual\n```\n", { ...linkTo, status: "inactive" })).statusCode, 201);
     assert.equal((await skill("far", "# far\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### far_q — 먼 조회\n\n```sql\nSELECT 1 FROM dual\n```\n")).statusCode, 201);
 
-    const r = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-queries" });
+    const r = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-choices" });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json().queries, [
       {
@@ -267,7 +267,25 @@ test("verification queries: this skill's queries then each active linked skill's
         ],
       },
     ]);
-    assert.equal((await app.inject({ method: "GET", url: "/api/docs/domain-skill/none/verification-queries" })).statusCode, 404);
+    assert.equal((await app.inject({ method: "GET", url: "/api/docs/domain-skill/none/verification-choices" })).statusCode, 404);
+
+    // 일반 지식: own, LINK1 (sub), LINK2 (deep, linked to sub) — far and the inactive one are out of reach.
+    const deep = await skill("deep", "# deep\n\n## 도메인 지식\n\n### D\n\n글\n", { role: "sub", links: [{ type: "domain-skill", id: "sub", rel: "related" }] });
+    assert.equal(deep.statusCode, 201, deep.body);
+    const pieces = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-choices" })).json().pieces;
+    assert.deepEqual(pieces, [
+      { skill: "s", tier: "own", paths: ["A"] },
+      { skill: "sub", tier: "link1", paths: ["X"] },
+      { skill: "deep", tier: "link2", paths: ["D"] },
+    ]);
+    const { rev: sRev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const set = {
+      questions: ["s/A", "sub/X", "deep/D", "far/X"].map((path, i) => ({ kind: "general", text: `q${i}`, answer: { path } })),
+    };
+    const put = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/verification-set", headers: { ...h, "if-match": sRev }, payload: set });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.equal(put.json().warnings.length, 1);
+    assert.match(put.json().warnings[0], /#### q3": .* — far\/X/);
   } finally {
     await cleanup();
   }
