@@ -2990,3 +2990,32 @@ a.wiki {
 .chip.role-sub {
   color: var(--teal-ink);
 }
+/* golden-set: 스킬 화면의 골든 셋 칩, 골든 화면의 종류별 질문 수 · 경고 */
+a.chip.golden-chip {
+  color: var(--primary);
+  text-decoration: none;
+}
+.chip.golden-chip.none,
+.chip.golden-kind.none {
+  color: var(--muted);
+}
+.golden-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.golden-warn {
+  margin: 8px 0 0;
+  padding: 8px 11px;
+  border-radius: 6px;
+  border-left: 3px solid var(--warning);
+  background: var(--surface-soft);
+  color: var(--warning-ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.golden-warn ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
