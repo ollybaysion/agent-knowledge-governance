@@ -32,23 +32,23 @@ test("the example reads into settings and seven questions, one per ###, with the
 
 test("each kind has its own fields; a missing required one or a foreign one is an error naming the line", () => {
   const errs = (md) => parseGolden(md).errors;
-  assert.match(errs("## 일반 지식\n\n### q\n\n- 채점표: x\n")[0], /^3행 .*"조각" 칸이 있어야/);
-  assert.match(errs("## 데이터 설명\n\n### q\n\n- 조각: A\n- 조회: a\n")[0], /데이터 설명 질문의 칸은 조회 · 입력/);
+  assert.match(errs("## 일반 지식\n\n### q\n\n- 채점표: x\n")[0], /^3행 .*"정답" 칸이 있어야/);
+  assert.match(errs("## 데이터 설명\n\n### q\n\n- 정답: A\n- 조회: a\n")[0], /데이터 설명 질문의 칸은 조회 · 입력/);
   assert.match(errs("## 데이터 연관\n\n### q\n\n- 조회: a\n")[0], /"채점표" 칸이 있어야/);
   assert.match(errs("## 고도화 분석\n\n### q\n")[0], /"보류" 칸이 있어야/);
   assert.match(errs("## 고도화 분석\n\n### q\n\n- 보류: 나중\n")[0], /값 없이 "- 보류"/);
-  assert.match(errs("## 일반 지식\n\n### q\n\n- 조각: A\n- 조각: B\n")[0], /두 번/);
+  assert.match(errs("## 일반 지식\n\n### q\n\n- 정답: A\n- 정답: B\n")[0], /두 번/);
   assert.match(errs("## 일반 지식\n\n### q\n\n아무 글\n")[0], /"- 이름: 값" 줄/);
   assert.match(errs("## 데이터 설명\n\n### q\n\n- 조회: a\n- 입력: snsr_id\n")[0], /"키=값"/);
 });
 
 test("sections: only 설정 and the four kinds, each once; a trailing ? or : is noise; a question sits under a kind", () => {
   const errs = (md) => parseGolden(md).errors;
-  assert.deepEqual(errs("## 설정:\n\n- 라인: L1\n- 설비: E\n\n## 일반 지식?\n\n### q\n\n- 조각: 없음\n"), []);
+  assert.deepEqual(errs("## 설정:\n\n- 라인: L1\n- 설비: E\n\n## 일반 지식?\n\n### q\n\n- 정답: 없음\n"), []);
   assert.match(errs("## 데이터\n\n### q\n")[0], /모르는 절/);
   assert.match(errs("## 일반 지식\n\n## 일반 지식\n")[0], /두 번/);
   assert.match(errs("## 설정\n\n### q\n")[0], /종류 절.* 아래에/);
-  assert.match(errs("## 일반 지식\n\n- 조각: A\n")[0], /"### 질문"/);
+  assert.match(errs("## 일반 지식\n\n- 정답: A\n")[0], /"### 질문"/);
 });
 
 test("settings: 라인 · 설비 · 기간, the period as start ~ end in minutes, start before end", () => {
@@ -67,7 +67,7 @@ test("knowledge paths follow the consumer's piece ids: headings with text, ances
 
 test("against the skill md: an unknown 조회 id is an error, an unknown 조각 path a warning", () => {
   assert.deepEqual(checkGolden(golden, skill), { errors: [], warnings: [] });
-  const bad = "## 설정\n\n- 라인: L1\n- 설비: E\n\n## 일반 지식\n\n### q\n\n- 조각: 옛 제목\n\n## 데이터 설명\n\n### r\n\n- 조회: sensor_row, snsr_id, gone\n";
+  const bad = "## 설정\n\n- 라인: L1\n- 설비: E\n\n## 일반 지식\n\n### q\n\n- 정답: 옛 제목\n\n## 데이터 설명\n\n### r\n\n- 조회: sensor_row, snsr_id, gone\n";
   const { errors, warnings } = checkGolden(bad, skill);
   // snsr_id is an ask item, not a query.
   assert.deepEqual(errors, ['14행 "### r": 스킬 md 의 ## 데이터 에 없는 조회 id 입니다 — snsr_id, gone']);

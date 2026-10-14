@@ -31,6 +31,7 @@ import {
   resolveWikilinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
+import { missingGoldenWrites } from "../golden-auto.mjs";
 
 const DOC_TYPES = [
   "db-schema",
@@ -233,9 +234,14 @@ export function registerDocsRoutes(app) {
             return { status: 409, body: { error: "already_exists" } };
           const conflict = dataIdConflict(doc);
           if (conflict) return conflict;
-          const rev = persistDoc(storeDir, type, doc, {
+          // A new agent gets its golden set (the empty template) in the same commit.
+          const golden = type === "domain-skill" ? missingGoldenWrites(storeDir, [doc.id]) : null;
+          const own = docWrites(storeDir, type, doc);
+          const rev = commitFiles(storeDir, {
             author: request.user.id,
-            message: `create ${type}/${doc.id}`,
+            message: `create ${type}/${doc.id}${golden?.ids.length ? " (+ golden-set 빈 틀)" : ""}`,
+            writes: [...own.writes, ...(golden?.writes ?? [])],
+            removes: [...own.removes, ...(golden?.removes ?? [])],
           });
           return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc) } };
         },
@@ -483,10 +489,12 @@ export function registerDocsRoutes(app) {
             for (const write of w.writes) byPath.set(write.relpath, write);
             removes.push(...w.removes);
           }
-          const writes = [...byPath.values()];
+          const golden = type === "domain-skill" ? missingGoldenWrites(storeDir, docs.map((d) => d.id)) : null;
+          const writes = [...byPath.values(), ...(golden?.writes ?? [])];
+          removes.push(...(golden?.removes ?? []));
           const rev = commitFiles(storeDir, {
             author: request.user.id,
-            message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}`,
+            message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}${golden?.ids.length ? ` (+ golden-set 빈 틀 ${golden.ids.length}개)` : ""}`,
             writes,
             removes,
           });

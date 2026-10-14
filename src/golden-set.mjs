@@ -11,7 +11,7 @@ import { skillDataIds } from "./skill-data-ids.mjs";
 
 /** The four question kinds, numbered as the scoring design numbers them. */
 export const GOLDEN_KINDS = [
-  { kind: 1, key: "일반 지식", fields: ["조각", "채점표"], required: ["조각"] },
+  { kind: 1, key: "일반 지식", fields: ["정답", "채점표"], required: ["정답"] },
   { kind: 2, key: "데이터 설명", fields: ["조회", "입력"], required: ["조회"] },
   { kind: 3, key: "데이터 연관", fields: ["조회", "채점표", "입력"], required: ["조회", "채점표"] },
   { kind: 4, key: "고도화 분석", fields: ["보류"], required: ["보류"] },
@@ -21,7 +21,7 @@ const SECTION_KEYS = new Set(GOLDEN_SECTIONS.map((s) => s.key));
 const SETTINGS = "설정";
 const SETTING_FIELDS = { 라인: "line", 설비: "eqp", 기간: "duration" };
 
-/** `조각: 없음` — the author marks knowledge the skill md does not have. */
+/** `정답: 없음` — the author marks knowledge the skill md does not have. */
 export const NO_KNOWLEDGE = "없음";
 
 const MINUTE = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}";
@@ -106,7 +106,7 @@ export function parseGolden(markdown) {
       errors.push(`${at(i, raw)}: 칸 "${name}" 의 값이 비었습니다`);
       return;
     }
-    if (name === "조각") {
+    if (name === "정답") {
       if (value === NO_KNOWLEDGE) question.noKnowledge = true;
       else question.pieces = list(value);
     } else if (name === "조회") {
@@ -249,7 +249,7 @@ export function knowledgePaths(markdown) {
 
 /**
  * A golden md checked against its agent's skill md. errors refuse the save: a
- * rule break, or a 조회 id the skill has no query for. warnings do not: a 조각
+ * rule break, or a 조회 id the skill has no query for. warnings do not: a 정답
  * path the skill has no heading for (the author may be renaming it), or data
  * questions with no `## 설정` to run them in.
  * @param {string} markdown
@@ -275,6 +275,15 @@ export function checkGolden(markdown, skillMarkdown) {
   if (data && !(settings?.line && settings?.eqp))
     warnings.push(`## 설정 에 라인 · 설비가 없어 데이터 질문 ${data}개를 돌릴 수 없습니다`);
   return { errors, warnings };
+}
+
+/**
+ * The golden md a new agent starts with: the five sections, no question yet.
+ * Valid as it is — an agent with no questions is scored by the absolute
+ * criteria alone.
+ */
+export function goldenTemplate(name) {
+  return `# ${name} 골든 셋\n\n${GOLDEN_SECTIONS.map((s) => `## ${s.heading}`).join("\n\n")}\n`;
 }
 
 /** Questions per kind, for a header: {1: n, 2: n, 3: n, 4: n}. */

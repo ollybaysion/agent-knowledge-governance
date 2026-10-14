@@ -18,6 +18,7 @@ import {
   AuthBootError,
 } from "./auth.mjs";
 import { createQueue } from "./queue.mjs";
+import { fillGoldenSets } from "./golden-auto.mjs";
 import { registerDocsRoutes } from "./routes/docs.mjs";
 import { registerPromoteRoutes } from "./routes/promote.mjs";
 import { registerProposalsRoutes } from "./routes/proposals.mjs";
@@ -57,6 +58,9 @@ export async function buildApp({
 
   const refs = loadSchemas(schemasDir);
   const queue = createQueue();
+  // Agents stored before golden sets existed get theirs once, in the agent
+  // lane like any automated write.
+  await queue.enqueue(async () => fillGoldenSets(storeDir), { priority: "agent" });
 
   const app = Fastify({ bodyLimit: BODY_LIMIT, logger: false });
 

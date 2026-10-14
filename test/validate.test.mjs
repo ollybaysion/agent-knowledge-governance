@@ -614,8 +614,8 @@ test("golden-set: the id is body.name; the md rules apply offline, the skill rul
   assert.deepEqual(withSkill, ['$.body.markdown: 5행 "### r": 스킬 md 의 ## 데이터 에 없는 조회 id 입니다 — nope']);
 });
 
-test("golden-set: no domain-skill of the same id is refused; an unknown 조각 path is not", () => {
-  const md = "# g\n\n## 일반 지식\n\n### q\n\n- 조각: 옛 제목\n";
+test("golden-set: no domain-skill of the same id is refused; an unknown 정답 path is not", () => {
+  const md = "# g\n\n## 일반 지식\n\n### q\n\n- 정답: 옛 제목\n";
   assert.deepEqual(validateDocument(goldenDoc(md), refs, { skillOf: () => goldenSkill }), []);
   assert.deepEqual(validateDocument(goldenDoc(md), refs, { skillOf: () => null }), [
     "$.id: 같은 id 의 domain-skill 문서가 없습니다 — s",

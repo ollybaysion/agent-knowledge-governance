@@ -2133,8 +2133,9 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
 }
 
 // A skill's golden set (the questions its answers are scored against) is the
-// golden-set document of the same id, found as a backlink. Without one an
-// editor starts a draft from the empty template.
+// golden-set document of the same id, found as a backlink. The server makes
+// one with every new skill; for a skill that still has none, an editor starts
+// a draft from the same empty template.
 function goldenChip(doc, data, canEdit) {
   const has = (data?.backlinks || []).some((b) => b.type === "golden-set" && b.id === doc.id);
   if (has)
@@ -2150,53 +2151,19 @@ function goldenChip(doc, data, canEdit) {
     class: "chip golden-chip none st-toggle",
     text: "+ 골든 셋",
     title: "이 에이전트의 골든 셋 드래프트를 빈 틀로 만듭니다.",
-    onclick: () => startDraft("golden-set", { name: doc.id, markdown: goldenTemplate(doc.id) }),
+    onclick: async () => {
+      const lib = await goldenLib;
+      startDraft("golden-set", { name: doc.id, markdown: lib ? lib.goldenTemplate(doc.id) : "" });
+    },
   });
 }
 
-function goldenTemplate(name) {
-  return `# ${name} 골든 셋
-
-## 설정
-
-- 라인: 
-- 설비: 
-- 기간: 2026-10-01T00:00 ~ 2026-10-01T06:00
-
-## 일반 지식
-
-### 질문 문장?
-
-- 조각: 소제목 경로
-- 채점표: 답에 들어가야 할 말
-
-## 데이터 설명
-
-### 질문 문장?
-
-- 조회: 조회 id
-
-## 데이터 연관
-
-### 질문 문장?
-
-- 조회: 조회 id, 조회 id
-- 채점표: 답이 설명해야 할 연관
-
-## 고도화 분석
-
-### 질문 문장?
-
-- 보류
-`;
-}
-
-// The golden-set reader (src/golden-set.mjs) for the question counts.
+// The golden-set reader and template (src/golden-set.mjs).
 const goldenLib = import("/golden-set.mjs").catch(() => null);
 const GOLDEN_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석" };
 
 // golden-set: one agent's golden md, read and edited by section like a skill.
-// The head counts questions per kind and lists the server's warnings (조각
+// The head counts questions per kind and lists the server's warnings (정답
 // paths the skill md lacks, data questions with no 설정).
 function renderGoldenView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis, data) {
   const b = doc.body;
@@ -2240,7 +2207,7 @@ function renderGoldenView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
       reload,
       wikis,
       sectionsOf: (lib) => lib.GOLDEN_SECTIONS,
-      hint: "절은 ## 설정 · ## 일반 지식 · ## 데이터 설명 · ## 데이터 연관 · ## 고도화 분석. 종류 절의 ### 하나가 질문 하나, 칸은 \"- 이름: 값\"(조각 · 조회 · 채점표 · 입력 · 보류). 조회 id 가 스킬 md 에 없으면 저장이 거절됩니다.",
+      hint: "절은 ## 설정 · ## 일반 지식 · ## 데이터 설명 · ## 데이터 연관 · ## 고도화 분석. 종류 절의 ### 하나가 질문 하나, 칸은 \"- 이름: 값\" — 일반 지식은 정답(스킬 md 의 ## 도메인 지식 소제목 경로, 없으면 \"없음\") · 채점표, 데이터 설명은 조회(## 데이터 의 조회 id) · 입력(키=값), 데이터 연관은 조회 · 채점표 · 입력, 고도화 분석은 \"- 보류\". 조회 id 가 스킬 md 에 없으면 저장이 거절됩니다.",
       empty: "아직 본문이 없습니다 — 편집을 눌러 골든 셋 md 를 붙여 넣으세요.",
     }),
   ]);
@@ -3329,7 +3296,7 @@ function renderDraftScreen(type, localId) {
           : type === "voc"
             ? draftVoc(body, persist)
             : type === "golden-set"
-              ? draftGoldenSet(body, persist)
+              ? draftGoldenSet(body, persist, rerender)
               : draftDomainSkill(body, onIdChange, persist, rerender);
 
   section.replaceChildren(head, note, fields);
@@ -3601,8 +3568,14 @@ function draftVoc(body, persist) {
   );
   return wrap;
 }
-function draftGoldenSet(body, persist) {
-  if (!body.markdown) body.markdown = goldenTemplate(body.name || "이름");
+function draftGoldenSet(body, persist, rerender) {
+  if (!body.markdown)
+    goldenLib.then((lib) => {
+      if (lib && !body.markdown) {
+        body.markdown = lib.goldenTemplate(body.name || "이름");
+        rerender();
+      }
+    });
   const wrap = el("div", { class: "dfwrap" });
   wrap.append(
     dfRow(
