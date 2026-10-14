@@ -589,3 +589,46 @@ test("voc: the shipped example validates", () => {
   const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));
   assert.deepEqual(validateDocument(doc, refs), []);
 });
+
+function goldenDoc(markdown, extra = {}) {
+  return {
+    schema: "golden-set/v1",
+    id: "s",
+    keywords: [{ kw: "s", inject: "pointer" }],
+    status: "active",
+    ...extra,
+    body: { name: "s", markdown },
+  };
+}
+const goldenSkill = {
+  status: "active",
+  body: { name: "s", markdown: "# s\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### q1 — 조회\n\n```sql\nSELECT 1\n```\n" },
+};
+
+test("golden-set: the id is body.name; the md rules apply offline, the skill rules only with skillOf", () => {
+  const md = "# g\n\n## 데이터 설명\n\n### r\n\n- 조회: nope\n";
+  assert.deepEqual(validateDocument(goldenDoc(md), refs), []);
+  assert.ok(validateDocument({ ...goldenDoc(md), id: "t" }, refs).some((e) => e.includes('expected "s"')));
+  assert.ok(validateDocument(goldenDoc("## 데이터\n"), refs).some((e) => e.includes("모르는 절")));
+  const withSkill = validateDocument(goldenDoc(md), refs, { skillOf: () => goldenSkill });
+  assert.deepEqual(withSkill, ['$.body.markdown: 5행 "### r": 스킬 md 의 ## 데이터 에 없는 조회 id 입니다 — nope']);
+});
+
+test("golden-set: no domain-skill of the same id is refused; an unknown 조각 path is not", () => {
+  const md = "# g\n\n## 일반 지식\n\n### q\n\n- 조각: 옛 제목\n";
+  assert.deepEqual(validateDocument(goldenDoc(md), refs, { skillOf: () => goldenSkill }), []);
+  assert.deepEqual(validateDocument(goldenDoc(md), refs, { skillOf: () => null }), [
+    "$.id: 같은 id 의 domain-skill 문서가 없습니다 — s",
+  ]);
+});
+
+test("golden-set: a draft skips the question rules like any draft", () => {
+  assert.deepEqual(validateForStore(goldenDoc("## 일반 지식\n\n### q\n", { status: "inactive" }), refs, { skillOf: () => null }), []);
+});
+
+test("golden-set: the shipped example validates against the shipped skill", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "golden-set", "fdc-explain-sensor-origin.json"), "utf8"));
+  const skill = JSON.parse(readFileSync(join(__dirname, "..", "examples", "domain-skill", "fdc-explain-sensor-origin.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs, { skillOf: (id) => (id === skill.id ? skill : null) }), []);
+  assert.equal(doc.body.markdown, readFileSync(join(__dirname, "..", "examples", "golden-set", "fdc-explain-sensor-origin.md"), "utf8"));
+});

@@ -19,6 +19,18 @@ const FILES = {
     path: "skill-sections.mjs",
     type: "text/javascript; charset=utf-8",
   },
+  // The golden-set reader and the data-id reader it imports, for the golden
+  // screen's question counts.
+  "/golden-set.mjs": {
+    dir: SRC_DIR,
+    path: "golden-set.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
+  "/skill-data-ids.mjs": {
+    dir: SRC_DIR,
+    path: "skill-data-ids.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
   "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
   // The server's own [[ ]] parser, so the page reads the brackets the way the
   // links were made. Served from src/ rather than copied into public/.

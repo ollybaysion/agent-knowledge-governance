@@ -2,6 +2,7 @@
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
 import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
 import { skillDataIds } from "../../src/skill-data-ids.mjs";
+import { checkGolden } from "../../src/golden-set.mjs";
 import {
   readJson,
   readText,
@@ -38,12 +39,14 @@ const DOC_TYPES = [
   "screen-map",
   "manual",
   "voc",
+  "golden-set",
 ];
 
 function mdRelPath(type, doc) {
   if (type === "domain-skill")
     return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
   if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
+  if (type === "golden-set") return `rendered/golden-set/${doc.body.name}/GOLDEN.md`;
   return `rendered/${type}/docs/${doc.id}.md`;
 }
 
@@ -83,7 +86,17 @@ export function registerDocsRoutes(app) {
   const inStore = {
     assetExists: (sha256) => hasAsset(storeDir, sha256),
     dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
+    skillOf: (id) => {
+      const skill = readJson(storeDir, `domain-skill/${id}.json`);
+      return skill && skill.status !== "archived" ? skill : null;
+    },
   };
+  // A golden set's 조각 paths its skill md lacks: saved anyway (the author may
+  // be renaming a heading), shown beside the document.
+  const warningsOf = (type, doc) =>
+    type === "golden-set" && typeof doc.body?.markdown === "string"
+      ? { warnings: checkGolden(doc.body.markdown, inStore.skillOf(doc.id)?.body?.markdown ?? null).warnings }
+      : {};
   // Run inside the queue, like already_exists: the other side is in the store.
   const dataIdConflict = (doc) => {
     const conflicts = dataIdConflicts(doc, inStore.dataIdOwners);
@@ -160,6 +173,7 @@ export function registerDocsRoutes(app) {
         links: resolveLinks(storeDir, doc.links),
         backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
         wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
+        ...warningsOf(type, doc),
       };
     },
   );
@@ -223,7 +237,7 @@ export function registerDocsRoutes(app) {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
           });
-          return { status: 201, body: { rev, json: doc } };
+          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc) } };
         },
         { priority: priorityOf(request.user) },
       );
@@ -340,7 +354,7 @@ export function registerDocsRoutes(app) {
           });
           return {
             status: 200,
-            body: { rev, json: newDoc, rebased: outcome.rebased },
+            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc) },
           };
         },
         { priority: priorityOf(request.user) },

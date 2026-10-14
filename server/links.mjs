@@ -67,6 +67,17 @@ function bodyLinks(wikis, type, id) {
     .map((w) => ({ type: w.type, id: w.id, rel: "related" }));
 }
 
+/**
+ * The links[] a type always carries, whatever the author lists: a golden set
+ * points at the skill it scores (same id), so the skill screen finds it as a
+ * backlink.
+ */
+function typeLinks(type, doc) {
+  if (type === "golden-set" && typeof doc.id === "string")
+    return [{ type: "domain-skill", id: doc.id, rel: "skill" }];
+  return [];
+}
+
 // links sits before body, the order json-spec §2 lists the keys in; an empty
 // list drops the key.
 export function withLinks(doc, links) {
@@ -76,8 +87,8 @@ export function withLinks(doc, links) {
 
 /**
  * The doc to store after a write, its links[] recomputed from the body:
- * (handLinks − what the previous body contributed) ∪ what this body
- * contributes. `handLinks` defaults to the doc's own links[]; PUT …/links
+ * (handLinks − what the previous body contributed) ∪ the type's own links ∪
+ * what this body contributes. `handLinks` defaults to the doc's own links[]; PUT …/links
  * passes the list it received instead. Returns {error} when a bare [[id]] is
  * ambiguous.
  */
@@ -101,6 +112,10 @@ export function mergeBodyLinks(storeDir, types, type, prevDoc, doc, handLinks = 
     : new Set();
   const kept = handLinks.filter((l) => !before.has(edgeKey(l)));
   const keptKeys = new Set(kept.map(edgeKey));
-  const added = bodyLinks(wikis, type, doc.id).filter((l) => !keptKeys.has(edgeKey(l)));
+  const added = [...typeLinks(type, doc), ...bodyLinks(wikis, type, doc.id)].filter((l) => {
+    if (keptKeys.has(edgeKey(l))) return false;
+    keptKeys.add(edgeKey(l));
+    return true;
+  });
   return { doc: withLinks(doc, [...kept, ...added]) };
 }

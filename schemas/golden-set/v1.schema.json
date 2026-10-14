@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "golden-set/v1",
+  "title": "golden-set/v1 body",
+  "description": "An agent's golden set: the questions its answers are scored against, one Markdown document per agent, the same shape as a domain-skill — `name` is the agent (domain-skill) id and the document id, `markdown` the author's text. Its `##` sections are 설정 and the four question kinds (일반 지식 · 데이터 설명 · 데이터 연관 · 고도화 분석); each `###` under a kind is one question with `- 이름: 값` fields (src/golden-set.mjs, envelope.mjs semantic check). The consumer is fdc-agent-be-spring GoldenMarkdownTool. Rendered as-is to rendered/golden-set/<name>/GOLDEN.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "markdown"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The agent's domain-skill name = document id = rendered/golden-set/<name>/GOLDEN.md."
+    },
+    "markdown": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The whole golden set as the author wrote it, stored and rendered byte-for-byte."
+    }
+  }
+}

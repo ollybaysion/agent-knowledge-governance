@@ -1,0 +1,22 @@
+{
+  "schema": "golden-set/v1",
+  "id": "fdc-explain-sensor-origin",
+  "keywords": [
+    {
+      "kw": "fdc-explain-sensor-origin golden",
+      "inject": "pointer"
+    }
+  ],
+  "status": "active",
+  "links": [
+    {
+      "type": "domain-skill",
+      "id": "fdc-explain-sensor-origin",
+      "rel": "skill"
+    }
+  ],
+  "body": {
+    "name": "fdc-explain-sensor-origin",
+    "markdown": "# fdc-explain-sensor-origin 골든 셋\n\n## 설정\n\n- 라인: L1\n- 설비: EQP01\n- 기간: 2026-10-01T00:00 ~ 2026-10-01T06:00\n\n## 일반 지식\n\n### 가상 센서는 값을 어떻게 얻나?\n\n- 조각: FDC_SENSOR\n- 채점표: 다른 센서 값으로 수식을 계산해 얻는다\n\n### ARG_ORDER 가 크면 중요한 입력 센서인가?\n\n- 조각: FDC_SENSOR\n- 채점표: ARG_ORDER 는 수식 인자 순서일 뿐 중요도가 아니다\n\n### 센서 값의 단위 환산 규칙은?\n\n- 조각: 없음\n\n## 데이터 설명\n\n### S-0004 는 물리 센서인가 가상 센서인가?\n\n- 조회: sensor_row\n- 입력: snsr_id=S-0004\n\n### S-0004 값은 어느 메시지로 들어오나?\n\n- 조회: sensor_row, message_row\n- 입력: snsr_id=S-0004\n\n## 데이터 연관\n\n### S-0007 은 어떤 센서들로 계산되나?\n\n- 조회: sensor_row, formula_row, formula_input_rows\n- 채점표: 수식과 입력 센서를 인자 순서대로 함께 말한다\n- 입력: snsr_id=S-0007\n\n## 고도화 분석\n\n### 가상 센서 값이 튀는 원인은 어느 입력 센서인가?\n\n- 보류\n"
+  }
+}

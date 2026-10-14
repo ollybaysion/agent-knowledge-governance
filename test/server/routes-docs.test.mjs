@@ -889,3 +889,82 @@ test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as writte
     await cleanup();
   }
 });
+
+test("golden-set: stored per agent, linked to its skill, rendered as written; the skill finds it as a backlink", async () => {
+  const { app, home, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const h = auth("edtok");
+  const skillMd = "# s\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### q1 — 조회\n\n```sql\nSELECT 1\n```\n";
+  const golden = (markdown, extra = {}) => ({
+    schema: "golden-set/v1",
+    id: "s",
+    keywords: [{ kw: "s golden", inject: "pointer" }],
+    status: "active",
+    ...extra,
+    body: { name: "s", markdown },
+  });
+  const ok = "# s 골든 셋\n\n## 일반 지식\n\n### a?\n\n- 조각: A\n\n## 데이터 설명\n\n### b?\n\n- 조회: q1\n";
+  try {
+    const noSkill = await app.inject({ method: "POST", url: "/api/docs/golden-set", headers: h, payload: golden(ok) });
+    assert.equal(noSkill.statusCode, 400);
+    assert.ok(noSkill.json().details.some((d) => d.includes("같은 id 의 domain-skill 문서가 없습니다")));
+    const noSkillDraft = await app.inject({
+      method: "POST",
+      url: "/api/docs/golden-set",
+      headers: h,
+      payload: golden(ok, { status: "inactive" }),
+    });
+    assert.equal(noSkillDraft.json().error, "unknown_link_target");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: h,
+      payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: skillMd } },
+    });
+    const badQuery = await app.inject({
+      method: "POST",
+      url: "/api/docs/golden-set",
+      headers: h,
+      payload: golden(ok.replace("조회: q1", "조회: q9")),
+    });
+    assert.equal(badQuery.statusCode, 400);
+    assert.ok(badQuery.json().details.some((d) => d.includes("없는 조회 id 입니다 — q9")));
+
+    const r = await app.inject({ method: "POST", url: "/api/docs/golden-set", headers: h, payload: golden(ok) });
+    assert.equal(r.statusCode, 201, r.body);
+    assert.deepEqual(r.json().json.links, [link("domain-skill", "s", "skill")]);
+    assert.deepEqual(r.json().warnings, ["## 설정 에 라인 · 설비가 없어 데이터 질문 1개를 돌릴 수 없습니다"]);
+    assert.equal(readFileSync(join(home, "store", "rendered", "golden-set", "s", "GOLDEN.md"), "utf8"), ok);
+
+    const skill = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    assert.deepEqual(skill.backlinks, [{ type: "golden-set", id: "s", rel: "skill", status: "active" }]);
+    assert.equal("warnings" in skill, false);
+
+    // An unknown 조각 path saves, with a warning; the skill link stays.
+    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/golden-set/s" })).json();
+    const edited = ok.replace("조각: A", "조각: 옛 제목").replace("# s 골든 셋", "# s 골든 셋\n\n## 설정\n\n- 라인: L1\n- 설비: E1");
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/docs/golden-set/s",
+      headers: { ...h, "if-match": rev },
+      payload: { name: "s", markdown: edited },
+    });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json().warnings, ['10행 "### a?": 스킬 md 의 ## 도메인 지식 에 없는 조각입니다 — 옛 제목']);
+    const got = (await app.inject({ method: "GET", url: "/api/docs/golden-set/s" })).json();
+    assert.deepEqual(got.warnings, put.json().warnings);
+
+    const links = await app.inject({
+      method: "PUT",
+      url: "/api/docs/golden-set/s/links",
+      headers: { ...h, "if-match": got.rev },
+      payload: { links: [] },
+    });
+    assert.deepEqual(links.json().json.links, [link("domain-skill", "s", "skill")]);
+
+    const list = (await app.inject({ method: "GET", url: "/api/docs?type=golden-set" })).json().docs;
+    assert.deepEqual(list.map((d) => [d.id, d.title, d.status]), [["s", "s", "active"]]);
+  } finally {
+    await cleanup();
+  }
+});

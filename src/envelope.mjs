@@ -14,6 +14,7 @@ import {
   skillSections,
 } from "./skill-sections.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
+import { checkGolden } from "./golden-set.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -28,6 +29,7 @@ const SCHEMA_FILES = {
   "screen-map/v1": "screen-map/v1.schema.json",
   "manual/v1": "manual/v1.schema.json",
   "voc/v1": "voc/v1.schema.json",
+  "golden-set/v1": "golden-set/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
 };
 
@@ -105,6 +107,7 @@ export function deriveId(schema, body) {
         : null;
     case "domain-skill/v1":
     case "voc/v1":
+    case "golden-set/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -131,6 +134,7 @@ const ID_SOURCE = {
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
   "voc/v1": () => "== body.name",
+  "golden-set/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
@@ -242,6 +246,24 @@ const SEMANTIC_CHECKS = {
   "voc/v1"(doc, errors) {
     checkDerivedId(doc, errors);
   },
+  // A golden set scores one agent, so the domain-skill of the same id must
+  // exist, and a 조회 must name a query that skill has. Whether the skill
+  // exists is a store question: the server passes `skillOf`, an offline caller
+  // does not and gets the md rules alone.
+  "golden-set/v1"(doc, errors, { skillOf } = {}) {
+    checkDerivedId(doc, errors);
+    if (typeof doc.body?.markdown !== "string") return;
+    let skill = null;
+    if (skillOf) {
+      skill = skillOf(doc.id);
+      if (!skill) {
+        fail(errors, `$.id: 같은 id 의 domain-skill 문서가 없습니다 — ${doc.id}`);
+        return;
+      }
+    }
+    for (const e of checkGolden(doc.body.markdown, skill?.body?.markdown ?? null).errors)
+      fail(errors, `$.body.markdown: ${e}`);
+  },
   "screen-map/v1"(doc, errors) {
     checkDerivedId(doc, errors);
     // A column named in both lists is a contradiction the schema cannot see:
@@ -352,12 +374,14 @@ function relaxedOf(schema) {
  * Validate a full document (envelope + body, or unclassified's flat meta).
  * @param {object} doc
  * @param {object} refs from loadSchemas()
- * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean}} [opts]
- *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists = the
- *   store lookup the manual check needs (omitted offline)
+ * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean,
+ *   skillOf?: (id: string) => object|null}} [opts]
+ *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists and
+ *   skillOf = the store lookups the manual and golden-set checks need
+ *   (omitted offline)
  * @returns {string[]} empty when valid
  */
-export function validateDocument(doc, refs, { draft = false, assetExists } = {}) {
+export function validateDocument(doc, refs, { draft = false, ...store } = {}) {
   const errors = [];
   if (!doc || typeof doc !== "object" || typeof doc.schema !== "string") {
     return ['$: missing or invalid "schema" field'];
@@ -404,7 +428,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
           `$.id: expected "${want}" (${ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body"}), got "${doc.id}"`,
         );
     } else {
-      SEMANTIC_CHECKS[doc.schema]?.(doc, errors, { assetExists });
+      SEMANTIC_CHECKS[doc.schema]?.(doc, errors, store);
     }
   }
   return errors;
@@ -414,11 +438,8 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
 // draft (relaxed — build it up over time), an active one must be complete. This
 // single rule is shared by every write route, and the activate route relies on
 // it as the completeness gate — flipping a doc to active re-runs the full schema.
-export function validateForStore(doc, refs, { assetExists } = {}) {
-  return validateDocument(doc, refs, {
-    draft: doc.status === "inactive",
-    assetExists,
-  });
+export function validateForStore(doc, refs, store = {}) {
+  return validateDocument(doc, refs, { ...store, draft: doc.status === "inactive" });
 }
 
 export function assertValidDocument(doc, refs, label = doc?.id ?? "document") {
