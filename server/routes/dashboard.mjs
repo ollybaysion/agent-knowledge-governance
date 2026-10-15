@@ -31,6 +31,12 @@ const FILES = {
     path: "sql-bind.mjs",
     type: "text/javascript; charset=utf-8",
   },
+  // The 그래프 screen's nodes, columns and reach — tested with node, run as is.
+  "/graph-model.mjs": {
+    dir: SRC_DIR,
+    path: "graph-model.mjs",
+    type: "text/javascript; charset=utf-8",
+  },
   "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
   // The server's own [[ ]] parser, so the page reads the brackets the way the
   // links were made. Served from src/ rather than copied into public/.

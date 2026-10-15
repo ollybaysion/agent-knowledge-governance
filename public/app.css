@@ -29,6 +29,10 @@
   --accent-soft: #e9e9fc;
   --teal-ink: #3f7d8a;
   --amber: #e8a55a;
+  /* 그래프 타입 색 — manual · screen-map · voc */
+  --violet-ink: #8a5fbf;
+  --rose-ink: #b05a8a;
+  --green-ink: #4e9a5a;
   /* semantic fill(공통) + ink(테마 보정) */
   --success: #5db872;
   --warning: #d4a017;
@@ -68,6 +72,9 @@
   --on-primary: #111120;
   --accent-soft: rgba(139, 147, 236, 0.18);
   --teal-ink: #5fb8c2;
+  --violet-ink: #b393e0;
+  --rose-ink: #d98bb7;
+  --green-ink: #7cc488;
   --success-ink: #5db872;
   --warning-ink: #d4a017;
   --orange-ink: #e8a55a;
@@ -3452,4 +3459,204 @@ button.chip.verify-path:hover {
 .slot-edit textarea.sk-md-edit {
   overflow: auto;
   resize: vertical;
+}
+
+/* ---- 그래프 (app.js renderGraph) ---- */
+.graph-tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+.graph-sel-chip {
+  font: inherit;
+  color: var(--primary);
+  background: var(--accent-soft);
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  padding: 1px 10px;
+  cursor: pointer;
+}
+.graph-ctl select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 1px 4px;
+}
+.graph-seg {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.graph-seg button {
+  font: inherit;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 0;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.graph-seg button + button {
+  border-left: 1px solid var(--hairline);
+}
+.graph-seg button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--surface-card);
+  font-weight: 600;
+}
+.graph-filter {
+  position: relative;
+}
+.graph-filter summary {
+  cursor: pointer;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 1px 8px;
+  background: var(--surface-soft);
+}
+.graph-filter-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--body);
+}
+.graph-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.graph-legend i {
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.graph-legend .sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--c);
+}
+.graph-legend .k-sub .sw {
+  background: var(--accent-soft);
+  border: 1px solid var(--c);
+}
+.graph-canvas {
+  overflow: auto;
+  padding: 8px 0;
+}
+.graph-svg {
+  display: block;
+  font-family: var(--sans);
+}
+.k-main,
+.k-sub {
+  --c: var(--primary);
+}
+.k-db-schema {
+  --c: var(--teal-ink);
+}
+.k-msg-format {
+  --c: var(--amber);
+  --on-c: #16162b;
+}
+.k-manual {
+  --c: var(--violet-ink);
+}
+.k-screen-map {
+  --c: var(--rose-ink);
+}
+.k-voc {
+  --c: var(--green-ink);
+}
+.g-col-h {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.g-node {
+  cursor: pointer;
+  outline: none;
+}
+.g-node .box {
+  fill: color-mix(in srgb, var(--c) 12%, var(--canvas));
+  stroke: var(--c);
+  stroke-width: 1;
+}
+.g-node.k-main .box {
+  fill: var(--c);
+}
+.g-node .tag {
+  fill: var(--c);
+}
+.g-node.k-main .tag {
+  fill: var(--primary-active);
+}
+.g-node .tag-t {
+  fill: var(--on-c, var(--on-primary));
+  font-size: 10px;
+  font-weight: 600;
+}
+.g-node .name {
+  fill: var(--ink);
+  font-size: 12px;
+}
+.g-node.k-main .name {
+  fill: var(--on-primary);
+}
+.g-node.sel .box {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--primary) 60%, transparent));
+}
+.g-node:focus-visible .box {
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+}
+.g-node.dim {
+  opacity: 0.35;
+}
+.g-edge {
+  fill: none;
+  stroke: var(--muted-soft);
+  stroke-width: 1.2;
+}
+.g-edge.scr {
+  stroke: var(--amber);
+  stroke-dasharray: 4 3;
+}
+.g-edge.on {
+  stroke: var(--primary);
+  stroke-width: 1.8;
+}
+.g-edge.scr.on {
+  stroke: var(--amber);
+}
+.g-edge.dim {
+  opacity: 0.35;
+}
+#g-arr path {
+  fill: var(--muted-soft);
+}
+#g-arr-on path {
+  fill: var(--primary);
+}
+#g-arr-scr path {
+  fill: var(--amber);
 }
