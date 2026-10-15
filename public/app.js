@@ -8,6 +8,21 @@
 
 const TOKEN_KEY = "akg_token";
 const THEME_KEY = "akg_theme";
+/** 왼쪽 트리에서 접어 둔 갈래 — 트리를 다시 그려도(저장 · 이동 · 새로고침) 접힌 채로 둔다. */
+const TREE_FOLD_KEY = "akg_tree_closed";
+function closedGroups() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(TREE_FOLD_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+function setGroupClosed(type, closed) {
+  const set = closedGroups();
+  if (closed) set.add(type);
+  else set.delete(type);
+  localStorage.setItem(TREE_FOLD_KEY, JSON.stringify([...set]));
+}
 let currentUser = null; // {id, role}
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
@@ -471,14 +486,16 @@ async function renderDocTree() {
       { class: "grp-items" },
       draftItems.concat(type === "domain-skill" ? skillTree(docs, docItem) : docs.map((d) => docItem(d))),
     );
-    const grp = el("div", { class: "grp" }, [
+    const grp = el("div", { class: closedGroups().has(type) ? "grp closed" : "grp" }, [
       el(
         "button",
         {
           type: "button",
           class: "grp-h",
-          onclick: (e) =>
-            e.currentTarget.closest(".grp").classList.toggle("closed"),
+          onclick: (e) => {
+            const closed = e.currentTarget.closest(".grp").classList.toggle("closed");
+            setGroupClosed(type, closed);
+          },
         },
         [
           el("span", { class: "chev", text: "▾" }),
