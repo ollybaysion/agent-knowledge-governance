@@ -63,6 +63,18 @@ test("GET /skill-sections.mjs serves the validator's own splitter, byte for byte
   await cleanup();
 });
 
+test("GET /graph-model.mjs serves src/graph-model.mjs, byte for byte, publicly", async () => {
+  const { app, cleanup } = await setup();
+  const res = await app.inject({ method: "GET", url: "/graph-model.mjs" });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers["content-type"], /javascript/);
+  assert.equal(
+    res.body,
+    readFileSync(new URL("../../src/graph-model.mjs", import.meta.url), "utf8"),
+  );
+  await cleanup();
+});
+
 test("GET /wikilinks.mjs serves the server's own [[ ]] parser, byte for byte, publicly", async () => {
   const { app, cleanup } = await setup();
   const res = await app.inject({ method: "GET", url: "/wikilinks.mjs" });
