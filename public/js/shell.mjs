@@ -3,7 +3,7 @@
 // search · who · 로그아웃) and the body columns. ?embed=1 draws none of it:
 // only the body column, for FE's drawer.
 import { $, el, icon } from "./dom.mjs";
-import { pushRecentAnswer } from "/lib/from-url.mjs";
+import { acceptFrom, pushRecentAnswer } from "/lib/from-url.mjs";
 import {
   THEME_KEY,
   answerId,
@@ -81,7 +81,8 @@ const ANSWERS_KEY = "akg_recent_answers";
 function recentAnswers() {
   try {
     const list = JSON.parse(localStorage.getItem(ANSWERS_KEY) || "[]");
-    return Array.isArray(list) ? list.filter((x) => typeof x?.url === "string") : [];
+    // Checked again on the way out: the FE address may have changed since.
+    return Array.isArray(list) ? list.filter((x) => typeof x?.url === "string" && acceptFrom(x.url, feUrl)) : [];
   } catch {
     return [];
   }
