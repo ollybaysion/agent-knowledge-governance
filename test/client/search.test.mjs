@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { searchDocs } from "../../public/search.mjs";
+import { searchDocs } from "../../public/lib/search.mjs";
 
 const order = ["db-schema", "domain-skill", "screen-map", "manual"];
 const docs = [

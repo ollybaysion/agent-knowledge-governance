@@ -31,65 +31,60 @@ test("GET / serves the dashboard shell, publicly, with a strict CSP header", asy
   assert.equal(res.statusCode, 200);
   assert.match(res.headers["content-type"], /text\/html/);
   assert.match(res.headers["content-security-policy"], /script-src 'self'/);
-  assert.ok(res.body.includes('<script src="/app.js">'));
+  assert.ok(res.body.includes('<script type="module" src="/js/main.mjs">'));
   await cleanup();
 });
 
-test("GET /app.js, /app.css and /search.mjs are served publicly with the right content types", async () => {
+test("GET /js/main.mjs, /app.css and /lib/search.mjs are served publicly with the right content types", async () => {
   const { app, cleanup } = await setup();
-  const js = await app.inject({ headers: as("reader"), method: "GET", url: "/app.js" });
+  const js = await app.inject({ headers: as("reader"), method: "GET", url: "/js/main.mjs" });
   assert.equal(js.statusCode, 200);
   assert.match(js.headers["content-type"], /javascript/);
+
+  const tab = await app.inject({ method: "GET", url: "/js/tabs/overview.mjs" });
+  assert.equal(tab.statusCode, 200);
+  assert.match(tab.headers["content-type"], /javascript/);
 
   const css = await app.inject({ headers: as("reader"), method: "GET", url: "/app.css" });
   assert.equal(css.statusCode, 200);
   assert.match(css.headers["content-type"], /css/);
 
-  const search = await app.inject({ headers: as("reader"), method: "GET", url: "/search.mjs" });
+  const search = await app.inject({ headers: as("reader"), method: "GET", url: "/lib/search.mjs" });
   assert.equal(search.statusCode, 200);
   assert.match(search.headers["content-type"], /javascript/);
   await cleanup();
 });
 
-test("GET /skill-sections.mjs serves the validator's own splitter, byte for byte, publicly", async () => {
+for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", "sql-bind"]) {
+  test(`GET /lib/shared/${name}.mjs serves src/${name}.mjs, byte for byte, publicly`, async () => {
+    const { app, cleanup } = await setup();
+    const res = await app.inject({ method: "GET", url: `/lib/shared/${name}.mjs` });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.headers["content-type"], /javascript/);
+    assert.equal(res.body, readFileSync(new URL(`../../src/${name}.mjs`, import.meta.url), "utf8"));
+    await cleanup();
+  });
+}
+
+test("/lib/shared/ serves only the listed modules, and only to GET", async () => {
   const { app, cleanup } = await setup();
-  const res = await app.inject({ headers: as("reader"), method: "GET", url: "/skill-sections.mjs" });
-  assert.equal(res.statusCode, 200);
-  assert.match(res.headers["content-type"], /javascript/);
-  assert.equal(
-    res.body,
-    readFileSync(new URL("../../src/skill-sections.mjs", import.meta.url), "utf8"),
-  );
+  for (const url of ["/lib/shared/validate.mjs", "/lib/shared/envelope.mjs", "/lib/shared/..%2Fserver%2Fapp.mjs"]) {
+    const res = await app.inject({ method: "GET", url });
+    assert.equal(res.statusCode, 404, url);
+  }
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    const res = await app.inject({ method, url: "/lib/shared/skill-sections.mjs", headers: as("t"), payload: "x" });
+    assert.equal(res.statusCode, 404, method);
+  }
   await cleanup();
 });
 
-test("GET /graph-model.mjs serves src/graph-model.mjs, byte for byte, publicly", async () => {
+test("/js/ and /lib/ refuse a path outside their folder", async () => {
   const { app, cleanup } = await setup();
-  const res = await app.inject({ headers: as("reader"), method: "GET", url: "/graph-model.mjs" });
-  assert.equal(res.statusCode, 200);
-  assert.match(res.headers["content-type"], /javascript/);
-  assert.equal(
-    res.body,
-    readFileSync(new URL("../../src/graph-model.mjs", import.meta.url), "utf8"),
-  );
-  await cleanup();
-});
-
-test("GET /wikilinks.mjs serves the server's own [[ ]] parser, byte for byte, publicly", async () => {
-  const { app, cleanup } = await setup();
-  const res = await app.inject({ headers: as("reader"), method: "GET", url: "/wikilinks.mjs" });
-  assert.equal(res.statusCode, 200);
-  assert.match(res.headers["content-type"], /javascript/);
-  assert.equal(res.body, readFileSync(new URL("../../src/wikilinks.mjs", import.meta.url), "utf8"));
-  await cleanup();
-});
-
-test("GET /verify-set.mjs serves the validator's own verification-set reader, byte for byte, publicly", async () => {
-  const { app, cleanup } = await setup();
-  const res = await app.inject({ headers: as("reader"), method: "GET", url: "/verify-set.mjs" });
-  assert.equal(res.statusCode, 200);
-  assert.match(res.headers["content-type"], /javascript/);
-  assert.equal(res.body, readFileSync(new URL("../../src/verify-set.mjs", import.meta.url), "utf8"));
+  for (const url of ["/js/../server/app.mjs", "/js/%2E%2E/server/app.mjs", "/lib/../../package.json", "/js/main.js", "/js/nope.mjs"]) {
+    const res = await app.inject({ method: "GET", url });
+    assert.equal(res.statusCode, 404, url);
+  }
   await cleanup();
 });
 
