@@ -168,15 +168,41 @@ export function listIds(dir, type) {
     .map((f) => f.slice(0, -".json".length));
 }
 
+/** The shape a git --author name must have here (users.json ids included). */
+export function isValidActor(actor) {
+  return typeof actor === "string" && ACTOR_RE.test(actor);
+}
+
 function authorString(actor) {
-  if (!ACTOR_RE.test(actor)) {
+  if (!isValidActor(actor)) {
     throw new StoreError(`유효하지 않은 actor: ${JSON.stringify(actor)}`, 400);
   }
   return `${actor} <${actor}@akg.local>`;
 }
 
+// Puts back what one failed commitFiles call changed: nothing stays staged,
+// files that existed go back to HEAD, files it created are removed. Without
+// this a failure after the write left the file on disk and in the index:
+// readJson served uncommitted content, the next commit swept it in under
+// another user's --author, and a restart was refused by assertClean.
+function rollback(dir, touched, created) {
+  const tracked = touched.filter((rel) => !created.has(rel));
+  try {
+    if (touched.length) git(dir, ["reset", "-q", "--", ...touched]);
+  } catch {}
+  try {
+    if (tracked.length) git(dir, ["checkout", "-q", "--", ...tracked]);
+  } catch {}
+  for (const rel of created) {
+    try {
+      rmSync(safeJoin(dir, rel), { force: true });
+    } catch {}
+  }
+}
+
 /**
  * One commit: write/remove a set of files, then `git commit --author`.
+ * On any failure the tree and index are put back as they were.
  * @param {string} dir store root
  * @param {{author: string, message: string, writes?: {relpath:string, content:string}[], removes?: string[]}} change
  * @returns {string} new HEAD rev
@@ -185,44 +211,54 @@ export function commitFiles(
   dir,
   { author, message, writes = [], removes = [] },
 ) {
+  // Checked before anything touches the tree.
+  const authorArg = authorString(author);
   const touched = [];
-  for (const { relpath, content } of writes) {
-    const p = safeJoin(dir, relpath);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, content);
-    touched.push(relpath);
-  }
-  // `removes` means "ensure absent", not "delete an existing file". A caller
-  // that keeps a derivative out of the tree (issue #7: an inactive doc's
-  // rendered md) cannot know whether it was ever written, and staging a path
-  // that never existed makes `git add` fail on the whole commit.
-  for (const relpath of removes) {
-    const p = safeJoin(dir, relpath);
-    if (!existsSync(p)) continue;
-    rmSync(p);
-    touched.push(relpath);
-  }
-  if (touched.length === 0) throw new StoreError("커밋할 변경이 없습니다", 400);
+  const created = new Set();
+  try {
+    for (const { relpath, content } of writes) {
+      const p = safeJoin(dir, relpath);
+      if (!existsSync(p)) created.add(relpath);
+      touched.push(relpath);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, content);
+    }
+    // `removes` means "ensure absent", not "delete an existing file". A caller
+    // that keeps a derivative out of the tree (issue #7: an inactive doc's
+    // rendered md) cannot know whether it was ever written, and staging a path
+    // that never existed makes `git add` fail on the whole commit.
+    for (const relpath of removes) {
+      const p = safeJoin(dir, relpath);
+      if (!existsSync(p)) continue;
+      touched.push(relpath);
+      rmSync(p);
+    }
+    if (touched.length === 0)
+      throw new StoreError("커밋할 변경이 없습니다", 400);
 
-  git(dir, ["add", "-A", "--", ...touched]);
+    git(dir, ["add", "-A", "--", ...touched]);
 
-  // Writing the same bytes back is a no-op, not an error. `git commit` fails
-  // on an empty index, which surfaced as a 500 on the most ordinary thing a
-  // producer does: re-push a document it did not change (a re-run factory, a
-  // retried CLI call). Idempotence is the honest answer — the document is
-  // already at this content, so nothing new happened to record.
-  //
-  // The rev returned is the one for the PATH, not HEAD: on a no-op, HEAD may
-  // belong to some other document's commit, and callers hand this rev
-  // straight back as the doc's rev — where If-Match compares it against
-  // revOfPath(). Returning HEAD would make the next edit 409 on a rev the
-  // client was just told was current.
-  if (isIndexEmpty(dir)) {
-    const primary = writes[0]?.relpath ?? touched[0];
-    return revOfPath(dir, primary);
+    // Writing the same bytes back is a no-op, not an error. `git commit` fails
+    // on an empty index, which surfaced as a 500 on the most ordinary thing a
+    // producer does: re-push a document it did not change (a re-run factory, a
+    // retried CLI call). Idempotence is the honest answer — the document is
+    // already at this content, so nothing new happened to record.
+    //
+    // The rev returned is the one for the PATH, not HEAD: on a no-op, HEAD may
+    // belong to some other document's commit, and callers hand this rev
+    // straight back as the doc's rev — where If-Match compares it against
+    // revOfPath(). Returning HEAD would make the next edit 409 on a rev the
+    // client was just told was current.
+    if (isIndexEmpty(dir)) {
+      const primary = writes[0]?.relpath ?? touched[0];
+      return revOfPath(dir, primary);
+    }
+    // S12: 커밋 메시지·author는 항상 spawn argv의 개별 원소로 전달 — shell 경유 금지.
+    git(dir, ["commit", "-q", "--author", authorArg, "-m", message]);
+  } catch (err) {
+    rollback(dir, touched, created);
+    throw err;
   }
-  // S12: 커밋 메시지·author는 항상 spawn argv의 개별 원소로 전달 — shell 경유 금지.
-  git(dir, ["commit", "-q", "--author", authorString(author), "-m", message]);
   const rev = git(dir, ["rev-parse", "HEAD"]).trim();
 
   const cache = cacheFor(dir);
