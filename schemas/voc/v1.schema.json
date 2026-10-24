@@ -2,10 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "voc/v1",
   "title": "voc/v1 body",
-  "description": "A VOC (voice of the customer) note: one Markdown document stored verbatim, the same shape as a domain-skill — `name` is the document id, `markdown` the author's text, `# <name>` by convention its first line. akg reads no section structure inside it; the only thing it takes from the text is its [[ ]] links (src/wikilinks.mjs). Rendered as-is to rendered/voc/<name>/VOC.md.",
+  "description": "A VOC (voice of the customer) note — the md body shape (md/v1): `name` is the document id, `markdown` the author's text, `# <name>` by convention its first line. Rendered as-is to rendered/voc/<name>/VOC.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "markdown"],
+  "required": [
+    "name",
+    "markdown"
+  ],
   "properties": {
     "name": {
       "type": "string",
@@ -15,7 +18,7 @@
     "markdown": {
       "type": "string",
       "pattern": "\\S",
-      "description": "The whole note as the author wrote it, stored and rendered byte-for-byte."
+      "description": "The whole document as the author wrote it, stored and rendered byte-for-byte."
     }
   }
 }

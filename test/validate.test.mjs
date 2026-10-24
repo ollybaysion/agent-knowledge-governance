@@ -349,26 +349,49 @@ test("whitespace-only strings are rejected by the \\S pattern", () => {
   assert.ok(errors.some((e) => e.includes("markdown")));
 });
 
-test("unclassified/v1: valid sidecar meta (no body key) passes", () => {
+test("unclassified/v1: an md body { name, markdown } passes", () => {
   const doc = {
     schema: "unclassified/v1",
     id: "deploy-guide",
     keywords: [{ kw: "deploy", inject: "pointer" }],
     status: "active",
+    body: { name: "deploy-guide", markdown: "# deploy-guide\n\n글\n" },
   };
   assert.deepEqual(validateDocument(doc, refs), []);
 });
 
-test("unclassified/v1: a body key is rejected (only 4 envelope keys apply here)", () => {
-  const doc = {
+test("unclassified/v1: the old sidecar meta (no body) is rejected, and the id is body.name", () => {
+  const meta = {
     schema: "unclassified/v1",
     id: "deploy-guide",
     keywords: [{ kw: "deploy", inject: "pointer" }],
     status: "active",
-    body: { text: "should not exist here" },
   };
-  const errors = validateDocument(doc, refs);
-  assert.ok(errors.some((e) => e.includes("body")));
+  assert.ok(validateDocument(meta, refs).some((e) => e.includes('"body"')));
+  const renamed = { ...meta, body: { name: "other", markdown: "글" } };
+  assert.ok(validateDocument(renamed, refs).some((e) => e.includes("== body.name")));
+});
+
+test("a registered md type validates against md/v1 only when it is named as md", () => {
+  const doc = {
+    schema: "meeting-notes2/v1",
+    id: "w1",
+    keywords: [{ kw: "w1", inject: "pointer" }],
+    status: "active",
+    body: { name: "w1", markdown: "# w1\n" },
+  };
+  assert.deepEqual(validateDocument(doc, refs, { mdTypes: ["meeting-notes2"] }), []);
+  assert.match(validateDocument(doc, refs)[0], /unknown schema version/);
+  const bad = { ...doc, body: { name: "w1", markdown: "# w1\n", extra: 1 } };
+  assert.ok(validateDocument(bad, refs, { mdTypes: ["meeting-notes2"] }).some((e) => e.includes("extra")));
+});
+
+test("origin: an http(s) url and an optional non-empty title", () => {
+  const doc = (origin) => ({ ...fabLineDoc(), origin });
+  assert.deepEqual(validateDocument(doc({ url: "https://wiki.example/x?y=1" }), refs), []);
+  assert.deepEqual(validateDocument(doc({ url: "http://host", title: "원본" }), refs), []);
+  for (const origin of [{ url: "ftp://host/x" }, { url: "" }, { url: "https://" }, { title: "t" }, { url: "https://h", title: " " }, { url: "https://h", x: 1 }])
+    assert.ok(validateDocument(doc(origin), refs).some((e) => e.startsWith("$.origin")), JSON.stringify(origin));
 });
 
 // fab-line — reference data a consumer turns into a closed choice. One doc per
@@ -405,13 +428,14 @@ test("keywords: Hangul syllables pass, upper-case Latin is still refused", () =>
       kw,
     );
   }
-  const meta = {
+  const md = {
     schema: "unclassified/v1",
     id: "deploy-guide",
     keywords: [{ kw: "배포", inject: "pointer" }],
     status: "active",
+    body: { name: "deploy-guide", markdown: "글" },
   };
-  assert.deepEqual(validateDocument(meta, refs), []);
+  assert.deepEqual(validateDocument(md, refs), []);
 });
 
 test("fab-line: an id that is not lower(code) is rejected", () => {

@@ -1,27 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "unclassified/v1",
-  "title": "unclassified/v1 sidecar meta",
-  "description": "agent-knowledge-governance-json-spec.md §4.5 — the only type whose truth is md, not JSON. This schema validates the WHOLE sidecar meta document (envelope fields inlined, no body key) — unlike the other types, where the type schema validates only envelope.body.",
+  "title": "unclassified/v1 body",
+  "description": "A document nobody has given a type yet — the md body shape (md/v1). Rendered as-is to rendered/unclassified/<name>.md; an admin moves it to an md type with POST /api/docs/unclassified/<id>/retype.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "id", "keywords", "status"],
+  "required": [
+    "name",
+    "markdown"
+  ],
   "properties": {
-    "schema": { "const": "unclassified/v1" },
-    "id": { "type": "string", "pattern": "^[a-z0-9._-]+$" },
-    "keywords": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["kw", "inject"],
-        "properties": {
-          "kw": { "type": "string", "pattern": "^[a-z0-9_. 가-힣-]+$" },
-          "inject": { "type": "string", "enum": ["full", "pointer"] }
-        }
-      }
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Document name = document id = rendered/unclassified/<name>.md."
     },
-    "status": { "type": "string", "enum": ["active", "inactive", "archived"] }
+    "markdown": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The whole document as the author wrote it, stored and rendered byte-for-byte."
+    }
   }
 }
