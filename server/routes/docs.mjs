@@ -72,6 +72,22 @@ function titleOf(doc) {
   return b.title ?? b.name ?? b.table ?? b.command ?? null;
 }
 
+// X-AKG-Note: what the editor saved ("절 저장: 도메인 지식"), URI-encoded since a
+// header carries no Hangul. One line, no control characters, 80 characters at
+// most; anything else is dropped.
+export function commitNote(raw) {
+  if (typeof raw !== "string" || raw === "") return null;
+  let text;
+  try {
+    text = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  text = text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
 function priorityOf(user) {
   return user.group === "agent" ? "agent" : "human";
 }
@@ -500,9 +516,10 @@ export function registerDocsRoutes(app) {
           const conflict = dataIdConflict(newDoc);
           if (conflict) return conflict;
 
+          const note = commitNote(request.headers["x-akg-note"]);
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
-            message: `edit ${type}/${id}`,
+            message: note ? `edit ${type}/${id} · ${note}` : `edit ${type}/${id}`,
           });
           return {
             status: 200,
