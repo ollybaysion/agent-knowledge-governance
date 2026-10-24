@@ -7,7 +7,6 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import {
-  STATUS_LABEL,
   evidence,
   getSlot,
   inactiveBar,
@@ -15,13 +14,12 @@ import {
   roleChip,
   setSlot,
   shortRev,
-  statusBadge,
   statusChip,
   tierBadge,
   wordDiff,
 } from "../shared.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
-import { answerSection, activeMdTypes, canEdit as userCanEdit, currentUser, isAdmin, isMdType, loadTypes, setLastDoc, TYPE_LABEL, typeColor } from "../state.mjs";
+import { answerSection, activeMdTypes, embed, canEdit as userCanEdit, currentUser, isAdmin, isMdType, loadTypes, setLastDoc, TYPE_LABEL, typeColor } from "../state.mjs";
 import { agentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
@@ -172,7 +170,7 @@ async function buildBody(ctx, host) {
 // ---------- 머리 ----------
 function docHead(ctx, title, isAgent, { toggleJson }) {
   const { type, doc, rev, canEdit, reload } = ctx;
-  const admin = isAdmin();
+  const admin = isAdmin() && !embed;
   const role = type === "domain-skill" ? doc.role ?? "main" : null;
   const sub = type === "domain-skill" ? summaryOf(doc.body?.markdown) : type === "db-schema" || type === "msg-format" ? doc.body?.purpose?.text ?? "" : type === "screen-map" ? [doc.body?.program, ...(doc.body?.menuPath ?? [])].filter(Boolean).join(" › ") : "";
   async function statusAction() {
@@ -230,7 +228,8 @@ function stickyHead(head) {
   const h1 = head.querySelector(".doc-title");
   const bar = head.querySelector(".doc-bar");
   if (!h1 || !bar || typeof IntersectionObserver === "undefined") return;
-  new IntersectionObserver(([e]) => bar.classList.toggle("stuck", !e.isIntersecting), { rootMargin: "-120px 0px 0px 0px" }).observe(h1);
+  const offset = embed ? 44 : 110;
+  new IntersectionObserver(([e]) => bar.classList.toggle("stuck", !e.isIntersecting), { rootMargin: `-${offset}px 0px 0px 0px` }).observe(h1);
 }
 
 function retypeMenu(ctx) {
@@ -453,7 +452,7 @@ function factsBody(ctx, host, doc) {
 // same slot opens the side-by-side reconcile card.
 function slotBody(ctx, host) {
   const { type, id, canEdit, reload } = ctx;
-  const canApprove = isAdmin();
+  const canApprove = isAdmin() && !embed;
   const slots = ctx.data.slots;
   let editingAddr = null;
   let editBuf = null;

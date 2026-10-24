@@ -4,13 +4,13 @@
 // which folds to a 48 band from the handle on its right edge.
 import { allDocs, api } from "../api.mjs";
 import { $, el, icon } from "../dom.mjs";
-import { newDocButton } from "../drafts.mjs";
+import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
 import { docRows, move, rowTier, typeRows } from "/lib/miller.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { shortRev, tierBadge } from "../shared.mjs";
-import { cols, panel, screen, setActiveTab, setCrumbs } from "../shell.mjs";
+import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, typeColor } from "../state.mjs";
 
 const enc = encodeURIComponent;
@@ -47,6 +47,21 @@ function docRow(d, { on, id }) {
   ]);
 }
 
+/** This browser's unsaved drafts of a type, as links ("(빈 문서)" until named). */
+export function draftLinks(type, { role = null, current = null } = {}) {
+  const drafts = draftsOfType(type).filter((d) => !role || (d.body.role ?? "main") === role);
+  if (!drafts.length) return null;
+  let unnamed = 0;
+  return el("ul", { class: "mlist drafts", "aria-label": "드래프트" }, drafts.map((d) => {
+    const id = deriveDraftId(type, d.body);
+    const label = id || (++unnamed === 1 ? "(빈 문서)" : `(빈 문서${unnamed})`);
+    return el("li", {}, el("a", { class: `mrow draft${d.localId === current ? " on" : ""}`, href: `#/draft/${type}/${d.localId}` }, [
+      el("span", { class: `mrow-name${id ? " mono" : " dim"}`, text: label }),
+      el("span", { class: "df-badge", text: "드래프트" }),
+    ]));
+  }));
+}
+
 // ---------- 경로 열 ----------
 const FOLD_KEY = "akg_path_folded";
 const folded = () => {
@@ -65,7 +80,7 @@ function setFolded(v) {
 }
 
 /** The path column of an open document: {node, collapsed, bind(layout)}. */
-export function pathPanel(type, id, docs) {
+export function pathPanel(type, id, docs, draftId = null) {
   const rows = docRows(docs, type);
   const color = typeColor(type);
   const node = el("aside", { class: "panel left path-panel", "aria-label": "같은 타입 문서" });
@@ -120,7 +135,7 @@ export function pathPanel(type, id, docs) {
         el("span", {}, [el("span", { class: "tdot", style: { "--c": color } }), ` ${typeLabel(type)} `, el("span", { class: "count-pill", text: String(rows.length) })]),
         el("span", { class: "dim", text: "최근 수정 순" }),
       ]),
-      el("div", { class: "panel-scroll" }, [list, el("p", { class: "dim path-hint", text: "같은 타입 문서 — ↑ ↓ 로 옮기고 ↩ 로 엽니다." })]),
+      el("div", { class: "panel-scroll" }, [draftLinks(type, { current: draftId }), list, el("p", { class: "dim path-hint", text: "같은 타입 문서 — ↑ ↓ 로 옮기고 ↩ 로 엽니다." })]),
       el("div", { class: "panel-foot" }, newDocButton()),
       handle,
     );
@@ -245,6 +260,7 @@ export async function renderBrowse(pickType = null) {
         el("span", { class: "sp" }),
         el("span", { class: "dim", text: "최근 수정 순" }),
       ]),
+      draftLinks(type) ?? document.createTextNode(""),
       list.length
         ? el("ul", { class: "mlist" }, list.map((d, i) => {
             const on = picked ? picked.id === d.id : state.i2 === i;

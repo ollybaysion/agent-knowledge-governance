@@ -6,6 +6,7 @@ import { el, icon, toast } from "./dom.mjs";
 import { dataIdConflictText } from "./shared.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "./shell.mjs";
 import { TYPES, TYPE_LABEL, canUpload as userCanUpload, isAdmin, isMdType, loadTypes, typeColor } from "./state.mjs";
+import { agentPanel } from "./tabs/agents.mjs";
 import { pathPanel } from "./tabs/docs.mjs";
 
 export function canCreate() {
@@ -216,9 +217,9 @@ export async function renderDraftScreen(type, localId) {
   );
   const docs = await allDocs();
   const main = el("main", { class: "main draft-main" });
-  const left = pathPanel(type, null, docs);
+  const left = isAgent ? { node: agentPanel(null, localId) } : pathPanel(type, null, docs, localId);
   const layout = cols({ left: left.node, main, className: left.collapsed ? "collapsed" : "" });
-  left.bind(layout);
+  left.bind?.(layout);
   screen().appendChild(layout);
   paintDraft(main, type, localId, body);
 }

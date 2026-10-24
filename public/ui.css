@@ -157,9 +157,14 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  min-width: 0;
+  flex: none;
   color: var(--muted);
   font-size: 13.5px;
+  white-space: nowrap;
+}
+.crumbs li.crumb-last {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .crumbs li .ic {
   color: var(--muted-soft);
@@ -475,7 +480,7 @@ body.embed .body {
 body.embed .cols > .main {
   max-width: none;
 }
-body.embed .doc-head {
+body.embed .doc-bar {
   top: 0;
 }
 
@@ -3166,4 +3171,21 @@ h6.md-h {
 }
 .cols > .main.wide {
   padding-top: 0;
+}
+.mlist.drafts {
+  padding-bottom: 0;
+}
+a.mrow.draft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  border-style: dashed;
+  border-color: var(--hairline);
+}
+
+@media (max-width: 1099px) {
+  .crumbs li:not(.crumb-root):not(.crumb-last) {
+    display: none;
+  }
 }

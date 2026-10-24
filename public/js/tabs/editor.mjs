@@ -318,7 +318,7 @@ export async function renderEditor(type, id, focusKey) {
     status.replaceChildren(
       el("span", { class: `chip ${n ? "warnchip" : ""}`, text: n ? `저장 안 됨 · 바뀐 절 ${n}` : "저장됨" }),
     );
-    bottomInfo.replaceChildren(el("b", { text: `바뀐 절 ${n}` }), names.length ? el("span", { class: "dim", text: ` · ${names.join(" · ")}` }) : null);
+    bottomInfo.replaceChildren(el("b", { text: `바뀐 절 ${n}` }), ...(names.length ? [el("span", { class: "dim", text: ` · ${names.join(" · ")}` })] : []));
     saveDocBtn.disabled = !n || conflict;
   }
 
@@ -452,20 +452,15 @@ export async function renderEditor(type, id, focusKey) {
     paintBand();
     for (const btn of seg.children) btn.setAttribute("aria-pressed", String(btn.textContent === { src: "원문", both: "나란히", preview: "미리보기" }[view]));
     panes.className = `ed-panes view-${view}`;
-    panes.replaceChildren(
-      view !== "preview"
-        ? el("div", { class: "ed-pane ed-src-pane" }, [
-            el("div", { class: "ed-pane-h" }, [el("b", { text: "md 원문 · 절 블록" }), el("span", { class: "dim mono", text: `${id}.md` }), el("span", { class: "sp" }), cursorPos]),
-            el("div", { class: "ed-pane-b" }, srcList),
-          ])
-        : null,
-      view !== "src"
-        ? el("div", { class: "ed-pane ed-pv-pane" }, [
-            el("div", { class: "ed-pane-h" }, [el("b", { text: "미리보기" }), el("span", { class: "dim", text: "같은 절 경계 · 커서 절이 켜짐 · 절을 누르면 원문이 열림" })]),
-            el("div", { class: "ed-pane-b" }, preview),
-          ])
-        : null,
-    );
+    const srcPane = el("div", { class: "ed-pane ed-src-pane" }, [
+      el("div", { class: "ed-pane-h" }, [el("b", { text: "md 원문 · 절 블록" }), el("span", { class: "dim mono", text: `${id}.md` }), el("span", { class: "sp" }), cursorPos]),
+      el("div", { class: "ed-pane-b" }, srcList),
+    ]);
+    const pvPane = el("div", { class: "ed-pane ed-pv-pane" }, [
+      el("div", { class: "ed-pane-h" }, [el("b", { text: "미리보기" }), el("span", { class: "dim", text: "같은 절 경계 · 커서 절이 켜짐 · 절을 누르면 원문이 열림" })]),
+      el("div", { class: "ed-pane-b" }, preview),
+    ]);
+    panes.replaceChildren(...(view === "src" ? [srcPane] : view === "preview" ? [pvPane] : [srcPane, pvPane]));
   }
   paint();
   if (focusKey) requestAnimationFrame(() => focusBlock(focusKey));

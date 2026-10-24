@@ -7,11 +7,12 @@ import { startDraft } from "../drafts.mjs";
 import { cols, panel, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { canEdit } from "../state.mjs";
 import { scoreDot } from "./doc-panel.mjs";
+import { draftLinks } from "./docs.mjs";
 
 export const isMain = (d) => d.type === "domain-skill" && (d.role ?? "main") === "main";
 
 /** The agent list panel; `selected` = the open agent's id. */
-export function agentPanel(selected) {
+export function agentPanel(selected, draftId = null) {
   const list = el("ul", { class: "alist", "aria-label": "에이전트" });
   const count = el("span", { class: "count-pill" });
   const search = el("input", { type: "search", class: "psearch", placeholder: "에이전트 찾기 — id · 이름", "aria-label": "에이전트 찾기", autocomplete: "off" });
@@ -53,7 +54,7 @@ export function agentPanel(selected) {
   return panel("left agent-panel", [
     el("div", { class: "psearch-w" }, [icon("search", 15), search]),
     el("div", { class: "plabel agent-h" }, [el("span", {}, ["에이전트 ", count]), el("span", { class: "dim mono", text: "domain-skill · main" })]),
-    el("div", { class: "panel-scroll" }, list),
+    el("div", { class: "panel-scroll" }, [draftLinks("domain-skill", { role: "main", current: draftId }), list]),
     el("div", { class: "panel-foot" }, [
       el("div", { class: "legend-score" }, [
         el("span", { class: "dim", text: "점 = Score 구간" }),

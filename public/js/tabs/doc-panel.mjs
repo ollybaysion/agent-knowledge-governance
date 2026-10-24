@@ -324,7 +324,7 @@ export function docPanel(ctx) {
       box.replaceChildren(
         el("div", { class: "plabel", text: "최근 이력" }),
         historyRows.length ? el("ul", { class: "plist" }, historyRows.slice(0, 3).map(histLine)) : el("p", { class: "dim pnone", text: "기록이 없습니다." }),
-        historyRows.length ? el("button", { type: "button", class: "linkbtn", text: "이력 전부 보기", onclick: () => show("history") }) : null,
+        ...(historyRows.length ? [el("button", { type: "button", class: "linkbtn", text: "이력 전부 보기", onclick: () => show("history") })] : []),
       );
     });
     return box;

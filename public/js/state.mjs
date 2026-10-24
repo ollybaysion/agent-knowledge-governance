@@ -59,8 +59,8 @@ export function setUser(user, csrf) {
   csrfToken = csrf;
 }
 export const isAdmin = () => currentUser?.group === "admin";
-/** Writes to a document (PUT · links · role · status) are admin's, as the server has them. */
-export const canEdit = () => isAdmin();
+/** Writes to a document (PUT · links · role · status) are admin's, as the server has them; FE's drawer (?embed=1) only reads. */
+export const canEdit = () => isAdmin() && !embed;
 /** 타입 없이 올리기 is open to every person who writes. */
 export const canUpload = () => currentUser?.group === "admin" || currentUser?.group === "user";
 

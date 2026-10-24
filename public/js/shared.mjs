@@ -1,6 +1,6 @@
 import { api } from "./api.mjs";
 import { $, el, toast } from "./dom.mjs";
-import { TIER_ABBR, TIER_LABEL, TYPE_LABEL, activeMdTypes, currentUser, isMdType } from "./state.mjs";
+import { TIER_ABBR, TIER_LABEL } from "./state.mjs";
 
 // ---------- slot address helpers (mirror server/slots.mjs) ----------
 export function getSlot(body, address) {
