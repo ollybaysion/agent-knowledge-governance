@@ -26,7 +26,7 @@ function walk(schema, path, body, onSlot) {
   if (schema.type === "object") {
     if (schema.properties && body && typeof body === "object") {
       for (const [key, sub] of Object.entries(schema.properties)) {
-        if (key in body)
+        if (Object.hasOwn(body, key))
           walk(sub, [...path, { k: "key", v: key }], body[key], onSlot);
       }
     }
@@ -37,7 +37,8 @@ function walk(schema, path, body, onSlot) {
       typeof body === "object"
     ) {
       for (const key of Object.keys(body)) {
-        if (schema.properties && key in schema.properties) continue;
+        if (schema.properties && Object.hasOwn(schema.properties, key))
+          continue;
         walk(
           schema.additionalProperties,
           [...path, { k: "key", v: key }],
@@ -78,21 +79,51 @@ function parseAddress(address) {
   return tokens;
 }
 
+// An address walks the body's own data, never the prototype chain behind it.
+// `cur[key]` alone let a proposal slot "__proto__.public" write onto
+// Object.prototype, which made `cfg.public` true for every route.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isForbidden(tok) {
+  return FORBIDDEN_KEYS.has(String(tok.v));
+}
+
+function hasOwnChild(cur, tok) {
+  return (
+    cur !== null &&
+    typeof cur === "object" &&
+    !isForbidden(tok) &&
+    Object.hasOwn(cur, tok.v)
+  );
+}
+
 /** Read the tiered-value (or undefined) at `address` in `body`. */
 export function getSlot(body, address) {
   let cur = body;
   for (const tok of parseAddress(address)) {
-    if (cur == null) return undefined;
+    if (!hasOwnChild(cur, tok)) return undefined;
     cur = cur[tok.v];
   }
   return cur;
 }
 
-/** Write a tiered-value at `address` in `body` (mutates body). Parent path must exist. */
+/**
+ * Write a tiered-value at `address` in `body` (mutates body). Parent path must
+ * exist as own properties. Throws TypeError otherwise, and on any
+ * `__proto__` / `constructor` / `prototype` token.
+ */
 export function setSlot(body, address, value) {
   const tokens = parseAddress(address);
+  if (tokens.length === 0 || tokens.some(isForbidden))
+    throw new TypeError(`쓸 수 없는 슬롯 주소: ${address}`);
   let cur = body;
-  for (let i = 0; i < tokens.length - 1; i++) cur = cur[tokens[i].v];
+  for (const tok of tokens.slice(0, -1)) {
+    if (!hasOwnChild(cur, tok))
+      throw new TypeError(`슬롯 주소의 부모가 없습니다: ${address}`);
+    cur = cur[tok.v];
+  }
+  if (cur === null || typeof cur !== "object")
+    throw new TypeError(`슬롯 주소의 부모가 객체가 아닙니다: ${address}`);
   cur[tokens[tokens.length - 1].v] = value;
 }
 

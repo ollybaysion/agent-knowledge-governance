@@ -81,6 +81,18 @@ test("additionalProperties:false rejects an unknown key inside body", () => {
   assert.ok(errors.some((e) => e.includes("notARealField")));
 });
 
+test("additionalProperties:false rejects a body key named after an Object.prototype member", () => {
+  for (const key of ["constructor", "toString", "hasOwnProperty"]) {
+    const doc = minimalDbSchemaDoc();
+    doc.body[key] = 1;
+    const errors = validateDocument(doc, refs);
+    assert.ok(
+      errors.some((e) => e.includes(`unknown key "${key}"`)),
+      `${key}: ${errors.join("; ")}`,
+    );
+  }
+});
+
 test("additionalProperties:false rejects an unknown key inside a tiered value", () => {
   const doc = minimalDbSchemaDoc();
   doc.body.purpose.confidence = 0.9;

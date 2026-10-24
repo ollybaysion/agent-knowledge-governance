@@ -95,10 +95,13 @@ function checkObjectConstraints(schema, data, path, refs, errors) {
   if (typeOf(data) !== "object") return;
   const props = schema.properties ?? {};
   for (const key of schema.required ?? []) {
-    if (!(key in data)) errors.push(`${path}: missing required key "${key}"`);
+    if (!Object.hasOwn(data, key))
+      errors.push(`${path}: missing required key "${key}"`);
   }
   for (const [key, value] of Object.entries(data)) {
-    if (key in props) {
+    // Own keys only: `"constructor" in props` is true for any plain object,
+    // so a body key named constructor skipped additionalProperties.
+    if (Object.hasOwn(props, key)) {
       validateNode(props[key], value, `${path}.${key}`, refs, errors);
       continue;
     }
@@ -122,9 +125,9 @@ function checkObjectConstraints(schema, data, path, refs, errors) {
   for (const [trigger, deps] of Object.entries(
     schema.dependentRequired ?? {},
   )) {
-    if (trigger in data) {
+    if (Object.hasOwn(data, trigger)) {
       for (const dep of deps) {
-        if (!(dep in data)) {
+        if (!Object.hasOwn(data, dep)) {
           errors.push(
             `${path}: "${trigger}" present requires "${dep}" (dependentRequired)`,
           );
