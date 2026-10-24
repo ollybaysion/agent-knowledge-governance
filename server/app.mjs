@@ -19,6 +19,8 @@ import {
 import { openAuth } from "./identity.mjs";
 import { CSRF_HEADER } from "./session.mjs";
 import { createQueue } from "./queue.mjs";
+import { createTypes } from "./types.mjs";
+import { registerTypesRoutes } from "./routes/types.mjs";
 import { registerDocsRoutes } from "./routes/docs.mjs";
 import { registerPromoteRoutes } from "./routes/promote.mjs";
 import { registerProposalsRoutes } from "./routes/proposals.mjs";
@@ -54,6 +56,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   const refs = loadSchemas(schemasDir);
   const contracts = loadContractSchemas(schemasDir);
   const queue = createQueue();
+  const types = createTypes(storeDir, refs);
 
   // nginx on the same host forwards every request from 127.0.0.1. The
   // failed-auth rate limit keys on request.ip, so without trusting that
@@ -66,7 +69,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     trustProxy: "loopback",
   });
 
-  app.decorate("akg", { storeDir, auth, refs, contracts, queue });
+  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types });
   app.addHook("onClose", () => auth.close());
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
@@ -158,6 +161,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
 
   registerDashboardRoutes(app);
   registerMiscRoutes(app);
+  registerTypesRoutes(app);
   registerDocsRoutes(app);
   registerAssetsRoutes(app);
   registerPromoteRoutes(app);
