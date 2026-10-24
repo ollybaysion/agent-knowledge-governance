@@ -8,7 +8,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
+import {
+  syncMirror,
+  AkgSyncError,
+  REJECTED,
+  listedTypeIds,
+} from "../src/mirror/sync.mjs";
 import { installSkills } from "../src/mirror/install-skills.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
@@ -19,6 +24,19 @@ const USAGE = `usage:
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
 `;
+
+// The types a proposal can name: the server's list as of the last sync, or
+// the ones this CLI ships with when the mirror has no list.
+const BUILTIN_TYPES = [
+  "db-schema",
+  "msg-format",
+  "domain-skill",
+  "screen-map",
+  "manual",
+  "fab-line",
+  "voc",
+  "unclassified",
+];
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
@@ -221,7 +239,7 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
   }
 }
 
-async function runPropose(positional, token, serverUrl) {
+async function runPropose(positional, token, serverUrl, mirrorDir) {
   const [spec, proposalPath] = positional;
   const slashIdx = spec ? spec.indexOf("/") : -1;
   if (!spec || slashIdx <= 0 || !proposalPath) {
@@ -230,6 +248,13 @@ async function runPropose(positional, token, serverUrl) {
   }
   const type = spec.slice(0, slashIdx);
   const id = spec.slice(slashIdx + 1);
+  const known = listedTypeIds(mirrorDir) ?? BUILTIN_TYPES;
+  if (!known.includes(type)) {
+    process.stderr.write(
+      `akg propose: 모르는 타입 "${type}" (아는 타입: ${known.join(", ")})\n`,
+    );
+    process.exit(1);
+  }
   const parsed = readJsonFile(proposalPath, "proposal file");
   const slots = parsed?.slots;
   if (
@@ -315,7 +340,8 @@ async function main() {
   }
 
   if (cmd === "sync") await runSync(flags, mirrorDir, token, serverUrl);
-  else if (cmd === "propose") await runPropose(positional, token, serverUrl);
+  else if (cmd === "propose")
+    await runPropose(positional, token, serverUrl, mirrorDir);
   else await runCatalogPush(positional, token, serverUrl);
 }
 

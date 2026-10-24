@@ -59,6 +59,24 @@ const ALLOWED_TYPE_DIRS = new Set([
   "unclassified",
 ]);
 
+// The server's type list, rendered/types.json, sits beside the type folders.
+const TYPES_FILE = "types.json";
+const TYPE_ID_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * The type ids `dir/types.json` lists (a bundle being installed, or the
+ * mirror), or null when the file is absent or unreadable — an older server.
+ */
+export function listedTypeIds(dir) {
+  try {
+    const { types } = JSON.parse(readFileSync(join(dir, TYPES_FILE), "utf8"));
+    if (!Array.isArray(types)) return null;
+    return types.map((t) => t?.id).filter((id) => typeof id === "string" && TYPE_ID_RE.test(id));
+  } catch {
+    return null;
+  }
+}
+
 function readLocalRev(mirrorDir) {
   try {
     const meta = JSON.parse(readFileSync(join(mirrorDir, "meta.json"), "utf8"));
@@ -101,11 +119,14 @@ function assertSafeEntries(names) {
 }
 
 // S11 zip-slip defense, step 2 (defense in depth, post-extraction): only
-// known type folders may appear at the mirror's top level.
+// known type folders may appear at the mirror's top level — the ones above
+// and the ones the bundle's own types.json lists.
 function assertKnownTopLevel(dir) {
-  for (const entry of readdirSync(dir)) {
-    if (!ALLOWED_TYPE_DIRS.has(entry)) {
-      throw new AkgSyncError(`unexpected top-level entry in bundle: ${entry}`, {
+  const allowed = new Set([...ALLOWED_TYPE_DIRS, ...(listedTypeIds(dir) ?? [])]);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === TYPES_FILE && entry.isFile()) continue;
+    if (!allowed.has(entry.name)) {
+      throw new AkgSyncError(`unexpected top-level entry in bundle: ${entry.name}`, {
         code: REJECTED,
       });
     }
