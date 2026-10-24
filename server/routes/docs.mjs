@@ -85,7 +85,7 @@ function titleOf(doc) {
 }
 
 function priorityOf(user) {
-  return user.role === "agent" ? "agent" : "human";
+  return user.group === "agent" ? "agent" : "human";
 }
 
 export function registerDocsRoutes(app) {
@@ -116,7 +116,7 @@ export function registerDocsRoutes(app) {
 
   app.get(
     "/api/docs",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request) => {
       const { type, tier, q } = request.query ?? {};
       const types = type ? [type] : DOC_TYPES;
@@ -150,7 +150,7 @@ export function registerDocsRoutes(app) {
 
   app.get(
     "/api/docs/:type/:id",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       // Only a document type names a document; score/<agent> and
@@ -196,7 +196,7 @@ export function registerDocsRoutes(app) {
   const verificationSets = new Map(); // id -> {key, set}
   app.get(
     "/api/docs/domain-skill/:id/verification-set",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { id } = request.params;
       const relpath = `domain-skill/${id}.json`;
@@ -227,7 +227,7 @@ export function registerDocsRoutes(app) {
   // commit, through the same checks a document PUT runs.
   app.put(
     "/api/docs/domain-skill/:id/verification-set",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { id } = request.params;
       if (!isValidId(id)) return reply.code(400).send({ error: "invalid_path_param", param: "id" });
@@ -306,7 +306,7 @@ export function registerDocsRoutes(app) {
   // paths, this skill's and its LINK1 · LINK2 skills'.
   app.get(
     "/api/docs/domain-skill/:id/verification-choices",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { id } = request.params;
       if (!isValidId(id)) return reply.code(400).send({ error: "invalid_path_param", param: "id" });
@@ -320,7 +320,7 @@ export function registerDocsRoutes(app) {
 
   app.post(
     "/api/docs/:type",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type } = request.params;
       const schemaId = `${type}/v1`;
@@ -387,7 +387,7 @@ export function registerDocsRoutes(app) {
 
   app.put(
     "/api/docs/:type/:id",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       const bodySchema = refs[`${type}/v1`];
@@ -508,7 +508,7 @@ export function registerDocsRoutes(app) {
   // decision to inject stays where #7 put it, with an approver.
   app.post(
     "/api/docs/:type/batch",
-    { config: { roles: ["editor", "agent"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type } = request.params;
       const schemaId = `${type}/v1`;
@@ -648,7 +648,7 @@ export function registerDocsRoutes(app) {
   // not who is holding the token (issue #12, §7-2).
   app.put(
     "/api/docs/:type/:id/facts",
-    { config: { roles: ["editor", "agent"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       const schemaId = `${type}/v1`;
@@ -711,7 +711,7 @@ export function registerDocsRoutes(app) {
   // activate: a stale rev is a 409, not a merge.
   app.put(
     "/api/docs/:type/:id/links",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       if (!refs[`${type}/v1`])
@@ -768,7 +768,7 @@ export function registerDocsRoutes(app) {
   // editor changes after creation. Same If-Match rule as links.
   app.put(
     "/api/docs/:type/:id/role",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       if (type !== "domain-skill")
@@ -814,7 +814,7 @@ export function registerDocsRoutes(app) {
 
   app.put(
     "/api/docs/db-schema/:id/catalog",
-    { config: { roles: ["editor", "agent"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { id } = request.params;
       const relpath = `db-schema/${id}.json`;
@@ -882,7 +882,7 @@ export function registerDocsRoutes(app) {
   ]) {
     app.post(
       `/api/docs/:type/:id/${action}`,
-      { config: { roles: ["approver"] } },
+      { config: { roles: ["admin"] } },
       async (request, reply) => {
         const { type, id } = request.params;
         if (!refs[`${type}/v1`])
@@ -940,7 +940,7 @@ export function registerDocsRoutes(app) {
   // injection index, but the JSON + git history are preserved.
   app.delete(
     "/api/docs/:type/:id",
-    { config: { roles: ["approver"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       // Same allowlist as PUT: archiving score/<agent>.json turned its array

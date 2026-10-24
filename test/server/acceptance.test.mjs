@@ -3,7 +3,7 @@
 //   1. 두 계정 동시 편집: 겹치는 슬롯 → 409, 안 겹치면 자동 재베이스 (S6)
 //   2. agent 토큰 promote → 403
 //   3. promote If-Match 불일치 → 409 (S4)
-//   4. users.json 없이 기동 → 거부 (S1)
+//   4. 비밀번호 파일 없이 기동 → 거부 (S1)
 //   5. 감사 뷰 == git log
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,15 +12,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp, AuthBootError } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { authConfig, signIn, as } from "../sign-in.mjs";
 import { git } from "../../server/git.mjs";
 
 async function setup(users) {
   const home = mkdtempSync(join(tmpdir(), "akg-acceptance-"));
-  saveUsers(join(home, "users.json"), users);
+  const signedIn = await signIn(home, users);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -33,7 +33,7 @@ async function setup(users) {
 }
 
 function auth(token) {
-  return { authorization: `Bearer ${token}` };
+  return as(token);
 }
 
 function newDoc() {
@@ -64,8 +64,8 @@ function newDoc() {
 
 test("1. 두 계정 동시 편집 — 겹치는 슬롯은 409, 겹치지 않으면 자동 재베이스 (S6)", async () => {
   const { app, cleanup } = await setup([
-    { id: "alice", role: "editor", tokenHash: hashToken("alice-tok") },
-    { id: "bob", role: "editor", tokenHash: hashToken("bob-tok") },
+    { id: "alice", group: "admin", token: "alice-tok" },
+    { id: "bob", group: "admin", token: "bob-tok" },
   ]);
   const created = await app.inject({
     method: "POST",
@@ -140,8 +140,8 @@ test("1. 두 계정 동시 편집 — 겹치는 슬롯은 409, 겹치지 않으�
 
 test("2. agent 토큰으로 promote 시도 → 403", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "agent:catalog-push", role: "agent", tokenHash: hashToken("agtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "agent:catalog-push", group: "agent", token: "agtok" },
   ]);
   const created = await app.inject({
     method: "POST",
@@ -161,8 +161,8 @@ test("2. agent 토큰으로 promote 시도 → 403", async () => {
 
 test("3. promote 시 If-Match 불일치 → 409 (S4)", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "boss", role: "approver", tokenHash: hashToken("aptok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "boss", group: "admin", token: "aptok" },
   ]);
   await app.inject({
     method: "POST",
@@ -183,12 +183,12 @@ test("3. promote 시 If-Match 불일치 → 409 (S4)", async () => {
   await cleanup();
 });
 
-test("4. users.json 없이 기동 → 거부 (S1)", async () => {
+test("4. 비밀번호 파일 없이 기동 → 거부 (S1)", async () => {
   const home = mkdtempSync(join(tmpdir(), "akg-acceptance-noauth-"));
   await assert.rejects(
     buildApp({
       storeDir: join(home, "store"),
-      usersPath: join(home, "users.json"),
+      auth: authConfig(join(home, "users.yml")),
     }),
     AuthBootError,
   );
@@ -197,7 +197,7 @@ test("4. users.json 없이 기동 → 거부 (S1)", async () => {
 
 test("5. 감사 뷰 == git log — API 응답이 store 레포의 실제 git log와 정확히 일치", async () => {
   const { app, storeDir, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const created = await app.inject({
     method: "POST",

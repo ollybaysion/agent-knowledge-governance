@@ -9,18 +9,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { readJson } from "../../server/store.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-bulk-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "ap", role: "approver", tokenHash: hashToken("aptok") },
-    { id: "bot", role: "agent", tokenHash: hashToken("bottok") },
+  const signedIn = await signIn(home, [
+    { id: "ed", group: "admin", token: "edtok" },
+    { id: "ap", group: "admin", token: "aptok" },
+    { id: "bot", group: "agent", token: "bottok" },
   ]);
   const storeDir = join(home, "store");
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir, auth: signedIn });
   return {
     app,
     storeDir,
@@ -31,7 +31,7 @@ async function setup() {
   };
 }
 
-const auth = (t) => ({ authorization: `Bearer ${t}` });
+const auth = (t) => (as(t));
 
 // db-schema carries the invariant id === lower(table) — owner stays a plain
 // body attribute that never qualifies the id — so the fixture derives the

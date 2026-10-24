@@ -8,17 +8,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-drafts-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "ap", role: "approver", tokenHash: hashToken("aptok") },
+  const signedIn = await signIn(home, [
+    { id: "ed", group: "admin", token: "edtok" },
+    { id: "ap", group: "admin", token: "aptok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -28,7 +28,7 @@ async function setup() {
     },
   };
 }
-const auth = (t) => ({ authorization: `Bearer ${t}` });
+const auth = (t) => (as(t));
 const post = (app, type, payload, t = "edtok") =>
   app.inject({ method: "POST", url: `/api/docs/${type}`, headers: auth(t), payload });
 

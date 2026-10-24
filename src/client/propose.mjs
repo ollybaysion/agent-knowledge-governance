@@ -1,5 +1,5 @@
 // akg CLI `propose` (design §8.1): submit a slot-level proposal to the hub's
-// review queue — POST /api/proposals (agent | editor role). This is the new
+// review queue — POST /api/proposals (agent · admin). This is the new
 // exit for claude-hooks' db-schema-propose-codebase skill: it hands its
 // proposal.json here instead of applying it to a local file.
 import { AkgApiError } from "./errors.mjs";

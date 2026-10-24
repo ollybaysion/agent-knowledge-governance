@@ -27,7 +27,7 @@ function lineOf(raw, agent, user, now, schema) {
   let line;
   if (raw.human !== undefined) {
     if (raw.machine !== undefined || raw.run !== undefined) return { errors: ["사람 줄에는 machine · run 을 두지 않습니다"] };
-    if (user.role === "agent") return { errors: ["사람 점수는 사람 계정만 적습니다"] };
+    if (user.group === "agent") return { errors: ["사람 점수는 사람 계정만 적습니다"] };
     line = { agent, kind: raw.kind, text: raw.text, at: now, human: { score: raw.human?.score, by: user.id, at: now } };
   } else {
     if (raw.machine === undefined || raw.run === undefined || raw.model === undefined || raw.mdRev === undefined)
@@ -60,7 +60,7 @@ export function registerScoreRoutes(app) {
   // `since` keeps the lines at or after that second (the record is in time order).
   app.get(
     "/api/score/:agent",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const agent = agentOf(request, reply);
       if (!agent) return reply;
@@ -77,7 +77,7 @@ export function registerScoreRoutes(app) {
 
   app.post(
     "/api/score/:agent",
-    { config: { roles: ["editor", "agent"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const agent = agentOf(request, reply);
       if (!agent) return reply;

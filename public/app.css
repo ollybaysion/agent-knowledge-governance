@@ -174,12 +174,12 @@ nav button:focus-visible {
 #meta .ok {
   color: var(--success-ink);
 }
-/* Anonymous visitors get a plain "열람 전용" chip where the id (role) goes, so
-   the reason edit controls are missing is visible without opening anything. */
-#meta .whoami.anon {
+/* "id · group" pill next to 로그아웃 (auth 시안 4-2). */
+#meta .whoami {
   border: 1px solid var(--hairline);
   border-radius: 999px;
   padding: 1px 10px;
+  background: var(--surface-soft);
 }
 #theme-toggle {
   font: inherit;
@@ -1996,35 +1996,21 @@ button.pchip:hover {
 }
 
 /* ---- 실제 앱 추가분(프로토타입엔 없던 로그인/상태 표시) ---- */
-/* #login is a <section>, and `section { display: none }` above drives screen
-   switching through an `.on` class that the login screen never gets. Without
-   this rule, showLogin() unsets [hidden] and still renders nothing — a blank
-   page. Visibility is tied to the [hidden] attribute the JS already toggles
-   rather than adding a second mechanism to keep in sync. */
-#login:not([hidden]) {
+/* #gate is a <section>, and `section { display: none }` above drives screen
+   switching through an `.on` class that the gate never gets. Without this
+   rule, showGate() unsets [hidden] and still renders nothing — a blank page.
+   Visibility is tied to the [hidden] attribute the JS already toggles rather
+   than adding a second mechanism to keep in sync. */
+#gate:not([hidden]) {
   display: block;
 }
-#login {
+#gate {
   max-width: 30rem;
   margin: 48px auto;
   padding: 0 16px;
 }
-#login h1 {
+#gate h1 {
   font-size: 18px;
-}
-#login input {
-  font: inherit;
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-  background: var(--surface-soft);
-  color: var(--body);
-  margin: 6px 0 10px;
-}
-#login .error {
-  color: var(--error-ink);
-  font-size: 12px;
 }
 .notice {
   border: 1px solid var(--error);

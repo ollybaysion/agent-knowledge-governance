@@ -11,18 +11,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-traversal-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "editor1", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "boss", role: "approver", tokenHash: hashToken("aptok") },
+  const signedIn = await signIn(home, [
+    { id: "editor1", group: "admin", token: "edtok" },
+    { id: "boss", group: "admin", token: "aptok" },
   ]);
   const storeDir = join(home, "store");
   const app = await buildApp({
     storeDir,
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -34,7 +34,7 @@ async function setup() {
   };
 }
 
-const auth = (t) => ({ authorization: `Bearer ${t}` });
+const auth = (t) => (as(t));
 
 async function createDoc(app) {
   return app.inject({
@@ -67,11 +67,11 @@ test("reject: a traversing :pid cannot delete a document the caller may not dele
   const docPath = join(storeDir, "db-schema", "x.json");
   assert.ok(existsSync(docPath));
 
-  // The honest route is approver-only, so an editor has no legitimate way here.
+  // The honest route is admin-only, so a user has no legitimate way here.
   const honest = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
-    headers: auth("edtok"),
+    headers: as("reader"),
   });
   assert.equal(honest.statusCode, 403);
 

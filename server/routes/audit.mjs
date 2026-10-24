@@ -18,7 +18,7 @@ export function registerAuditRoutes(app) {
 
   app.get(
     "/api/audit",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { doc, window } = request.query ?? {};
       const args = [

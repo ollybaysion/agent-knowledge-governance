@@ -9,18 +9,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
-const auth = (token) => ({ authorization: `Bearer ${token}` });
+const auth = (token) => as(token);
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-doc-type-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+  const signedIn = await signIn(home, [
+    { id: "renoir", group: "admin", token: "aptok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   const skill = await app.inject({
     method: "POST",

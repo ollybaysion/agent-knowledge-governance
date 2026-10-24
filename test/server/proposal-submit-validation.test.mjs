@@ -11,17 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-submit-validate-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "agent:x", role: "agent", tokenHash: hashToken("agtok") },
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  const signedIn = await signIn(home, [
+    { id: "agent:x", group: "agent", token: "agtok" },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -32,7 +32,7 @@ async function setup() {
   };
 }
 
-const auth = (token) => ({ authorization: `Bearer ${token}` });
+const auth = (token) => (as(token));
 
 function newDbSchemaDoc() {
   return {

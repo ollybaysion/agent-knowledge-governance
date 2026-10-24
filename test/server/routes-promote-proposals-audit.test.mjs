@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 function freshHome() {
   return mkdtempSync(join(tmpdir(), "akg-promote-route-test-"));
@@ -13,10 +13,10 @@ function freshHome() {
 
 async function setup(users) {
   const home = freshHome();
-  saveUsers(join(home, "users.json"), users);
+  const signedIn = await signIn(home, users);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -28,7 +28,7 @@ async function setup(users) {
 }
 
 function auth(token) {
-  return { authorization: `Bearer ${token}` };
+  return as(token);
 }
 
 function newDbSchemaDoc() {
@@ -63,8 +63,8 @@ async function createDoc(app, token) {
 
 test("promote: an agent token gets 403 (D6 — agents never promote)", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "agent:x", role: "agent", tokenHash: hashToken("agtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "agent:x", group: "agent", token: "agtok" },
   ]);
   const rev = await createDoc(app, "edtok");
   const res = await app.inject({
@@ -77,15 +77,15 @@ test("promote: an agent token gets 403 (D6 — agents never promote)", async () 
   await cleanup();
 });
 
-test("promote: editor also gets 403 — only approver may promote", async () => {
+test("promote: a user gets 403 — only admin may promote", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const rev = await createDoc(app, "edtok");
   const res = await app.inject({
     method: "POST",
     url: "/api/docs/db-schema/x/promote",
-    headers: { ...auth("edtok"), "if-match": rev },
+    headers: { ...as("reader"), "if-match": rev },
     payload: {},
   });
   assert.equal(res.statusCode, 403);
@@ -94,8 +94,8 @@ test("promote: editor also gets 403 — only approver may promote", async () => 
 
 test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlapping slot promote still succeeds", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "boss", role: "approver", tokenHash: hashToken("aptok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "boss", group: "admin", token: "aptok" },
   ]);
   const rev0 = await createDoc(app, "edtok");
   const editRes = await app.inject({
@@ -159,8 +159,8 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
 
 test("proposals: submit -> list pending -> adopt lands the slot as inferred and archives the proposal", async () => {
   const { app, cleanup } = await setup([
-    { id: "agent:x", role: "agent", tokenHash: hashToken("agtok") },
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "agent:x", group: "agent", token: "agtok" },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const rev0 = await createDoc(app, "edtok");
 
@@ -216,7 +216,7 @@ test("proposals: submit -> list pending -> adopt lands the slot as inferred and 
 
 test("proposals: agent role cannot adopt or reject, only submit", async () => {
   const { app, cleanup } = await setup([
-    { id: "agent:x", role: "agent", tokenHash: hashToken("agtok") },
+    { id: "agent:x", group: "agent", token: "agtok" },
   ]);
   const res = await app.inject({
     method: "POST",
@@ -230,7 +230,7 @@ test("proposals: agent role cannot adopt or reject, only submit", async () => {
 
 test("proposals: identical resubmission from an agent dedups to the existing pending proposal", async () => {
   const { app, cleanup } = await setup([
-    { id: "agent:x", role: "agent", tokenHash: hashToken("agtok") },
+    { id: "agent:x", group: "agent", token: "agtok" },
   ]);
   const payload = {
     type: "db-schema",
@@ -258,7 +258,7 @@ test("proposals: identical resubmission from an agent dedups to the existing pen
 
 test("audit: GET /api/audit reflects the exact commit trail (author, message) for a doc's writes", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const rev0 = await createDoc(app, "edtok");
   await app.inject({

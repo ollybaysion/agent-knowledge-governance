@@ -103,9 +103,7 @@ function fail(errors, msg) {
 
 // The id is derived from the body, never authored beside it — one place to get
 // it wrong instead of two. SEMANTIC_CHECKS below turns each rule into a
-// validation, and src/client/push.mjs uses the same rules to build an envelope
-// around a bare body, so a pushed doc and a validated doc agree by
-// construction. Null when the body lacks the field the id comes from: the
+// validation. Null when the body lacks the field the id comes from: the
 // schema layer reports the missing field, and a second complaint about the id
 // would only bury it.
 export function deriveId(schema, body) {

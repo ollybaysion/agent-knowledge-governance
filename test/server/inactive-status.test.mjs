@@ -11,17 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { readJson } from "../../server/store.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-inactive-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "ap", role: "approver", tokenHash: hashToken("aptok") },
+  const signedIn = await signIn(home, [
+    { id: "ed", group: "admin", token: "edtok" },
+    { id: "ap", group: "admin", token: "aptok" },
   ]);
   const storeDir = join(home, "store");
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir, auth: signedIn });
   return {
     app,
     storeDir,
@@ -32,7 +32,7 @@ async function setup() {
   };
 }
 
-const auth = (t) => ({ authorization: `Bearer ${t}` });
+const auth = (t) => (as(t));
 
 function doc(overrides = {}) {
   return {
@@ -219,12 +219,12 @@ test("archiving also removes the md — the pre-existing leak this closes", asyn
   await cleanup();
 });
 
-test("turning a doc on is an approver decision, and needs a matching rev", async () => {
+test("turning a doc on is an admin decision, and needs a matching rev", async () => {
   const { app, cleanup } = await setup();
   const rev = await create(app, doc({ status: "inactive" }));
 
-  const asEditor = await transition(app, "activate", rev, "edtok");
-  assert.equal(asEditor.statusCode, 403);
+  const asUser = await transition(app, "activate", rev, "reader");
+  assert.equal(asUser.statusCode, 403);
 
   const noMatch = await app.inject({
     method: "POST",

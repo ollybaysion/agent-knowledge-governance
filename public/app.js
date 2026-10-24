@@ -6,7 +6,6 @@
 // intro-band + SVG state diagram) lives in index.html.
 "use strict";
 
-const TOKEN_KEY = "akg_token";
 const THEME_KEY = "akg_theme";
 /** 왼쪽 트리에서 접어 둔 갈래 — 트리를 다시 그려도(저장 · 이동 · 새로고침) 접힌 채로 둔다. */
 const TREE_FOLD_KEY = "akg_tree_closed";
@@ -23,7 +22,8 @@ function setGroupClosed(type, closed) {
   else set.delete(type);
   localStorage.setItem(TREE_FOLD_KEY, JSON.stringify([...set]));
 }
-let currentUser = null; // {id, role}
+let currentUser = null; // {id, group, logout}
+let csrfToken = null; // the shared session's CSRF token, from /api/me
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
 const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual", "voc"];
@@ -68,11 +68,8 @@ function el(tag, attrs, children) {
 const $ = (id) => document.getElementById(id);
 
 // Save an in-memory string as a client-side download. No server round-trip: it
-// reuses text api() already fetched with the viewer's token, so it works the
-// same whether or not the deploy allows anonymous reads (AKG_ANON_READ) — a
-// bare <a href> to the md endpoint would 401 under AKG_ANON_READ=0 since anchors
-// carry no Authorization header. CSP-safe: a `download` anchor is not a fetch
-// the `default-src 'self'` policy governs.
+// reuses text api() already fetched. CSP-safe: a `download` anchor is not a
+// fetch the `default-src 'self'` policy governs.
 function downloadTextFile(filename, text, mime) {
   const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -142,14 +139,14 @@ $("theme-toggle").addEventListener("click", () => {
 });
 
 // ---------- API ----------
-const getToken = () => localStorage.getItem(TOKEN_KEY);
-const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
-const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+// The SESSION cookie BE set at login rides along on its own (same-site); a
+// write also carries the session's CSRF token.
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
-  const token = getToken();
-  if (token) headers.authorization = `Bearer ${token}`;
+  if (csrfToken && WRITE_METHODS.has(opts.method || "GET"))
+    headers["x-csrf-token"] = csrfToken;
   // opts.raw = bytes sent as they are (a capture upload); the caller sets
   // the content-type. Otherwise opts.body goes as JSON.
   let body = opts.raw ?? opts.body;
@@ -157,12 +154,10 @@ async function api(path, opts = {}) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(body);
   }
-  // fetch throws rather than resolving for two reachable cases: the network is
-  // down, and the token carries a character that cannot go in a header (a
-  // mis-paste — Korean text, a stray newline). Both used to surface as an
-  // unhandled rejection, which meant the UI showed nothing at all and left
-  // whatever message was on screen before. Status 0 = "the request never went
-  // out", distinct from any status a server can return.
+  // fetch throws rather than resolving when the network is down. That used to
+  // surface as an unhandled rejection, which meant the UI showed nothing at
+  // all and left whatever message was on screen before. Status 0 = "the
+  // request never went out", distinct from any status a server can return.
   let res;
   try {
     res = await fetch(path, {
@@ -179,6 +174,9 @@ async function api(path, opts = {}) {
   } catch {
     /* fail-soft: 304 / md text bodies have no JSON */
   }
+  // The session ended mid-use (30 minutes idle, or a logout elsewhere).
+  if (res.status === 401 && currentUser)
+    toast("로그인이 끝났습니다. 새로고침하면 로그인 화면으로 갑니다.", "error");
   return {
     ok: res.ok,
     status: res.status,
@@ -247,112 +245,48 @@ function evidence(ev) {
 const shortRev = (r) => (r || "").slice(0, 7);
 
 // ---------- shell ----------
-function showLogin(message) {
+// Before the app shows, one line on the gate: why the dashboard cannot open.
+function showGate(message) {
   $("topbar").hidden = true;
   $("app-layout").hidden = true;
-  $("login").hidden = false;
-  $("login-error").textContent = message || "";
+  $("gate").hidden = false;
+  $("gate-msg").textContent = message;
 }
 function showApp() {
   $("topbar").hidden = false;
   $("app-layout").hidden = false;
-  $("login").hidden = true;
+  $("gate").hidden = true;
 }
 function renderMeta() {
-  const anon = currentUser.anonymous === true;
   $("meta-store").replaceChildren(
     el("span", {
-      class: anon ? "whoami anon" : "whoami",
-      text: anon ? "열람 전용" : `${currentUser.id} (${currentUser.role})`,
+      class: "whoami",
+      text: `${currentUser.id} · ${currentUser.group}`,
     }),
     el("button", {
       type: "button",
       id: "auth-toggle",
       class: "btn ghost sm",
-      text: anon ? "로그인" : "로그아웃",
-      onclick: anon ? () => showLogin() : logout,
+      text: "로그아웃",
+      onclick: logout,
     }),
   );
 }
-// Ask the server who we are with whatever credential is in storage — none is a
-// valid answer when anonymous read is on, and that is what boots the read-only
-// view. Returns the identity, or null if even anonymous access was refused.
-async function loadMe() {
-  const res = await api("/api/me");
-  // The status is carried out, not swallowed: "wrong token" and "server is
-  // rate-limiting you" and "the auth store is broken" are different problems
-  // and the login screen has to be able to say which one happened.
-  if (!res.ok) return { ok: false, status: res.status };
-  currentUser = res.data;
-  renderMeta();
-  return { ok: true };
+// Login and logout both live in BE, on the FE address. Logout is BE's form
+// POST with the session's CSRF token, so it ends the shared session (and the
+// Keycloak one) for FE and AKG together.
+function logout() {
+  const form = el("form", { method: "post", action: currentUser.logout }, [
+    el("input", { type: "hidden", name: "_csrf", value: csrfToken || "" }),
+  ]);
+  document.body.appendChild(form);
+  form.submit();
 }
-function loginFailureMessage(status) {
-  if (status === 0)
-    return "요청을 보내지 못했습니다 — 서버에 연결할 수 없거나, 토큰에 쓸 수 없는 문자가 섞여 있습니다.";
-  if (status === 401)
-    return "토큰이 유효하지 않습니다 — 오타이거나, 만료됐거나, 회수된 토큰입니다.";
-  if (status === 429)
-    return "인증 시도가 너무 많습니다. 잠시 후 다시 시도하세요.";
-  if (status === 500)
-    return "서버의 인증 저장소를 읽지 못했습니다. 관리자에게 문의하세요.";
-  return `로그인 실패 (${status})`;
-}
-async function tryLogin(token) {
-  setToken(token);
-  const me = await loadMe();
-  if (!me.ok) {
-    clearToken();
-    showLogin(loginFailureMessage(me.status));
-    return false;
-  }
-  showApp();
-  return true;
-}
-// Anonymous browsing: no token at all. Only reachable when the server allows it
-// (AKG_ANON_READ), otherwise /api/me 401s and the caller falls back to login.
-async function tryAnon() {
-  clearToken();
-  const me = await loadMe();
-  if (!me.ok) return false;
-  showApp();
-  return true;
-}
-async function logout() {
-  clearToken();
-  if (await tryAnon()) enterApp();
-  else showLogin("로그아웃했습니다.");
-}
-$("token-submit").addEventListener("click", async () => {
-  const val = $("token-input").value.trim();
-  // An empty submit used to do nothing at all, which reads as a broken button.
-  if (!val) return showLogin("토큰을 입력하세요.");
-  if (await tryLogin(val)) enterApp();
-});
-// The input is not inside a <form>, so Enter would otherwise do nothing —
-// which is the first thing anyone tries in a password field.
-$("token-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") $("token-submit").click();
-});
-// Escape hatch from the login screen back to anonymous browsing — without it a
-// logged-out user who opens login has no way back to the read-only view.
-$("login-cancel").addEventListener("click", async () => {
-  if (await tryAnon()) enterApp();
-});
-
-// ---------- URL token pickup (convenience only — S1 still enforced server-side) ----------
-function consumeUrlToken() {
-  const params = new URLSearchParams(location.search);
-  const t = params.get("token");
-  if (!t) return null;
-  params.delete("token");
-  const rest = params.toString();
-  history.replaceState(
-    null,
-    "",
-    location.pathname + (rest ? `?${rest}` : "") + location.hash,
-  );
-  return t;
+function gateMessage(status) {
+  if (status === 0) return "서버에 연결할 수 없습니다.";
+  if (status === 429) return "인증 실패가 너무 많습니다. 잠시 후 다시 시도하세요.";
+  if (status === 503) return "세션 저장소(Redis)에 닿지 않습니다. 관리자에게 문의하세요.";
+  return `로그인 정보를 읽지 못했습니다 (${status}).`;
 }
 
 // ---------- navigation (prototype: section.on + nav button.on) ----------
@@ -821,8 +755,8 @@ async function renderDocScreen(type, id) {
   // repaint optimistically instead of re-fetching the whole document.
   let { json: doc, rev } = res.data;
   const { slots, md } = res.data;
-  const canApprove = currentUser.role === "approver";
-  const canEdit = canApprove || currentUser.role === "editor";
+  const canApprove = currentUser.group === "admin";
+  const canEdit = canApprove;
   let editBuf = null; // {text, evidence[]} — working copy of the open slot
   let reconcileFor = null; // {address, doc, rev, overlap} — 409 화해 카드 상태
   const live = {}; // live refs of the open editor (badge/caption/save/diff)
@@ -907,7 +841,7 @@ async function renderDocScreen(type, id) {
             class: "btn promote sm",
             onclick: () => slotAction("확정", slot.address, "promote"),
           },
-          ["확정", el("span", { class: "role", text: "approver" })],
+          ["확정", el("span", { class: "role", text: "admin" })],
         ),
       );
     if (canEdit && (slot.tier === "inferred" || slot.tier === "confirmed"))
@@ -1929,7 +1863,7 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
     if ((r.data || {}).error === "data_id_conflict") toast(dataIdConflictText(r.data), "error");
     else if (r.status === 409)
       toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
-    else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
+    else if (r.status === 403) toast("admin 만 할 수 있습니다.", "error");
     else {
       const d = r.data || {};
       toast(
@@ -2820,7 +2754,7 @@ async function uploadCapture(file) {
     raw: file,
   });
   if (r.ok) return { step: { asset: r.data.sha256, width: r.data.width, height: r.data.height } };
-  if (r.status === 403) return { error: "editor 이상 권한이 필요합니다." };
+  if (r.status === 403) return { error: "admin 만 할 수 있습니다." };
   if (r.status === 413) return { error: "캡처는 2MB 까지 올릴 수 있습니다." };
   if (r.status === 400 || r.status === 415)
     return { error: "이미지를 읽지 못했습니다 — PNG · JPEG · WebP 인지 확인하세요." };
@@ -2973,7 +2907,7 @@ function renderManualView(doc, rev, md, canEdit, reload, onToggleStatus, onToggl
       }
       const d = r.data || {};
       if (r.status === 409) toast("다른 사람이 먼저 수정했습니다 — 문서를 다시 여세요.", "error");
-      else if (r.status === 403) toast("editor 이상 권한이 필요합니다.", "error");
+      else if (r.status === 403) toast("admin 만 할 수 있습니다.", "error");
       else toast(`저장 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`, "error");
     });
 
@@ -3510,7 +3444,7 @@ async function renderQueue() {
   section.appendChild(propWrap);
   if (propRes.status === 403)
     propWrap.appendChild(
-      el("p", { class: "loading", text: "editor 이상만 볼 수 있습니다." }),
+      el("p", { class: "loading", text: "admin 만 볼 수 있습니다." }),
     );
   else if (!propRes.ok)
     propWrap.appendChild(
@@ -3608,7 +3542,7 @@ async function slotQueueSection(section, title, badge, tier, promotable) {
   );
   const wrap = el("div", { class: "tbl-wrap" });
   section.appendChild(wrap);
-  const canApprove = currentUser.role === "approver";
+  const canApprove = currentUser.group === "admin";
   const rows = [];
   for (const type of DOC_TYPES) {
     const listRes = await api(`/api/docs?type=${type}&tier=${tier}`);
@@ -3801,10 +3735,7 @@ function auditMessage(msg) {
 // 이 inactive 문서로 커밋(이름 없으면 저장 불가). 미완이어도 저장되고(서버 완화
 // 검증), 활성화는 완성돼야만 된다. CSP: 인라인 없이 el/addEventListener.
 function canCreate() {
-  return (
-    !!currentUser &&
-    (currentUser.role === "editor" || currentUser.role === "approver")
-  );
+  return !!currentUser && currentUser.group === "admin";
 }
 const nowIso = () => new Date().toISOString();
 
@@ -4427,14 +4358,19 @@ function enterApp() {
 }
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
-  const token = consumeUrlToken() || getToken();
-  // With a token, log in as that user. Without one, try anonymous first — the
-  // login screen is now an opt-in action, not the front gate. It only appears
-  // if the server refuses anonymous reads.
-  if (token) {
-    if (await tryLogin(token)) enterApp();
-    return;
+  let res;
+  try {
+    res = await fetch("/api/me");
+  } catch {
+    return showGate(gateMessage(0));
   }
-  if (await tryAnon()) enterApp();
-  else showLogin();
+  const data = await res.json().catch(() => null);
+  // No session: log in at FE (BE's login), then come back.
+  if (res.status === 401 && data?.login) return location.assign(data.login);
+  if (!res.ok) return showGate(gateMessage(res.status));
+  currentUser = data;
+  csrfToken = res.headers.get("x-csrf-token");
+  renderMeta();
+  showApp();
+  enterApp();
 })();

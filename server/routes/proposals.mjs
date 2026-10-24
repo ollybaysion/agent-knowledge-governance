@@ -1,5 +1,5 @@
-// §6 proposal queue: submit (agent·editor), list pending (editor),
-// adopt/reject (editor). Storage: store/proposals/pending|archive/<uuid>.json
+// §6 proposal queue: submit (agent·admin), list pending (admin),
+// adopt/reject (admin). Storage: store/proposals/pending|archive/<uuid>.json
 // — a directory listing IS the queue (design §D2), no separate DB.
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -14,7 +14,7 @@ import { applySlots, checkSlotValues } from "../proposal-apply.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
 
 function priorityOf(user) {
-  return user.role === "agent" ? "agent" : "human";
+  return user.group === "agent" ? "agent" : "human";
 }
 
 export function registerProposalsRoutes(app) {
@@ -23,7 +23,7 @@ export function registerProposalsRoutes(app) {
 
   app.post(
     "/api/proposals",
-    { config: { roles: ["agent", "editor"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type, id, slots } = request.body ?? {};
       if (
@@ -101,7 +101,7 @@ export function registerProposalsRoutes(app) {
 
   app.get(
     "/api/proposals",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request) => {
       const state = request.query?.state === "archive" ? "archive" : "pending";
       const dir = `proposals/${state}`;
@@ -115,7 +115,7 @@ export function registerProposalsRoutes(app) {
 
   app.post(
     "/api/proposals/:pid/adopt",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { pid } = request.params;
       // CS7: pid becomes a file path below — reject anything that isn't a
@@ -196,7 +196,7 @@ export function registerProposalsRoutes(app) {
 
   app.post(
     "/api/proposals/:pid/reject",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { pid } = request.params;
       if (!isValidId(pid))

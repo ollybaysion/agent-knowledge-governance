@@ -12,19 +12,19 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 const BIN = fileURLToPath(new URL("../../bin/akg.mjs", import.meta.url));
 
 async function setupServer() {
   const home = mkdtempSync(join(tmpdir(), "akg-cli-server-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "editor1", role: "editor", tokenHash: hashToken("ed-tok") },
-    { id: "agent1", role: "agent", tokenHash: hashToken("agent-tok") },
+  const signedIn = await signIn(home, [
+    { id: "editor1", group: "admin", token: "ed-tok" },
+    { id: "agent1", group: "agent", token: "agent-tok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const serverUrl = `http://127.0.0.1:${app.server.address().port}`;
@@ -82,7 +82,7 @@ test("cli propose: end-to-end success -> exit 0, proposal lands in the queue", a
     const list = await app.inject({
       method: "GET",
       url: "/api/proposals",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     assert.equal(list.json().proposals.length, 1);
     rmSync(dir, { recursive: true, force: true });
@@ -138,7 +138,7 @@ test("cli catalog-push: end-to-end success -> exit 0, catalog replaced on the do
     const seeded = await app.inject({
       method: "POST",
       url: "/api/docs/db-schema",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
       payload: {
         schema: "db-schema/v1",
         id: "sensor",
@@ -184,7 +184,7 @@ test("cli catalog-push: end-to-end success -> exit 0, catalog replaced on the do
     const got = await app.inject({
       method: "GET",
       url: "/api/docs/db-schema/sensor",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     assert.equal(got.json().json.body.catalog.columns.length, 2);
     rmSync(dir, { recursive: true, force: true });
@@ -244,146 +244,6 @@ function runCliBare(args, home) {
     child.on("close", (status) => resolve({ status, stdout, stderr }));
   });
 }
-
-test("cli push: a bare spec.json creates the doc, and a second run updates it", async () => {
-  const { app, serverUrl, cleanup } = await setupServer();
-  const home = mkdtempSync(join(tmpdir(), "akg-cli-push-"));
-  try {
-    const specPath = join(home, "spec.json");
-    writeFileSync(specPath, JSON.stringify(GOLDEN_SPEC));
-
-    const first = await runCli(["push", "domain-skill", specPath], {
-      token: "ed-tok",
-      serverUrl,
-    });
-    assert.equal(first.status, 0, first.stderr);
-    assert.match(first.stdout, /^created domain-skill\/fdc-explain-sensor-origin \(rev /);
-
-    // The hub now serves the skill — this is the whole point of the command.
-    const md = await app.inject({
-      method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor-origin?format=md",
-      headers: { authorization: "Bearer ed-tok" },
-    });
-    assert.equal(md.statusCode, 200);
-    assert.match(md.body, /^---\nname: fdc-explain-sensor-origin\n/);
-
-    writeFileSync(
-      specPath,
-      JSON.stringify({
-        ...GOLDEN_SPEC,
-        markdown: GOLDEN_SPEC.markdown.replace("## 한 줄 설명\n\n", "## 한 줄 설명\n\n센서 값이 물리 수집인지 수식 계산인지.\n\n"),
-      }),
-    );
-    const second = await runCli(["push", "domain-skill", specPath], {
-      token: "ed-tok",
-      serverUrl,
-    });
-    assert.equal(second.status, 0, second.stderr);
-    assert.match(second.stdout, /^updated domain-skill\/fdc-explain-sensor-origin \(rev /);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-    await cleanup();
-  }
-});
-
-test("cli push --dry-run: renders the skill with no token, no server, and writes nothing", async () => {
-  const home = mkdtempSync(join(tmpdir(), "akg-cli-dryrun-"));
-  try {
-    const specPath = join(home, "spec.json");
-    writeFileSync(specPath, JSON.stringify(GOLDEN_SPEC));
-
-    const r = await runCliBare(["push", "domain-skill", specPath, "--dry-run"], home);
-    assert.equal(r.status, 0, r.stderr);
-    // The preview IS the SKILL.md the factory used to print locally.
-    assert.match(r.stdout, /^---\nname: fdc-explain-sensor-origin\n/);
-    assert.match(r.stdout, /## 도메인 지식/);
-    assert.match(r.stdout, /## 데이터/);
-    assert.match(r.stderr, /DRY-RUN/);
-    // Nothing about a missing token or server, because it needs neither.
-    assert.doesNotMatch(r.stderr, /no token|no server URL/);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-// A skill is written as md, so the natural file to push is the .md itself:
-// its basename is the skill name (the consumer's "file name is the name" rule)
-// and the text goes into body.markdown verbatim.
-test("cli push: a .md file becomes { name: <basename>, markdown } and round-trips byte-for-byte", async () => {
-  const { app, cleanup, serverUrl } = await setupServer();
-  const home = mkdtempSync(join(tmpdir(), "akg-cli-md-"));
-  try {
-    const mdPath = join(home, "fdc-explain-sensor-origin.md");
-    writeFileSync(mdPath, GOLDEN_SPEC.markdown);
-
-    const r = await runCli(["push", "domain-skill", mdPath], { token: "ed-tok", serverUrl });
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^created domain-skill\/fdc-explain-sensor-origin \(rev /);
-
-    const stored = await app.inject({
-      method: "GET",
-      url: "/api/docs/domain-skill/fdc-explain-sensor-origin",
-      headers: { authorization: "Bearer ed-tok" },
-    });
-    assert.equal(stored.statusCode, 200);
-    assert.deepEqual(stored.json().json.body, GOLDEN_SPEC);
-
-    // A section the consumer does not read fails before the network.
-    writeFileSync(join(home, "bad-skill.md"), GOLDEN_SPEC.markdown.replace("## 데이터", "## 데이타"));
-    const bad = await runCli(["push", "domain-skill", join(home, "bad-skill.md")], {
-      token: "ed-tok",
-      serverUrl: "http://127.0.0.1:1",
-    });
-    assert.notEqual(bad.status, 0);
-    assert.match(bad.stderr, /모르는 절입니다 — "## 데이타"/);
-    assert.doesNotMatch(bad.stderr, /ECONNREFUSED|fetch failed/);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-    await cleanup();
-  }
-});
-
-test("cli push: an invalid spec fails on validation, before it ever calls the server", async () => {
-  const home = mkdtempSync(join(tmpdir(), "akg-cli-badspec-"));
-  try {
-    const specPath = join(home, "spec.json");
-    // A key from the old JSON shape — the exact thing "unknown keys are
-    // rejected" exists to catch.
-    writeFileSync(
-      specPath,
-      JSON.stringify({ ...GOLDEN_SPEC, description: "손으로 쓴 라우팅 문장" }),
-    );
-
-    // A server URL that cannot possibly answer: if validation did not happen
-    // first, this would fail with a connection error instead.
-    const r = await runCli(["push", "domain-skill", specPath], {
-      token: "ed-tok",
-      serverUrl: "http://127.0.0.1:1",
-    });
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /검증 실패/);
-    assert.match(r.stderr, /description/);
-    assert.doesNotMatch(r.stderr, /ECONNREFUSED|fetch failed/);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("cli push: a body with no derivable id says which field is missing", async () => {
-  const home = mkdtempSync(join(tmpdir(), "akg-cli-noid-"));
-  try {
-    const specPath = join(home, "spec.json");
-    const { name, ...noName } = GOLDEN_SPEC;
-    writeFileSync(specPath, JSON.stringify(noName));
-
-    const r = await runCliBare(["push", "domain-skill", specPath, "--dry-run"], home);
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /`name` 이 필요합니다/);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
 
 test("cli: unknown command -> exit 1, usage printed", async () => {
   const { serverUrl, cleanup } = await setupServer();

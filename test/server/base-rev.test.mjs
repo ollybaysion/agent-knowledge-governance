@@ -8,10 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { commitFiles, initStore, readJsonAtRev } from "../../server/store.mjs";
 
-const auth = (token) => ({ authorization: `Bearer ${token}` });
+const auth = (token) => as(token);
 
 function newDbSchemaDoc() {
   return {
@@ -56,12 +56,12 @@ test("readJsonAtRev answers null for anything but a 40-hex rev", () => {
 
 test("PUT /api/docs/:type/:id with If-Match HEAD is a 409 unknown_base_rev", async () => {
   const home = mkdtempSync(join(tmpdir(), "akg-base-rev-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  const signedIn = await signIn(home, [
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   const created = await app.inject({
     method: "POST",
