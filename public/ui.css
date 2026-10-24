@@ -3133,3 +3133,37 @@ h6.md-h {
     display: none;
   }
 }
+
+/* ==========================================================================
+ * 개요 · 검토 · 감사 — 새 틀의 카드
+ * ========================================================================== */
+.overview,
+.page-card {
+  margin-top: 16px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 4px 0 20px;
+}
+.overview .intro-band {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.overview .tt-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.typechips button[aria-pressed="true"] {
+  background: var(--surface-card);
+  color: var(--ink);
+  font-weight: 600;
+}
+.audit-filter {
+  padding: 0 16px 8px;
+}
+.page-card h2 .n {
+  font-family: var(--sans);
+}
+.cols > .main.wide {
+  padding-top: 0;
+}

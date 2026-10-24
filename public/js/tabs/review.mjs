@@ -1,13 +1,11 @@
-import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
-import { el as __el } from "../dom.mjs";
-import { api } from "../api.mjs";
+import { api, invalidateDocs } from "../api.mjs";
 import { $, el, toast } from "../dom.mjs";
 import { evidence } from "../shared.mjs";
 import { DOC_TYPES, currentUser } from "../state.mjs";
-import { invalidateDocs } from "../api.mjs";
 import { refreshReviewCount } from "../review-count.mjs";
+import { pageSection } from "../shell.mjs";
 
-// ================= 검토 대기열 =================
+// 검토 탭: 에이전트 제안 · 추정 슬롯(확정 대기) · 폐기 슬롯. 내용은 그대로, 새 틀의 카드 안.
 export async function renderQueue() {
   const section = $("queue");
   section.replaceChildren(
@@ -206,14 +204,7 @@ export async function slotQueueSection(section, title, badge, tier, promotable) 
   );
 }
 
-function wideSection(tab, label, id) {
-  __setActiveTab(tab);
-  __setCrumbs([{ label }]);
-  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
-  __screen().appendChild(__cols({ main, className: "wide" }));
-}
-
 export function renderReview() {
-  wideSection("review", "검토", "queue");
+  pageSection("review", "검토", "queue");
   renderQueue();
 }

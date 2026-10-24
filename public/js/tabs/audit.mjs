@@ -1,10 +1,9 @@
-import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
-import { el as __el } from "../dom.mjs";
 import { api } from "../api.mjs";
+import { pageSection } from "../shell.mjs";
 import { $, el } from "../dom.mjs";
 import { shortRev } from "../shared.mjs";
 
-// ================= 감사 =================
+// 감사 탭: git log 그대로(GET /api/audit). 내용은 그대로, 새 틀의 카드 안.
 export async function renderAudit() {
   const section = $("audit");
   const docInput = el("input", { type: "text", placeholder: "type/id (선택)" });
@@ -26,7 +25,7 @@ export async function renderAudit() {
       "감사 로그 ",
       el("span", { class: "n", text: "= git log (GET /api/audit)" }),
     ]),
-    el("div", { class: "row6", style: "padding:0 16px 8px" }, [
+    el("div", { class: "row6 audit-filter" }, [
       docInput,
       windowSelect,
       goBtn,
@@ -104,14 +103,7 @@ export function auditMessage(msg) {
   ]);
 }
 
-function wideSection(tab, label, id) {
-  __setActiveTab(tab);
-  __setCrumbs([{ label }]);
-  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
-  __screen().appendChild(__cols({ main, className: "wide" }));
-}
-
 export function renderAuditScreen() {
-  wideSection("audit", "감사", "audit");
+  pageSection("audit", "감사", "audit");
   renderAudit();
 }

@@ -296,3 +296,12 @@ export function cols({ left = null, main, right = null, className = "" }) {
 }
 export const panel = (cls, children, label) =>
   el("aside", { class: `panel ${cls}`, ...(label ? { "aria-label": label } : {}) }, children);
+
+/** A wide page card holding one <section id> (검토 · 감사 draw into it). */
+export function pageSection(tab, label, id) {
+  setActiveTab(tab);
+  setCrumbs([{ label }]);
+  const section = el("section", { id, class: `page-card ${id}` });
+  screen().appendChild(cols({ main: el("main", { class: "main wide" }, section), className: "wide" }));
+  return section;
+}
