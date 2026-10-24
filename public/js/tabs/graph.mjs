@@ -1,7 +1,8 @@
+import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
+import { el as __el } from "../dom.mjs";
 import { api } from "../api.mjs";
 import { $, el } from "../dom.mjs";
 import { DOC_TYPES, TYPE_LABEL, setLastDoc, typeInfo } from "../state.mjs";
-import { highlightTree } from "./docs.mjs";
 
 // ================= 그래프 =================
 // 문서 간 관계를 왼→오 층 그래프로. 열 = 메인에서의 거리, 선 = links[]
@@ -41,6 +42,7 @@ export function svgEl(tag, attrs, children) {
 }
 
 export async function renderGraph(selKey) {
+  wideSection("graph", "그래프", "graph");
   const ticket = ++graphTicket;
   const section = $("graph");
   section.replaceChildren(el("p", { class: "loading", text: "불러오는 중…" }));
@@ -58,7 +60,6 @@ export async function renderGraph(selKey) {
   if (sel) {
     const n = graph.nodes.get(sel);
     setLastDoc({ type: n.type, id: n.id });
-    highlightTree();
   }
 
   function select(key) {
@@ -66,7 +67,6 @@ export async function renderGraph(selKey) {
     const n = key && graph.nodes.get(key);
     setLastDoc(n ? { type: n.type, id: n.id } : null);
     history.replaceState(null, "", n ? `#/graph/${n.type}/${encodeURIComponent(n.id)}` : "#/graph");
-    highlightTree();
     paintSel();
     highlight();
   }
@@ -308,4 +308,11 @@ export async function renderGraph(selKey) {
   }
 
   draw();
+}
+
+function wideSection(tab, label, id) {
+  __setActiveTab(tab);
+  __setCrumbs([{ label }]);
+  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
+  __screen().appendChild(__cols({ main, className: "wide" }));
 }

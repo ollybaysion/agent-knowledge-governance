@@ -1,8 +1,11 @@
+import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
+import { el as __el } from "../dom.mjs";
 import { api } from "../api.mjs";
 import { $, el, toast } from "../dom.mjs";
 import { evidence } from "../shared.mjs";
 import { DOC_TYPES, currentUser } from "../state.mjs";
-import { renderDocTree } from "./docs.mjs";
+import { invalidateDocs } from "../api.mjs";
+import { refreshReviewCount } from "../review-count.mjs";
 
 // ================= 검토 대기열 =================
 export async function renderQueue() {
@@ -94,7 +97,8 @@ export async function renderQueue() {
       body: {},
     });
     if (r.ok) {
-      await renderDocTree();
+      invalidateDocs();
+      refreshReviewCount();
       renderQueue();
     } else toast(`반영 실패 (${r.status})`, "error");
   }
@@ -140,7 +144,8 @@ export async function slotQueueSection(section, title, badge, tier, promotable) 
                   },
                 );
                 if (r.ok) {
-                  await renderDocTree();
+                  invalidateDocs();
+      refreshReviewCount();
                   renderQueue();
                 } else toast(`확정 실패 (${r.status})`, "error");
               },
@@ -199,4 +204,16 @@ export async function slotQueueSection(section, title, badge, tier, promotable) 
         ])
       : el("p", { class: "loading", text: "없습니다." }),
   );
+}
+
+function wideSection(tab, label, id) {
+  __setActiveTab(tab);
+  __setCrumbs([{ label }]);
+  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
+  __screen().appendChild(__cols({ main, className: "wide" }));
+}
+
+export function renderReview() {
+  wideSection("review", "검토", "queue");
+  renderQueue();
 }

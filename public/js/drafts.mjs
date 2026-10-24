@@ -1,25 +1,23 @@
-import { api } from "./api.mjs";
-import { $, el, toast } from "./dom.mjs";
+// 새 문서: [새 문서] → 타입 플라이아웃(타입 목록 순서) → 로컬 드래프트(서버에
+// 아직 없음) → 이름과 팩트를 채우고 저장 = 비활성 문서 하나. 맨 아래
+// [타입 없이 올리기] 는 md 한 장을 미분류로 올린다(쓰기 사용자 모두).
+import { allDocs, api, invalidateDocs } from "./api.mjs";
+import { el, icon, toast } from "./dom.mjs";
 import { dataIdConflictText } from "./shared.mjs";
-import { DOC_TYPES, TYPE_LABEL, activeMdTypes, currentUser, isMdType } from "./state.mjs";
-import { renderDocTree } from "./tabs/docs.mjs";
+import { cols, screen, setActiveTab, setCrumbs } from "./shell.mjs";
+import { TYPES, TYPE_LABEL, canUpload as userCanUpload, isAdmin, isMdType, loadTypes, typeColor } from "./state.mjs";
+import { pathPanel } from "./tabs/docs.mjs";
 
-// ================= 새 문서 만들기 (#33) =================
-// 흐름: 사이드바 하단 "+ 새 문서" → 오른쪽 포맷 플라이아웃 → 포맷 클릭 → 로컬
-// 드래프트(서버 미저장) → 이름 포함 모든 필드를 클릭-투-편집으로 채움 → "저장"
-// 이 inactive 문서로 커밋(이름 없으면 저장 불가). 미완이어도 저장되고(서버 완화
-// 검증), 활성화는 완성돼야만 된다. CSP: 인라인 없이 el/addEventListener.
 export function canCreate() {
-  return !!currentUser && currentUser.group === "admin";
+  return isAdmin();
 }
 export function canUpload() {
-  return !!currentUser && (currentUser.group === "admin" || currentUser.group === "user");
+  return userCanUpload();
 }
 export const nowIso = () => new Date().toISOString();
 
 // ---- 로컬 드래프트 저장소 (localStorage) — 여러 개 동시 보관 ----
-// akg_drafts = { <localId>: { type, body } }. 저장 전이라 서버엔 없고, 트리에
-// "(빈 문서)"·"(빈 문서2)"… 로 늘어난다. localId 는 단조 증가 카운터(d1, d2 …).
+// akg_drafts = { <localId>: { type, body } }. localId 는 단조 증가(d1, d2 …).
 export const DRAFTS_KEY = "akg_drafts";
 export function loadDrafts() {
   try {
@@ -81,108 +79,91 @@ export function deriveDraftId(type, body) {
   return "";
 }
 
-// ---- 사이드바 하단 버튼 + 오른쪽 포맷 플라이아웃 ----
-export function renderTreeActions() {
-  const host = $("tree-actions");
-  if (!host) return;
-  host.replaceChildren();
-  if (!canUpload()) return;
-  const btn = el(
-    "button",
-    { type: "button", id: "new-doc-btn", class: "btn primary" },
-    "+ 새 문서",
-  );
-  btn.addEventListener("click", () => toggleFlyout(host, btn));
-  host.appendChild(btn);
-}
-export function closeFlyout() {
-  document.querySelector(".nd-flyout")?.remove();
-  document.removeEventListener("click", onDocClickForFlyout, true);
-}
-export function onDocClickForFlyout(e) {
-  const fly = document.querySelector(".nd-flyout");
-  if (!fly) return;
-  if (!fly.contains(e.target) && e.target.id !== "new-doc-btn") closeFlyout();
-}
-export const NEW_DOC_OPTS = [
-  { type: "db-schema", desc: "테이블 · 컬럼" },
-  { type: "msg-format", desc: "설비 커맨드" },
-  { type: "domain-skill", desc: "스킬 문서(md)" },
-  { type: "manual", desc: "화면 매뉴얼(캡처)" },
-];
-// admin: the structured types above and every open md type; anyone who
-// writes: 타입 없이 올리기 (unclassified).
+
+// ---- 새 문서 단추 + 플라이아웃 ----
+// Structured types with a draft form, in the type list's order; every open md
+// type; last, 타입 없이 올리기 for anyone who writes.
+const FORM_TYPES = { "db-schema": "테이블 · 컬럼", "msg-format": "설비 커맨드", "domain-skill": "스킬 문서(md)", manual: "화면 매뉴얼(캡처)" };
 export function newDocOpts() {
   if (!canCreate()) return [];
-  const md = activeMdTypes()
-    .filter((t) => t.id !== "unclassified")
-    .map((t) => ({ type: t.id, desc: t.description || `${t.label}(md)` }));
-  return [...NEW_DOC_OPTS, ...md];
-}
-export function toggleFlyout(host, btn) {
-  if (document.querySelector(".nd-flyout")) {
-    closeFlyout();
-    return;
-  }
-  const fly = el("div", { class: "nd-flyout", role: "menu" }, [
-    el("div", { class: "nd-h", text: "새 문서 종류" }),
-    ...newDocOpts().map((o) =>
-      el(
-        "button",
-        {
-          type: "button",
-          class: "nd-opt",
-          role: "menuitem",
-          onclick: () => {
-            closeFlyout();
-            startDraft(o.type);
-          },
-        },
-        [
-          el("span", { class: "k", text: o.type }),
-          el("span", { class: "d", text: o.desc }),
-        ],
-      ),
-    ),
-    el(
-      "button",
-      {
-        type: "button",
-        class: "nd-opt",
-        role: "menuitem",
-        onclick: () => {
-          closeFlyout();
-          openUploadDialog();
-        },
-      },
-      [
-        el("span", { class: "k", text: "타입 없이 올리기" }),
-        el("span", { class: "d", text: "미분류 md 한 장" }),
-      ],
-    ),
-  ]);
-  // body 에 fixed 로 붙인다 — 사이드바의 overflow 가 팝오버를 자르지 않게. 위치는
-  // 버튼 rect 로: 버튼 오른쪽, 아래 정렬(.style 프로퍼티는 CSP style-src 무관).
-  document.body.appendChild(fly);
-  const rect = btn.getBoundingClientRect();
-  fly.style.left = `${Math.round(rect.right + 6)}px`;
-  fly.style.bottom = `${Math.round(window.innerHeight - rect.bottom)}px`;
-  // 다음 틱에 바깥 클릭 감지 등록(지금 클릭이 바로 닫지 않게)
-  setTimeout(
-    () => document.addEventListener("click", onDocClickForFlyout, true),
-    0,
-  );
+  return TYPES.filter((t) => t.status === "active" && t.id !== "unclassified" && (FORM_TYPES[t.id] || t.kind === "md")).map((t) => ({
+    type: t.id,
+    label: t.id === "domain-skill" ? "스킬 문서" : t.label,
+    desc: FORM_TYPES[t.id] ?? t.description ?? `${t.label}(md)`,
+    color: t.color,
+  }));
 }
 
-// 포맷을 고를 때마다 새 빈 드래프트를 하나 더 만든다 — 트리에 "(빈 문서)",
-// "(빈 문서2)"… 로 늘어난다.
-export function startDraft(type) {
+let openFly = null;
+function closeFlyout() {
+  if (!openFly) return;
+  openFly.menu.remove();
+  openFly.btn.setAttribute("aria-expanded", "false");
+  document.removeEventListener("pointerdown", openFly.outside, true);
+  openFly = null;
+}
+
+/** [새 문서] and its flyout: types in order, then 타입 없이 올리기. */
+export function newDocButton({ compact = false } = {}) {
+  if (!canUpload()) return document.createTextNode("");
+  const btn = el("button", { type: "button", class: `btn primary${compact ? " sm" : ""} newdoc-btn`, "aria-haspopup": "menu", "aria-expanded": "false" }, [icon("plus", 15), "새 문서"]);
+  btn.addEventListener("click", () => {
+    if (openFly?.btn === btn) return closeFlyout();
+    closeFlyout();
+    const opts = newDocOpts();
+    const item = (attrs, children) => el("li", { role: "none" }, el("button", { type: "button", role: "menuitem", class: "nd-opt", ...attrs }, children));
+    const menu = el("div", { class: "nd-flyout", role: "menu", "aria-label": "새 문서 종류" }, [
+      el("div", { class: "nd-h", text: "새 문서" }),
+      el("ul", {}, [
+        ...opts.map((o) =>
+          item({ onclick: () => { closeFlyout(); startDraft(o.type); } }, [
+            el("span", { class: "tdot", style: { "--c": o.color }, "aria-hidden": "true" }),
+            el("span", { class: "nd-l", text: o.label }),
+            el("span", { class: "nd-d", text: o.desc }),
+          ])),
+        item({ class: "nd-opt nd-upload", onclick: () => { closeFlyout(); openUploadDialog(); } }, [
+          icon("upload", 15),
+          el("span", { class: "nd-l", text: "타입 없이 올리기" }),
+          el("span", { class: "nd-d", text: "md 한 장 → 미분류" }),
+        ]),
+      ]),
+    ]);
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll("button")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") items[(i + 1) % items.length].focus();
+      else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length].focus();
+      else if (e.key === "Escape") {
+        closeFlyout();
+        btn.focus();
+      } else return;
+      e.preventDefault();
+    });
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect();
+    const w = 300;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    menu.style.left = `${Math.round(left)}px`;
+    if (r.top > window.innerHeight / 2) menu.style.bottom = `${Math.round(window.innerHeight - r.top + 6)}px`;
+    else menu.style.top = `${Math.round(r.bottom + 6)}px`;
+    btn.setAttribute("aria-expanded", "true");
+    const outside = (e) => {
+      if (!menu.contains(e.target) && !btn.contains(e.target)) closeFlyout();
+    };
+    openFly = { btn, menu, outside };
+    setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
+    menu.querySelector("button")?.focus();
+  });
+  return btn;
+}
+
+// Each pick makes one more empty draft.
+export function startDraft(type, preset = {}) {
   const localId = createDraft(type);
-  renderDocTree(); // 왼쪽 트리에 바로 뜨게
+  if (Object.keys(preset).length) saveDraftBody(localId, { ...preset });
   location.hash = `#/draft/${type}/${localId}`;
 }
 
-// 헤더 제목 = id 소스(테이블/커맨드/스킬명) 클릭-투-편집. "이름"이 곧 문서 제목.
 export function idSourceField(type, body, onIdChange) {
   if (type === "db-schema")
     return eField(() => body.table, (v) => (body.table = v), {
@@ -218,68 +199,71 @@ export function idSourceField(type, body, onIdChange) {
   });
 }
 
-// ---- 드래프트 화면 (인라인 클릭-투-편집) ----
-export function renderDraftScreen(type, localId) {
-  const section = $("draft");
+
+// ---- 드래프트 화면 ----
+export async function renderDraftScreen(type, localId) {
   const body = getDraftBody(localId);
-  // 드래프트가 없어졌으면(저장/취소/잘못된 링크) 개요로.
-  if (!DOC_TYPES.includes(type) || body == null) {
-    location.hash = "#/corpus";
+  if (!TYPES.some((t) => t.id === type) || body == null) {
+    location.replace("#/docs");
     return;
   }
+  const isAgent = type === "domain-skill" && (body.role ?? "main") === "main";
+  setActiveTab(isAgent ? "agents" : "docs");
+  setCrumbs(
+    isAgent
+      ? [{ label: "에이전트", href: "#/agents" }, { label: "새 문서" }]
+      : [{ label: "문서", href: "#/docs" }, { label: TYPE_LABEL[type] ?? type, href: `#/docs/${type}` }, { label: "새 문서" }],
+  );
+  const docs = await allDocs();
+  const main = el("main", { class: "main draft-main" });
+  const left = pathPanel(type, null, docs);
+  const layout = cols({ left: left.node, main, className: left.collapsed ? "collapsed" : "" });
+  left.bind(layout);
+  screen().appendChild(layout);
+  paintDraft(main, type, localId, body);
+}
+
+function paintDraft(section, type, localId, body) {
   const persist = () => saveDraftBody(localId, body);
   const rerender = () => {
     persist();
-    renderDraftScreen(type, localId);
+    paintDraft(section, type, localId, body);
   };
-
-  const saveBtn = el("button", {
-    type: "button",
-    class: "btn primary",
-    text: "저장 (비활성)",
-    onclick: () => saveDraft(type, localId, body),
-  });
+  const saveBtn = el("button", { type: "button", class: "btn primary", text: "저장 (비활성)", onclick: () => saveDraft(type, localId, body) });
   function updateSave() {
     const id = deriveDraftId(type, body);
     saveBtn.disabled = !id;
-    saveBtn.title = id
-      ? "이 드래프트를 비활성 문서로 저장합니다."
-      : "제목(테이블/커맨드/스킬명)을 먼저 입력해야 저장할 수 있습니다.";
+    saveBtn.title = id ? "이 드래프트를 비활성 문서로 저장합니다." : "제목(테이블 · 커맨드 · 스킬 이름)을 먼저 넣어야 저장합니다.";
   }
   const onIdChange = () => {
     persist();
     updateSave();
-    renderDocTree(); // 트리 라벨을 "(빈 문서)" → 새 제목으로 갱신
   };
-
-  // 헤더 제목 = id 소스 클릭-투-편집. 여기에 바로 이름을 친다.
   const head = el("div", { class: "dfhead" }, [
-    el("span", { class: "df-badge", text: "드래프트 · 저장 안 됨" }),
-    el("span", { class: "dftitle-wrap" }, idSourceField(type, body, onIdChange)),
-    el("span", { class: "chip", text: type }),
-    el("span", { class: "sp" }),
-    el("button", {
-      type: "button",
-      class: "btn ghost",
-      text: "취소",
-      onclick: () => {
-        deleteDraft(localId);
-        toast("드래프트를 버렸습니다.");
-        renderDocTree();
-        location.hash = "#/corpus";
-      },
-    }),
-    saveBtn,
+    el("p", { class: "doc-eyebrow" }, [
+      el("span", { class: "tdot", style: { "--c": typeColor(type) } }),
+      ` ${type} · ${TYPE_LABEL[type] ?? type}`,
+      el("span", { class: "df-badge", text: "드래프트 · 저장 안 됨" }),
+    ]),
+    el("div", { class: "dftitle-wrap" }, idSourceField(type, body, onIdChange)),
+    el("div", { class: "dfacts" }, [
+      el("button", {
+        type: "button",
+        class: "btn ghost",
+        text: "버리기",
+        onclick: () => {
+          deleteDraft(localId);
+          toast("드래프트를 버렸습니다.");
+          location.hash = type === "domain-skill" ? "#/agents" : `#/docs/${type}`;
+        },
+      }),
+      saveBtn,
+    ]),
   ]);
-  const note = el("div", { class: "df-note" }, [
-    el("b", { text: "로컬 드래프트입니다 — 아직 서버에 저장되지 않았습니다." }),
-    " 이름과 팩트를 채우고 ",
-    el("b", { text: "저장" }),
-    " 하면 비활성 문서로 올라갑니다. 설명 등 나머지는 저장 후 문서 화면에서 채우고, ",
-    el("b", { text: "완성되면 활성화" }),
-    " 하세요.",
+  const note = el("p", { class: "df-note" }, [
+    el("b", { text: "이 브라우저에만 있는 드래프트입니다." }),
+    " 이름과 팩트를 채우고 저장하면 비활성 문서로 올라갑니다. 설명은 저장 뒤 문서 화면에서 채우고, 다 되면 활성으로 바꾸세요.",
   ]);
-
   const fields =
     type === "db-schema"
       ? draftDbSchema(body, onIdChange, persist, rerender)
@@ -290,12 +274,10 @@ export function renderDraftScreen(type, localId) {
           : isMdType(type)
             ? draftVoc(body, persist)
             : draftDomainSkill(body, onIdChange, persist, rerender);
-
   section.replaceChildren(head, note, fields);
   updateSave();
 }
 
-// 클릭-투-편집 텍스트 (제자리 스왑, 전체 재렌더 없음). onChange 는 커밋 후 호출.
 export function eField(get, set, opts = {}) {
   const wrap = el("span", { class: "df-v" });
   function showRead() {
@@ -527,7 +509,6 @@ export function draftDomainSkill(body, onIdChange, persist, rerender) {
   return wrap;
 }
 
-// ---- 저장: 드래프트 → inactive 문서 POST ----
 export function draftManual(body, persist) {
   const wrap = el("div", { class: "dfwrap" });
   wrap.append(
@@ -609,10 +590,11 @@ export function finalizeDraftBody(type, body) {
   return b;
 }
 
+
 export async function saveDraft(type, localId, body) {
   const id = deriveDraftId(type, body);
   if (!id) {
-    toast("제목(테이블/커맨드/스킬명)을 먼저 입력하세요.", "error");
+    toast("제목(테이블 · 커맨드 · 스킬 이름)을 먼저 넣으세요.", "error");
     return;
   }
   const doc = {
@@ -626,112 +608,153 @@ export async function saveDraft(type, localId, body) {
   const r = await api(`/api/docs/${type}`, { method: "POST", body: doc });
   if (r.status === 201) {
     deleteDraft(localId);
-    toast("저장했습니다 — 비활성 문서입니다. 이어서 채우고 완성되면 활성화하세요.");
-    await renderDocTree();
+    toast("저장했습니다 — 비활성 문서입니다. 이어서 채우고 다 되면 활성으로 바꾸세요.");
+    invalidateDocs();
+    await loadTypes();
     location.hash = `#/doc/${type}/${encodeURIComponent(id)}`;
     return;
   }
-  if ((r.data || {}).error === "data_id_conflict") {
-    toast(dataIdConflictText(r.data), "error");
-    return;
-  }
-  if (r.status === 409) {
-    toast(`이미 같은 이름(${id})의 문서가 있습니다.`, "error");
-    return;
-  }
+  if ((r.data || {}).error === "data_id_conflict") return toast(dataIdConflictText(r.data), "error");
+  if (r.status === 409) return toast(`같은 이름(${id})의 문서가 이미 있습니다.`, "error");
   if (r.status === 400) {
     const d = r.data || {};
-    const msg =
-      d.error === "validation_failed"
-        ? (d.details || []).join(" · ")
-        : d.error === "edit_rejected"
-          ? d.message
-          : d.error || "";
-    toast("저장 실패: " + msg, "error");
-    return;
+    const msg = d.error === "validation_failed" ? (d.details || []).join(" · ") : d.error === "edit_rejected" ? d.message : d.error || "";
+    return toast(`저장 실패: ${msg}`, "error");
   }
   toast(`저장 실패 (${r.status || "네트워크"})`, "error");
 }
 
-// 타입 없이 올리기: one md as an unclassified document. Anyone who writes may;
-// an admin gives it a type later (타입 정하기).
+// 타입 없이 올리기: md 한 장을 미분류 문서로. 쓰는 사람 누구나 올리고, 타입은
+// admin 이 나중에 정한다(문서 머리 [타입 정하기 ▾]).
+const slugOf = (name) =>
+  name
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^[^a-z]+|-+$/g, "");
+
 export function openUploadDialog() {
-  const name = el("input", { type: "text", class: "fld mono", placeholder: "이름 (예: deploy-guide)", "aria-label": "이름" });
-  const text = el("textarea", {
-    class: "fld mono up-md",
-    rows: 12,
-    spellcheck: "false",
-    placeholder: "md 를 붙여 넣거나 .md 파일 하나를 여기에 끌어 놓습니다",
-    "aria-label": "md 본문",
-  });
-  const url = el("input", { type: "url", class: "fld mono", placeholder: "원본 URL (선택, https://…)", "aria-label": "원본 URL" });
-  const send = el("button", { type: "submit", class: "btn primary", text: "올리기" });
-  const dlg = el("dialog", { class: "up-dialog", "aria-label": "타입 없이 올리기" });
-  const form = el("form", { method: "dialog" }, [
-    el("h3", { text: "타입 없이 올리기" }),
-    el("p", { class: "fhint", text: "미분류로 저장합니다. 타입은 admin 이 나중에 정합니다." }),
-    dfRow("이름", true, name),
-    dfRow("md", true, text),
-    dfRow("원본", false, url),
-    el("div", { class: "editacts" }, [
-      send,
-      el("button", { type: "button", class: "btn ghost", text: "취소", onclick: () => dlg.close() }),
-    ]),
+  const fileBox = el("div", { class: "up-drop", tabindex: "0", role: "button", "aria-label": "md 파일 고르기 — 끌어 놓거나 눌러서 고릅니다" }, [
+    icon("file", 18),
+    el("span", { class: "up-drop-t", text: "md 파일 하나를 여기에 끌어 놓거나 눌러서 고릅니다" }),
   ]);
-  text.addEventListener("dragover", (e) => e.preventDefault());
-  text.addEventListener("drop", async (e) => {
-    const files = e.dataTransfer?.files;
-    if (!files?.length) return;
-    e.preventDefault();
-    if (files.length > 1 || !/\.(md|markdown|txt)$/i.test(files[0].name)) {
+  const picker = el("input", { type: "file", accept: ".md,.markdown,.txt,text/markdown,text/plain", hidden: true });
+  const name = el("input", { type: "text", class: "fld", placeholder: "이름 (예: 설비 점검 메모)", "aria-label": "이름" });
+  const id = el("input", { type: "text", class: "fld mono", placeholder: "id (예: eqp-check-memo)", "aria-label": "id" });
+  const text = el("textarea", { class: "fld mono up-md", rows: 10, spellcheck: "false", placeholder: "md 를 붙여 넣습니다 — # 제목 으로 시작해 자유롭게", "aria-label": "md 본문" });
+  const url = el("input", { type: "url", class: "fld mono", placeholder: "https://… (선택)", "aria-label": "원본 URL" });
+  const send = el("button", { type: "submit", class: "btn primary", text: "저장" });
+  const dlg = el("dialog", { class: "dlg up-dialog", "aria-labelledby": "up-title" });
+  let idTouched = false;
+  id.addEventListener("input", () => (idTouched = true));
+  name.addEventListener("input", () => {
+    if (!idTouched) id.value = slugOf(name.value);
+  });
+  async function takeFile(f) {
+    if (!f) return;
+    if (!/\.(md|markdown|txt)$/i.test(f.name)) {
       toast(".md 파일 하나만 받습니다", "error");
       return;
     }
-    text.value = await files[0].text();
-    if (!name.value.trim())
-      name.value = files[0].name
-        .replace(/\.[^.]+$/, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/^[^a-z]+|-+$/g, "");
+    if (f.size > 400 * 1024) {
+      toast("md 는 400KB 까지 받습니다", "error");
+      return;
+    }
+    text.value = await f.text();
+    const base = f.name.replace(/\.[^.]+$/, "");
+    if (!name.value.trim()) name.value = base;
+    if (!idTouched) id.value = slugOf(base) || id.value;
+    fileBox.replaceChildren(
+      icon("file", 18),
+      el("b", { class: "mono", text: f.name }),
+      el("span", { class: "dim", text: `${(f.size / 1024).toFixed(1)} KB · ${text.value.split("\n").length}줄 — 다른 파일을 놓으면 바뀝니다` }),
+    );
+  }
+  fileBox.addEventListener("click", () => picker.click());
+  fileBox.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      picker.click();
+    }
   });
+  picker.addEventListener("change", () => takeFile(picker.files[0]));
+  for (const target of [fileBox, text]) {
+    target.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      fileBox.classList.add("over");
+    });
+    target.addEventListener("dragleave", () => fileBox.classList.remove("over"));
+    target.addEventListener("drop", (e) => {
+      const files = e.dataTransfer?.files;
+      fileBox.classList.remove("over");
+      if (!files?.length) return;
+      e.preventDefault();
+      if (files.length > 1) return toast(".md 파일 하나만 받습니다", "error");
+      takeFile(files[0]);
+    });
+  }
+  const row = (label, control, hint) =>
+    el("label", { class: "up-row" }, [
+      el("span", { class: "up-k", text: label }),
+      el("span", { class: "up-v" }, [control, hint ? el("span", { class: "dim up-hint", text: hint }) : null]),
+    ]);
+  const form = el("form", { method: "dialog" }, [
+    el("div", { class: "dlg-h" }, [
+      el("h3", { id: "up-title", text: "타입 없이 올리기" }),
+      el("span", { class: "tag", text: "쓰기 사용자 모두" }),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "icon-btn", "aria-label": "닫기", onclick: () => dlg.close() }, icon("x", 16)),
+    ]),
+    el("p", { class: "dim", text: "md 파일을 끌어다 놓거나 글을 붙입니다. 문서는 미분류에 들어가고, 타입은 admin 이 나중에 정합니다." }),
+    fileBox,
+    picker,
+    row("이름", name, "파일 이름에서 가져옵니다"),
+    row("id", id, "영문 소문자 · 숫자 · 하이픈. 타입을 정해도 그대로입니다"),
+    row("md 본문", text),
+    row("원본 URL", url, "선택 — 문서 머리에 원본 ↗ 로 보입니다"),
+    el("div", { class: "dlg-foot" }, [
+      el("span", { class: "dim", text: "저장하면 미분류에 커밋 하나를 남깁니다" }),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "btn ghost", text: "취소", onclick: () => dlg.close() }),
+      send,
+    ]),
+  ]);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const id = name.value.trim().toLowerCase();
-    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
-      toast("이름은 영어 소문자로 시작하고 소문자 · 숫자 · - 만 씁니다", "error");
-      return;
-    }
-    if (!text.value.trim()) {
-      toast("md 본문이 비었습니다", "error");
-      return;
-    }
+    const docId = id.value.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9-]*$/.test(docId)) return toast("id 는 영문 소문자로 시작하고 소문자 · 숫자 · - 만 씁니다", "error");
+    if (!text.value.trim()) return toast("md 본문이 비었습니다", "error");
     const u = url.value.trim();
+    if (u && !/^https?:\/\//i.test(u)) return toast("원본 URL 은 http(s):// 로 시작합니다", "error");
+    let markdown = text.value;
+    const label = name.value.trim();
+    if (label && !/^#\s+/m.test(markdown)) markdown = `# ${label}\n\n${markdown}`;
     send.disabled = true;
     const r = await api("/api/docs/unclassified", {
       method: "POST",
       body: {
         schema: "unclassified/v1",
-        id,
-        keywords: [{ kw: id, inject: "full" }],
+        id: docId,
+        keywords: [{ kw: docId, inject: "full" }],
         status: "active",
-        ...(u ? { origin: { url: u } } : {}),
-        body: { name: id, markdown: text.value },
+        ...(u ? { origin: { url: u, ...(label ? { title: label } : {}) } } : {}),
+        body: { name: docId, markdown },
       },
     });
     send.disabled = false;
     if (r.status === 201) {
       dlg.close();
       toast("미분류로 올렸습니다");
-      await renderDocTree();
-      location.hash = `#/doc/unclassified/${encodeURIComponent(id)}`;
+      invalidateDocs();
+      await loadTypes();
+      location.hash = `#/doc/unclassified/${encodeURIComponent(docId)}`;
       return;
     }
     const d = r.data || {};
     toast(
       r.status === 409
-        ? `이미 같은 이름(${id})의 문서가 있습니다.`
-        : `올리기 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : d.message ? " — " + d.message : ""}`,
+        ? `같은 id(${docId})의 문서가 이미 있습니다.`
+        : `올리기 실패 (${r.status})${d.details ? ` — ${d.details.join(" · ")}` : d.message ? ` — ${d.message}` : ""}`,
       "error",
     );
   });
@@ -739,5 +762,5 @@ export function openUploadDialog() {
   dlg.appendChild(form);
   document.body.appendChild(dlg);
   dlg.showModal();
-  name.focus();
+  fileBox.focus();
 }

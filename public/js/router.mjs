@@ -1,15 +1,8 @@
 // Hash routes → screens. The hash alone moves around inside the page, so the
 // address's ?embed · ?from · ?section stay as they are on every move.
-import { $, el } from "./dom.mjs";
-import { cols, panel, screen, setActiveTab, setCrumbs } from "./shell.mjs";
-import { currentUser, lastDoc, setLastDoc } from "./state.mjs";
-import { renderOverview } from "./tabs/overview.mjs";
-import { renderDocScreen } from "./tabs/doc-view.mjs";
-import { renderGraph } from "./tabs/graph.mjs";
-import { renderQueue } from "./tabs/review.mjs";
-import { renderAudit } from "./tabs/audit.mjs";
-import { renderDraftScreen } from "./drafts.mjs";
-import { renderDocTree, treeParts } from "./tabs/docs.mjs";
+import { el } from "./dom.mjs";
+import { cols, screen, setActiveTab, setCrumbs } from "./shell.mjs";
+import { currentUser, isAdmin, lastDoc } from "./state.mjs";
 
 // A screen with unsaved work sets a guard: the message to confirm before
 // leaving, or null when there is nothing to lose.
@@ -50,10 +43,6 @@ export function hashParts(hash = location.hash) {
     });
 }
 export const docHash = (type, id) => `#/doc/${type}/${encodeURIComponent(id)}`;
-export function go(hash) {
-  if (location.hash === hash) route();
-  else location.hash = hash;
-}
 
 /** A doc picked from a list opens its screen — or, on the graph, becomes its selection. */
 export function openDoc(type, id) {
@@ -61,59 +50,56 @@ export function openDoc(type, id) {
   location.hash = onGraph ? `#/graph/${type}/${encodeURIComponent(id)}` : docHash(type, id);
 }
 
-function wide(tab, crumbs, id) {
+/** A screen of its own module, loaded on first use. */
+const screens = {
+  overview: () => import("./tabs/overview.mjs"),
+  agents: () => import("./tabs/agents.mjs"),
+  docs: () => import("./tabs/docs.mjs"),
+  doc: () => import("./tabs/doc-view.mjs"),
+  edit: () => import("./tabs/editor.mjs"),
+  draft: () => import("./drafts.mjs"),
+  graph: () => import("./tabs/graph.mjs"),
+  review: () => import("./tabs/review.mjs"),
+  audit: () => import("./tabs/audit.mjs"),
+  types: () => import("./tabs/types.mjs"),
+};
+
+function notAllowed(tab, label) {
   setActiveTab(tab);
-  setCrumbs(crumbs);
-  const main = el("main", { class: "main wide" }, el("section", { id, class: "on" }));
-  screen().appendChild(cols({ main, className: "wide" }));
+  setCrumbs([{ label }]);
+  screen().appendChild(cols({ main: el("main", { class: "main" }, el("p", { class: "loading", text: "admin 만 볼 수 있습니다." })) }));
 }
 
-function withTree(tab, id) {
-  setActiveTab(tab);
-  const main = el("main", { class: "main" }, el("section", { id, class: "on" }));
-  screen().appendChild(cols({ left: panel("left tree-panel", treeParts(), "문서 트리"), main }));
-  renderDocTree();
-}
-
-export function route() {
+let routeTicket = 0;
+export async function route() {
   if (!currentUser) return;
+  const ticket = ++routeTicket;
   const parts = hashParts();
-  window.scrollTo(0, 0);
-  if (parts[0] === "doc" && parts[1] && parts[2]) {
-    withTree("docs", "doc");
-    setCrumbs([{ label: "문서", href: "#/docs" }, { label: parts[2] }]);
-    renderDocScreen(parts[1], parts[2]);
-    return;
-  }
-  if (parts[0] === "draft" && parts[1] && parts[2]) {
-    withTree("docs", "draft");
-    setCrumbs([{ label: "문서", href: "#/docs" }, { label: "새 문서" }]);
-    renderDraftScreen(parts[1], parts[2]);
-    return;
-  }
-  if (parts[0] === "graph") {
-    wide("graph", [{ label: "그래프" }], "graph");
-    renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null);
-    return;
-  }
-  if (parts[0] === "docs" || parts[0] === "agents") {
-    withTree(parts[0], "doc");
-    setCrumbs([{ label: parts[0] === "docs" ? "문서" : "에이전트" }]);
-    if (lastDoc) renderDocScreen(lastDoc.type, lastDoc.id);
-    else $("doc").replaceChildren(el("p", { class: "loading", text: "왼쪽에서 문서를 고르세요." }));
-    return;
-  }
-  if (parts[0] === "review" || parts[0] === "queue") {
-    wide("review", [{ label: "검토" }], "queue");
-    renderQueue();
-    return;
-  }
-  if (parts[0] === "audit") {
-    wide("audit", [{ label: "감사" }], "audit");
-    renderAudit();
-    return;
-  }
-  setLastDoc(lastDoc);
-  wide("overview", [{ label: "개요" }], "corpus");
-  renderOverview();
+  const [head] = parts;
+  if (!(head === "doc" && parts[1] === lastDoc?.type && parts[2] === lastDoc?.id)) window.scrollTo(0, 0);
+  const load = async (name) => {
+    const m = await screens[name]();
+    return ticket === routeTicket ? m : null;
+  };
+  let m;
+  if (head === "doc" && parts[1] && parts[2]) {
+    if ((m = await load("doc"))) m.renderDocScreen(parts[1], parts[2]);
+  } else if (head === "edit" && parts[1] && parts[2]) {
+    if ((m = await load("edit"))) m.renderEditor(parts[1], parts[2], parts[3] ?? null);
+  } else if (head === "draft" && parts[1] && parts[2]) {
+    if ((m = await load("draft"))) m.renderDraftScreen(parts[1], parts[2]);
+  } else if (head === "agents") {
+    if ((m = await load("agents"))) m.renderAgents();
+  } else if (head === "docs") {
+    if ((m = await load("docs"))) m.renderBrowse(parts[1] ?? null);
+  } else if (head === "graph") {
+    if ((m = await load("graph"))) m.renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null);
+  } else if (head === "review" || head === "queue") {
+    if ((m = await load("review"))) m.renderReview();
+  } else if (head === "audit") {
+    if ((m = await load("audit"))) m.renderAuditScreen();
+  } else if (head === "types") {
+    if (!isAdmin()) return notAllowed("types", "타입");
+    if ((m = await load("types"))) m.renderTypes();
+  } else if ((m = await load("overview"))) m.renderOverviewScreen();
 }

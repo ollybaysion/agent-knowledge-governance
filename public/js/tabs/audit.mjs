@@ -1,3 +1,5 @@
+import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
+import { el as __el } from "../dom.mjs";
 import { api } from "../api.mjs";
 import { $, el } from "../dom.mjs";
 import { shortRev } from "../shared.mjs";
@@ -100,4 +102,16 @@ export function auditMessage(msg) {
     el("span", { class: `act ${cls}`, text: verb }),
     " " + msg.slice(verb.length + 1),
   ]);
+}
+
+function wideSection(tab, label, id) {
+  __setActiveTab(tab);
+  __setCrumbs([{ label }]);
+  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
+  __screen().appendChild(__cols({ main, className: "wide" }));
+}
+
+export function renderAuditScreen() {
+  wideSection("audit", "감사", "audit");
+  renderAudit();
 }

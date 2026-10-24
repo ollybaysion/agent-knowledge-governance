@@ -1,3 +1,5 @@
+import { cols as __cols, screen as __screen, setActiveTab as __setActiveTab, setCrumbs as __setCrumbs } from "../shell.mjs";
+import { el as __el } from "../dom.mjs";
 import { api } from "../api.mjs";
 import { $, el } from "../dom.mjs";
 import { keywordChips, shortRev, stat, statusBadge, tierMeter } from "../shared.mjs";
@@ -103,4 +105,16 @@ export async function renderOverview() {
       tr.style.display = t === "all" || tr.dataset.type === t ? "" : "none";
     }
   }
+}
+
+function wideSection(tab, label, id) {
+  __setActiveTab(tab);
+  __setCrumbs([{ label }]);
+  const main = __el("main", { class: "main wide" }, __el("section", { id, class: "on" }));
+  __screen().appendChild(__cols({ main, className: "wide" }));
+}
+
+export function renderOverviewScreen() {
+  wideSection("overview", "개요", "corpus");
+  renderOverview();
 }

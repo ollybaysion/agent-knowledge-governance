@@ -17,6 +17,7 @@ import {
   readJson,
   readText,
   revOfPath,
+  changedAtOfPath,
   readJsonAtRev,
   listIds,
   commitFiles,
@@ -160,6 +161,7 @@ export function registerDocsRoutes(app) {
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
+            updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
           });
         }
       }
