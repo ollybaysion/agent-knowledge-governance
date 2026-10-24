@@ -269,7 +269,14 @@ export function commitFiles(
   const rev = git(dir, ["rev-parse", "HEAD"]).trim();
 
   const cache = cacheFor(dir);
-  for (const relpath of touched) cache.set(relpath, rev);
+  for (const relpath of touched) {
+    cache.set(relpath, rev);
+    // The directories above too: revOfPath(dir, "domain-skill") is "the last
+    // commit under this directory", and a cache that learned only file paths
+    // kept answering with its first cold read.
+    for (let d = dirname(relpath); d !== "." && d !== "/"; d = dirname(d))
+      cache.set(d, rev);
+  }
   return rev;
 }
 

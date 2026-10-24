@@ -47,6 +47,33 @@ test("commitFiles writes + commits, rev is retrievable, cache is warm without a 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("revOfPath of a directory follows each commit under it, after a cold read", () => {
+  const dir = freshDir();
+  initStore(dir);
+  const rev1 = commitFiles(dir, {
+    author: "renoir",
+    message: "x",
+    writes: [{ relpath: "domain-skill/x.json", content: '{"x":1}\n' }],
+  });
+  assert.equal(revOfPath(dir, "domain-skill"), rev1);
+  const rev2 = commitFiles(dir, {
+    author: "renoir",
+    message: "y",
+    writes: [{ relpath: "domain-skill/y.json", content: '{"y":1}\n' }],
+  });
+  assert.notEqual(rev2, rev1);
+  assert.equal(revOfPath(dir, "domain-skill"), rev2);
+  const rev3 = commitFiles(dir, {
+    author: "renoir",
+    message: "nested",
+    writes: [{ relpath: "proposals/pending/p.json", content: "{}\n" }],
+  });
+  assert.equal(revOfPath(dir, "proposals"), rev3);
+  assert.equal(revOfPath(dir, "proposals/pending"), rev3);
+  assert.equal(revOfPath(dir, "domain-skill"), rev2);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("readJsonAtRev reads a historical version after a second commit changes the file", () => {
   const dir = freshDir();
   initStore(dir);
