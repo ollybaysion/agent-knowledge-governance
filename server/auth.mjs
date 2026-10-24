@@ -100,6 +100,7 @@ export function hasRole(user, allowed) {
 // of Phase 1 rehearsal scope).
 const FAIL_WINDOW_MS = 5 * 60 * 1000;
 const FAIL_LIMIT = 20;
+const FAIL_SWEEP_SIZE = 256;
 const failuresByKey = new Map(); // key -> timestamps[]
 
 export function recordAuthFailure(key, { now = Date.now() } = {}) {
@@ -108,6 +109,13 @@ export function recordAuthFailure(key, { now = Date.now() } = {}) {
   );
   arr.push(now);
   failuresByKey.set(key, arr);
+  // One key per source address that ever failed: past this size, drop the
+  // keys whose window has passed so the map does not only ever grow.
+  if (failuresByKey.size > FAIL_SWEEP_SIZE) {
+    for (const [k, times] of failuresByKey) {
+      if (times.every((t) => now - t >= FAIL_WINDOW_MS)) failuresByKey.delete(k);
+    }
+  }
 }
 
 export function isRateLimited(key, { now = Date.now() } = {}) {
