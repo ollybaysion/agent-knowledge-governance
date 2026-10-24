@@ -3646,3 +3646,53 @@ button.chip.verify-path:hover {
 #g-arr-scr path {
   fill: var(--amber);
 }
+
+/* 문서 머리 둘째 줄 — 원본 ↗ · 원본 고치기 · 타입 정하기 */
+.doc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+.doc-meta .fld {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--ink);
+}
+.doc-meta input.fld {
+  min-width: 16em;
+}
+/* 닫힌 타입의 트리 묶음 */
+.grp.type-off {
+  opacity: 0.55;
+}
+/* 타입 없이 올리기 */
+.up-dialog {
+  width: min(640px, calc(100vw - 32px));
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(17, 17, 32, 0.35);
+  padding: 16px;
+}
+.up-dialog::backdrop {
+  background: rgba(17, 17, 32, 0.4);
+}
+.up-dialog .fld {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--ink);
+  padding: 6px 8px;
+}
+.up-dialog .up-md {
+  min-height: 12em;
+  resize: vertical;
+}

@@ -26,7 +26,30 @@ let currentUser = null; // {id, group, logout}
 let csrfToken = null; // the shared session's CSRF token, from /api/me
 let lastDoc = null; // {type, id} — for the "문서" nav tab
 
-const DOC_TYPES = ["db-schema", "msg-format", "domain-skill", "screen-map", "manual", "voc"];
+// The type list in order (GET /api/types), loaded at boot. These defaults are
+// the server's list while it has no store/types.json.
+let TYPES = [
+  { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", status: "active" },
+  { id: "msg-format", label: "설비 커맨드", color: "#e8a55a", kind: "structured", status: "active" },
+  { id: "domain-skill", label: "에이전트", color: "#4657cf", kind: "structured", status: "active" },
+  { id: "screen-map", label: "화면", color: "#b05a8a", kind: "structured", status: "active" },
+  { id: "manual", label: "매뉴얼", color: "#8a5fbf", kind: "structured", status: "active" },
+  { id: "fab-line", label: "라인", color: "#7a6a4f", kind: "structured", status: "active" },
+  { id: "voc", label: "VOC", color: "#4e9a5a", kind: "md", status: "active" },
+  { id: "unclassified", label: "미분류", color: "#8a8f98", kind: "md", status: "active" },
+];
+let DOC_TYPES = TYPES.map((t) => t.id);
+let TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.id, t.label]));
+const typeInfo = (type) => TYPES.find((t) => t.id === type) ?? null;
+const isMdType = (type) => typeInfo(type)?.kind === "md";
+const activeMdTypes = () => TYPES.filter((t) => t.kind === "md" && t.status === "active");
+async function loadTypes() {
+  const r = await api("/api/types");
+  if (!r.ok || !Array.isArray(r.data?.types)) return;
+  TYPES = r.data.types;
+  DOC_TYPES = TYPES.map((t) => t.id);
+  TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.id, t.label]));
+}
 const TIER_LABEL = {
   scaffold: "빈칸",
   inferred: "추정",
@@ -38,14 +61,6 @@ const TIER_ABBR = {
   inferred: "inf",
   confirmed: "conf",
   deprecated: "dep",
-};
-const TYPE_LABEL = {
-  "db-schema": "db-schema",
-  "msg-format": "msg-format",
-  "domain-skill": "domain-skill",
-  "screen-map": "screen-map",
-  manual: "manual",
-  voc: "voc",
 };
 
 // ---------- DOM helper ----------
@@ -431,7 +446,8 @@ async function renderDocTree() {
       { class: "grp-items" },
       draftItems.concat(type === "domain-skill" ? skillTree(docs, docItem) : docs.map((d) => docItem(d))),
     );
-    const grp = el("div", { class: closedGroups().has(type) ? "grp closed" : "grp" }, [
+    const off = typeInfo(type)?.status === "archived" ? " type-off" : "";
+    const grp = el("div", { class: `${closedGroups().has(type) ? "grp closed" : "grp"}${off}` }, [
       el(
         "button",
         {
@@ -444,7 +460,7 @@ async function renderDocTree() {
         },
         [
           el("span", { class: "chev", text: "▾" }),
-          ` ${type} `,
+          ` ${TYPE_LABEL[type] ?? type} `,
           el("span", { class: "cnt", text: String(docs.length) }),
         ],
       ),
@@ -1330,7 +1346,8 @@ async function renderDocScreen(type, id) {
   const slotByAddr = (addr) => slots.find((s) => s.address === addr);
 
   function renderInner() {
-    const view = BODY_VIEWS[type];
+    const view = BODY_VIEWS[type] ?? (isMdType(type) ? renderVocView : null);
+    const meta = docMeta(type, doc, rev, reload);
     if (view) {
       const skill = view(
         doc,
@@ -1355,6 +1372,11 @@ async function renderDocScreen(type, id) {
         res.data,
       );
       skill.appendChild(linksEl);
+      if (meta) {
+        const chips = skill.querySelector(".sk-chips");
+        if (chips) chips.after(meta);
+        else skill.prepend(meta);
+      }
       section.replaceChildren(
         jsonOpen
           ? el("div", { class: "doc-split open" }, [
@@ -1533,6 +1555,7 @@ async function renderDocScreen(type, id) {
             }),
           ])
         : null,
+      meta,
       notice,
       // 승인자가 JSON 을 열면 문서(좌)와 원본 JSON(우)을 좌우로 가른다. 닫혀
       // 있으면 docwrap 이 그대로 한 폭을 쓴다(기존과 동일). 좁은 화면은 세로로 쌓임.
@@ -1729,6 +1752,113 @@ function viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen) {
         )
       : null,
   ]);
+}
+
+// The doc head's row under the chips: 원본 ↗ when the doc names its original;
+// for admin the origin editor and, on an md type's doc, 타입 정하기.
+function docMeta(type, doc, rev, reload) {
+  const items = [];
+  if (doc.origin?.url)
+    items.push(
+      el("a", {
+        class: "btn ghost sm",
+        href: doc.origin.url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        title: doc.origin.title || doc.origin.url,
+        text: "원본 ↗",
+      }),
+    );
+  const admin = currentUser?.group === "admin";
+  if (admin && doc.status !== "archived") {
+    items.push(
+      el("button", {
+        type: "button",
+        class: "btn ghost sm",
+        text: doc.origin ? "원본 고치기" : "원본 넣기",
+        onclick: () => originForm(),
+      }),
+    );
+    const targets = isMdType(type) ? activeMdTypes().filter((t) => t.id !== type) : [];
+    if (targets.length) {
+      const sel = el("select", { class: "fld", "aria-label": "타입 정하기" }, [
+        el("option", { value: "", text: "타입 정하기 ▾" }),
+        ...targets.map((t) => el("option", { value: t.id, text: t.label })),
+      ]);
+      sel.addEventListener("change", async () => {
+        const to = sel.value;
+        if (!to) return;
+        if (!confirm(`${TYPE_LABEL[type] ?? type} → ${TYPE_LABEL[to] ?? to} 로 옮깁니다. 이 문서를 가리키는 연결도 같이 고칩니다.`)) {
+          sel.value = "";
+          return;
+        }
+        const r = await api(`/api/docs/${type}/${encodeURIComponent(doc.id)}/retype`, {
+          method: "POST",
+          headers: { "if-match": rev },
+          body: { type: to },
+        });
+        if (!r.ok) {
+          sel.value = "";
+          const d = r.data || {};
+          toast(
+            d.error === "already_exists"
+              ? `${TYPE_LABEL[to] ?? to} 에 같은 id 의 문서가 있습니다.`
+              : d.error === "type_archived"
+                ? "닫힌 타입으로는 옮기지 않습니다."
+                : r.status === 409
+                  ? "충돌 — 다른 사용자가 이 문서를 먼저 고쳤습니다. 새로고침 후 다시 시도하세요."
+                  : `옮기기 실패 (${r.status})${d.message ? " — " + d.message : ""}`,
+            "error",
+          );
+          return;
+        }
+        toast(`${TYPE_LABEL[to] ?? to} 로 옮겼습니다`, "ok");
+        await renderDocTree();
+        location.hash = `#/doc/${to}/${encodeURIComponent(doc.id)}`;
+      });
+      items.push(sel);
+    }
+  }
+  if (!items.length) return null;
+  const row = el("div", { class: "doc-meta" }, items);
+  function originForm() {
+    const url = el("input", { type: "url", class: "fld mono", placeholder: "원본 URL (https://…, 비우면 지움)", "aria-label": "원본 URL" });
+    url.value = doc.origin?.url || "";
+    const title = el("input", { type: "text", class: "fld", placeholder: "원본 제목 (선택)", "aria-label": "원본 제목" });
+    title.value = doc.origin?.title || "";
+    const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
+    save.addEventListener("click", async () => {
+      const u = url.value.trim();
+      const t = title.value.trim();
+      save.disabled = true;
+      const r = await api(`/api/docs/${type}/${encodeURIComponent(doc.id)}/origin`, {
+        method: "PUT",
+        headers: { "if-match": rev },
+        body: { origin: u ? { url: u, ...(t ? { title: t } : {}) } : null },
+      });
+      if (r.ok) {
+        toast("원본을 저장했습니다", "ok");
+        reload();
+        return;
+      }
+      save.disabled = false;
+      const d = r.data || {};
+      toast(
+        r.status === 409
+          ? "충돌 — 다른 사용자가 이 문서를 먼저 고쳤습니다. 새로고침 후 다시 시도하세요."
+          : `저장 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : ""}`,
+        "error",
+      );
+    });
+    row.replaceChildren(
+      url,
+      title,
+      save,
+      el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: () => row.replaceChildren(...items) }),
+    );
+    url.focus();
+  }
+  return row;
 }
 
 // One chip does both jobs: shows the status (raw enum, uppercase) and — for
@@ -2619,8 +2749,10 @@ function renderSkillView(doc, rev, md, canEdit, reload, onToggleStatus, onToggle
 
 // voc: one md note, read whole and edited whole (no section structure). Its
 // [[ ]] are drawn as links like a skill's; 저장 = one PUT of { name, markdown }.
+// Every md type's doc screen (voc, unclassified, a registered type).
 function renderVocView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJson, jsonOpen, wikis) {
   const b = doc.body;
+  const type = doc.schema.split("/")[0];
   const holder = el("div", { class: "sk-doc" });
   function read() {
     holder.replaceChildren(
@@ -2631,7 +2763,7 @@ function renderVocView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJs
           : null,
       ]),
       (b.markdown || "").trim() === ""
-        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 VOC md 를 붙여 넣으세요." })
+        ? el("p", { class: "dim", text: "아직 본문이 없습니다 — 편집을 눌러 md 를 붙여 넣으세요." })
         : wikiText(el("pre", { class: "sk-md" }), b.markdown, wikis),
     );
   }
@@ -2646,7 +2778,7 @@ function renderVocView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJs
     };
     save.addEventListener("click", async () => {
       save.disabled = true;
-      const r = await api(`/api/docs/voc/${encodeURIComponent(doc.id)}`, {
+      const r = await api(`/api/docs/${type}/${encodeURIComponent(doc.id)}`, {
         method: "PUT",
         headers: { "if-match": rev },
         body: { ...b, markdown: input.value },
@@ -2690,7 +2822,7 @@ function renderVocView(doc, rev, md, canEdit, reload, onToggleStatus, onToggleJs
   }
   read();
   return el("div", { class: "skwrap" }, [
-    el("p", { class: "sk-eyebrow", text: "voc · VOC(md)" }),
+    el("p", { class: "sk-eyebrow", text: `${type} · ${TYPE_LABEL[type] ?? type}(md)` }),
     el("h1", { class: "sk-title", text: b.name }),
     viewChips(doc, rev, onToggleStatus, onToggleJson, jsonOpen),
     inactiveBar(doc),
@@ -3149,6 +3281,16 @@ const KIND_LABEL = {
   "screen-map": "화면",
   voc: "VOC",
 };
+// The types the graph draws, in the type list's order. A type app.css has no
+// k- colour for takes its colour from the list.
+const graphTypes = () => DOC_TYPES.filter((t) => t !== "fab-line");
+const kindLabel = (kind) => KIND_LABEL[kind] ?? TYPE_LABEL[kind] ?? kind;
+const CSS_KINDS = new Set(Object.keys(KIND_LABEL));
+function paintKind(node, kind) {
+  const color = typeInfo(kind)?.color;
+  if (!CSS_KINDS.has(kind) && color) node.style.setProperty("--c", color);
+  return node;
+}
 // 깊이 · 방향 · 숨긴 타입은 화면을 다시 열어도 그대로 둔다.
 const graphView = { depth: Infinity, direction: "both", hidden: new Set() };
 let graphTicket = 0;
@@ -3175,7 +3317,7 @@ async function renderGraph(selKey) {
     );
     return;
   }
-  const graph = lib.buildGraph(res.data.docs);
+  const graph = lib.buildGraph(res.data.docs, graphTypes());
   let sel = selKey && graph.nodes.has(selKey) ? selKey : null;
   let drawn = null; // { nodes: Map<key, g>, edges: [{ path, i, scr }], layer }
   if (sel) {
@@ -3253,7 +3395,7 @@ async function renderGraph(selKey) {
     el(
       "div",
       { class: "graph-filter-menu" },
-      lib.GRAPH_TYPES.map((t) =>
+      graphTypes().map((t) =>
         el("label", {}, [
           el("input", {
             type: "checkbox",
@@ -3273,8 +3415,8 @@ async function renderGraph(selKey) {
   const legend = el(
     "span",
     { class: "graph-legend", "aria-label": "범례" },
-    Object.entries(KIND_LABEL).map(([kind, label]) =>
-      el("i", { class: `k-${kind}` }, [el("b", { class: "sw" }), label]),
+    ["main", "sub", ...graphTypes().filter((t) => t !== "domain-skill")].map((kind) =>
+      paintKind(el("i", { class: `k-${kind}` }, [el("b", { class: "sw" }), kindLabel(kind)]), kind),
     ),
   );
   const canvas = el("div", { class: "graph-canvas" });
@@ -3322,7 +3464,7 @@ async function renderGraph(selKey) {
       let colW = textW(c.label, "600 11px");
       c.keys.forEach((k, i) => {
         const n = graph.nodes.get(k);
-        const tagW = textW(KIND_LABEL[n.kind], "600 10px") + 10;
+        const tagW = textW(kindLabel(n.kind), "600 10px") + 10;
         const w = 5 + tagW + 6 + textW(n.name, "12px") + 10;
         pos.set(k, { x, y: y0 + i * ROW, w, tagW, col });
         colW = Math.max(colW, w);
@@ -3376,16 +3518,17 @@ async function renderGraph(selKey) {
           transform: `translate(${p.x},${p.y})`,
           tabindex: "0",
           role: "button",
-          "aria-label": `${KIND_LABEL[n.kind]} ${n.name}`,
+          "aria-label": `${kindLabel(n.kind)} ${n.name}`,
         },
         [
           svgEl("title", { text: `${n.type} · ${n.id}\n클릭 = 고르기 · 더블클릭 = 문서 열기` }),
           svgEl("rect", { class: "box", width: p.w, height: CH, rx: 6 }),
           svgEl("rect", { class: "tag", x: 5, y: 5, width: p.tagW, height: 14, rx: 3 }),
-          svgEl("text", { class: "tag-t", x: 5 + p.tagW / 2, y: 15.5, "text-anchor": "middle", text: KIND_LABEL[n.kind] }),
+          svgEl("text", { class: "tag-t", x: 5 + p.tagW / 2, y: 15.5, "text-anchor": "middle", text: kindLabel(n.kind) }),
           svgEl("text", { class: "name", x: 5 + p.tagW + 6, y: 16.5, text: n.name }),
         ],
       );
+      paintKind(g, n.kind);
       g.addEventListener("click", (e) => {
         if (e.detail > 1) return; // 더블클릭의 두 번째 클릭은 고르기를 풀지 않는다
         select(sel === k ? null : k);
@@ -3737,6 +3880,9 @@ function auditMessage(msg) {
 function canCreate() {
   return !!currentUser && currentUser.group === "admin";
 }
+function canUpload() {
+  return !!currentUser && (currentUser.group === "admin" || currentUser.group === "user");
+}
 const nowIso = () => new Date().toISOString();
 
 // ---- 로컬 드래프트 저장소 (localStorage) — 여러 개 동시 보관 ----
@@ -3799,7 +3945,7 @@ function deriveDraftId(type, body) {
   if (type === "domain-skill")
     return body.name ? String(body.name).toLowerCase() : "";
   if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
-  if (type === "voc") return body.name ? String(body.name).toLowerCase() : "";
+  if (isMdType(type)) return body.name ? String(body.name).toLowerCase() : "";
   return "";
 }
 
@@ -3808,7 +3954,7 @@ function renderTreeActions() {
   const host = $("tree-actions");
   if (!host) return;
   host.replaceChildren();
-  if (!canCreate()) return;
+  if (!canUpload()) return;
   const btn = el(
     "button",
     { type: "button", id: "new-doc-btn", class: "btn primary" },
@@ -3831,8 +3977,16 @@ const NEW_DOC_OPTS = [
   { type: "msg-format", desc: "설비 커맨드" },
   { type: "domain-skill", desc: "스킬 문서(md)" },
   { type: "manual", desc: "화면 매뉴얼(캡처)" },
-  { type: "voc", desc: "VOC(md)" },
 ];
+// admin: the structured types above and every open md type; anyone who
+// writes: 타입 없이 올리기 (unclassified).
+function newDocOpts() {
+  if (!canCreate()) return [];
+  const md = activeMdTypes()
+    .filter((t) => t.id !== "unclassified")
+    .map((t) => ({ type: t.id, desc: t.description || `${t.label}(md)` }));
+  return [...NEW_DOC_OPTS, ...md];
+}
 function toggleFlyout(host, btn) {
   if (document.querySelector(".nd-flyout")) {
     closeFlyout();
@@ -3840,7 +3994,7 @@ function toggleFlyout(host, btn) {
   }
   const fly = el("div", { class: "nd-flyout", role: "menu" }, [
     el("div", { class: "nd-h", text: "새 문서 종류" }),
-    ...NEW_DOC_OPTS.map((o) =>
+    ...newDocOpts().map((o) =>
       el(
         "button",
         {
@@ -3857,6 +4011,22 @@ function toggleFlyout(host, btn) {
           el("span", { class: "d", text: o.desc }),
         ],
       ),
+    ),
+    el(
+      "button",
+      {
+        type: "button",
+        class: "nd-opt",
+        role: "menuitem",
+        onclick: () => {
+          closeFlyout();
+          openUploadDialog();
+        },
+      },
+      [
+        el("span", { class: "k", text: "타입 없이 올리기" }),
+        el("span", { class: "d", text: "미분류 md 한 장" }),
+      ],
     ),
   ]);
   // body 에 fixed 로 붙인다 — 사이드바의 overflow 가 팝오버를 자르지 않게. 위치는
@@ -3909,10 +4079,9 @@ function idSourceField(type, body, onIdChange) {
   return eField(() => body.name, (v) => (body.name = v ? v.toLowerCase() : v), {
     mono: true,
     title: true,
-    placeholder:
-      type === "voc"
-        ? "VOC 이름 클릭해서 입력 (예: line-a-rf-power-drift)"
-        : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+    placeholder: isMdType(type)
+      ? `${TYPE_LABEL[type] ?? type} 이름 클릭해서 입력 (예: line-a-rf-power-drift)`
+      : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
   });
 }
@@ -3986,7 +4155,7 @@ function renderDraftScreen(type, localId) {
         ? draftMsgFormat(body, onIdChange, persist, rerender)
         : type === "manual"
           ? draftManual(body, persist)
-          : type === "voc"
+          : isMdType(type)
             ? draftVoc(body, persist)
             : draftDomainSkill(body, onIdChange, persist, rerender);
 
@@ -4251,7 +4420,7 @@ function draftVoc(body, persist) {
       eField(() => body.markdown, (v) => (body.markdown = v), {
         area: true,
         mono: true,
-        placeholder: "VOC md 를 여기에 — # 이름 으로 시작해 받은 말과 정리를 자유롭게. [[문서 id]] 는 연결이 됩니다.",
+        placeholder: "md 를 여기에 — # 이름 으로 시작해 자유롭게. [[문서 id]] 는 연결이 됩니다.",
         onChange: persist,
       }),
     ),
@@ -4296,7 +4465,7 @@ function finalizeDraftBody(type, body) {
     };
   }
   if (type === "manual") return body.title ? { title: body.title } : {};
-  if (type === "voc") {
+  if (isMdType(type)) {
     const b = { name: body.name };
     if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;
     return b;
@@ -4352,9 +4521,100 @@ async function saveDraft(type, localId, body) {
   toast(`저장 실패 (${r.status || "네트워크"})`, "error");
 }
 
+// 타입 없이 올리기: one md as an unclassified document. Anyone who writes may;
+// an admin gives it a type later (타입 정하기).
+function openUploadDialog() {
+  const name = el("input", { type: "text", class: "fld mono", placeholder: "이름 (예: deploy-guide)", "aria-label": "이름" });
+  const text = el("textarea", {
+    class: "fld mono up-md",
+    rows: 12,
+    spellcheck: "false",
+    placeholder: "md 를 붙여 넣거나 .md 파일 하나를 여기에 끌어 놓습니다",
+    "aria-label": "md 본문",
+  });
+  const url = el("input", { type: "url", class: "fld mono", placeholder: "원본 URL (선택, https://…)", "aria-label": "원본 URL" });
+  const send = el("button", { type: "submit", class: "btn primary", text: "올리기" });
+  const dlg = el("dialog", { class: "up-dialog", "aria-label": "타입 없이 올리기" });
+  const form = el("form", { method: "dialog" }, [
+    el("h3", { text: "타입 없이 올리기" }),
+    el("p", { class: "fhint", text: "미분류로 저장합니다. 타입은 admin 이 나중에 정합니다." }),
+    dfRow("이름", true, name),
+    dfRow("md", true, text),
+    dfRow("원본", false, url),
+    el("div", { class: "editacts" }, [
+      send,
+      el("button", { type: "button", class: "btn ghost", text: "취소", onclick: () => dlg.close() }),
+    ]),
+  ]);
+  text.addEventListener("dragover", (e) => e.preventDefault());
+  text.addEventListener("drop", async (e) => {
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    e.preventDefault();
+    if (files.length > 1 || !/\.(md|markdown|txt)$/i.test(files[0].name)) {
+      toast(".md 파일 하나만 받습니다", "error");
+      return;
+    }
+    text.value = await files[0].text();
+    if (!name.value.trim())
+      name.value = files[0].name
+        .replace(/\.[^.]+$/, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^[^a-z]+|-+$/g, "");
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = name.value.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+      toast("이름은 영어 소문자로 시작하고 소문자 · 숫자 · - 만 씁니다", "error");
+      return;
+    }
+    if (!text.value.trim()) {
+      toast("md 본문이 비었습니다", "error");
+      return;
+    }
+    const u = url.value.trim();
+    send.disabled = true;
+    const r = await api("/api/docs/unclassified", {
+      method: "POST",
+      body: {
+        schema: "unclassified/v1",
+        id,
+        keywords: [{ kw: id, inject: "full" }],
+        status: "active",
+        ...(u ? { origin: { url: u } } : {}),
+        body: { name: id, markdown: text.value },
+      },
+    });
+    send.disabled = false;
+    if (r.status === 201) {
+      dlg.close();
+      toast("미분류로 올렸습니다");
+      await renderDocTree();
+      location.hash = `#/doc/unclassified/${encodeURIComponent(id)}`;
+      return;
+    }
+    const d = r.data || {};
+    toast(
+      r.status === 409
+        ? `이미 같은 이름(${id})의 문서가 있습니다.`
+        : `올리기 실패 (${r.status})${d.details ? " — " + d.details.join(" · ") : d.message ? " — " + d.message : ""}`,
+      "error",
+    );
+  });
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.appendChild(form);
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  name.focus();
+}
+
 // ---------- boot ----------
-function enterApp() {
-  renderDocTree().then(() => route());
+async function enterApp() {
+  await loadTypes();
+  await renderDocTree();
+  route();
 }
 (async function boot() {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
