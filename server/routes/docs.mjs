@@ -27,8 +27,9 @@ import {
   persistDoc,
   archiveDoc,
   renderDocMd,
-  docWrites,
+  docsWrites,
 } from "../render-store.mjs";
+import { docMdPath } from "../../src/render/index.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
@@ -41,37 +42,23 @@ import {
   resolveWikilinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
+import { hasGroup } from "../auth.mjs";
+import { UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
-
-const DOC_TYPES = [
-  "db-schema",
-  "msg-format",
-  "domain-skill",
-  "screen-map",
-  "manual",
-  "voc",
-];
-
-function mdRelPath(type, doc) {
-  if (type === "domain-skill")
-    return `rendered/domain-skill/${doc.body.name}/SKILL.md`;
-  if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
-  return `rendered/${type}/docs/${doc.id}.md`;
-}
 
 // Published md if there is one, otherwise rendered on the spot. Only an active
 // doc has a file in rendered/ (issue #7), and a doc nobody can preview is a doc
 // nobody can judge — which would make the inactive state unusable in the very
 // review it exists to enable.
-function docMd(storeDir, type, doc) {
-  const stored = readText(storeDir, mdRelPath(type, doc));
+function docMd(storeDir, type, doc, md) {
+  const stored = readText(storeDir, docMdPath(type, doc, { md }));
   if (stored != null) return stored;
   // An inactive draft has no stored md and its body may be too incomplete to
   // render — the dashboard builds the doc view from the JSON, not this md, so a
   // failed render is not fatal. (Active docs always have a stored md, so they
   // never reach this render path.)
   try {
-    return renderDocMd(type, doc);
+    return renderDocMd(type, doc, { md });
   } catch {
     return null;
   }
@@ -89,13 +76,23 @@ function priorityOf(user) {
 }
 
 export function registerDocsRoutes(app) {
-  const { storeDir, refs, queue, contracts } = app.akg;
+  const { storeDir, refs, queue, contracts, types } = app.akg;
   // What the validator needs from the store (a manual's captures, the data
-  // ids other skills hold).
+  // ids other skills hold, the md types).
   const inStore = {
     assetExists: (sha256) => hasAsset(storeDir, sha256),
     dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
+    get mdTypes() {
+      return types.mdIds();
+    },
   };
+  // A closed type keeps its documents readable and takes no new content. Run
+  // inside the queue, so a type closed a moment earlier is seen.
+  const closedType = (type) =>
+    types.isArchived(type)
+      ? { status: 409, body: { error: "type_archived", message: `${type} 타입은 닫혀 새 내용을 받지 않습니다` } }
+      : null;
+  const originOf = (doc) => (doc.origin ? { origin: doc.origin } : {});
   // A verification set's 정답 paths the skill md lacks: saved anyway (the
   // author may be renaming a heading), shown beside the document.
   const warningsOf = (type, doc) => {
@@ -114,15 +111,36 @@ export function registerDocsRoutes(app) {
       : null;
   };
 
+  // GET /api/docs/:type/:id's JSON answer.
+  const docView = (type, id, doc, rev) => {
+    const bodySchema = types.bodySchema(type);
+    const typeIds = types.ids();
+    return {
+      json: doc,
+      md: docMd(storeDir, type, doc, types.isMd(type)),
+      rev,
+      tiers: bodySchema ? tierSummary(bodySchema, doc.body) : {},
+      slots: bodySchema
+        ? listSlotAddresses(bodySchema, doc.body).map((address) => ({
+            address,
+            ...getSlot(doc.body, address),
+          }))
+        : [],
+      links: resolveLinks(storeDir, doc.links),
+      backlinks: backlinksOf(storeDir, typeIds, type, id),
+      wikilinks: resolveWikilinks(storeDir, typeIds, type, doc),
+      ...warningsOf(type, doc),
+    };
+  };
+
   app.get(
     "/api/docs",
     { config: { roles: ["user", "agent"] } },
     async (request) => {
       const { type, tier, q } = request.query ?? {};
-      const types = type ? [type] : DOC_TYPES;
       const docs = [];
-      for (const t of types) {
-        const bodySchema = refs[`${t}/v1`];
+      for (const t of type ? [type] : types.ids()) {
+        const bodySchema = types.bodySchema(t);
         if (!bodySchema) continue;
         for (const id of listIds(storeDir, t)) {
           const doc = readJson(storeDir, `${t}/${id}.json`);
@@ -138,6 +156,7 @@ export function registerDocsRoutes(app) {
             keywords: doc.keywords,
             links: doc.links ?? [],
             title: titleOf(doc),
+            ...originOf(doc),
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
@@ -155,7 +174,7 @@ export function registerDocsRoutes(app) {
       const { type, id } = request.params;
       // Only a document type names a document; score/<agent> and
       // assets/<sha> are store files of another shape.
-      if (!refs[`${type}/v1`]) return reply.code(404).send({ error: "not_found" });
+      if (!types.bodySchema(type)) return reply.code(404).send({ error: "not_found" });
       const relpath = `${type}/${id}.json`;
       const doc = readJson(storeDir, relpath);
       if (!doc) return reply.code(404).send({ error: "not_found" });
@@ -166,27 +185,10 @@ export function registerDocsRoutes(app) {
           return reply.code(304).send();
         if (rev) reply.header("etag", rev);
         reply.type("text/markdown; charset=utf-8");
-        return reply.send(docMd(storeDir, type, doc) ?? "");
+        return reply.send(docMd(storeDir, type, doc, types.isMd(type)) ?? "");
       }
       if (rev) reply.header("etag", rev);
-      const bodySchema = refs[`${type}/v1`];
-      const slots = bodySchema
-        ? listSlotAddresses(bodySchema, doc.body).map((address) => ({
-            address,
-            ...getSlot(doc.body, address),
-          }))
-        : [];
-      return {
-        json: doc,
-        md: docMd(storeDir, type, doc),
-        rev,
-        tiers: bodySchema ? tierSummary(bodySchema, doc.body) : {},
-        slots,
-        links: resolveLinks(storeDir, doc.links),
-        backlinks: backlinksOf(storeDir, DOC_TYPES, type, id),
-        wikilinks: resolveWikilinks(storeDir, DOC_TYPES, type, doc),
-        ...warningsOf(type, doc),
-      };
+      return docView(type, id, doc, rev);
     },
   );
 
@@ -281,7 +283,7 @@ export function registerDocsRoutes(app) {
             if (err instanceof EditError) return { status: 400, body: { error: "edit_rejected", message: err.message } };
             throw err;
           }
-          const merged = mergeBodyLinks(storeDir, DOC_TYPES, "domain-skill", doc, { ...doc, body });
+          const merged = mergeBodyLinks(storeDir, types.ids(), "domain-skill", doc, { ...doc, body });
           if (merged.error) return { status: 400, body: merged.error };
           const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
@@ -318,13 +320,17 @@ export function registerDocsRoutes(app) {
     },
   );
 
+  // Anyone who writes may file an unclassified document; every other type is
+  // the admin's.
   app.post(
     "/api/docs/:type",
-    { config: { roles: ["admin"] } },
+    { config: { roles: ["admin", "user"] } },
     async (request, reply) => {
       const { type } = request.params;
+      if (type !== UNCLASSIFIED.id && !hasGroup(request.user, ["admin"]))
+        return reply.code(403).send({ error: "forbidden" });
       const schemaId = `${type}/v1`;
-      const bodySchema = refs[schemaId];
+      const bodySchema = types.bodySchema(type);
       if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
       const submitted = request.body;
       if (!submitted || submitted.schema !== schemaId) {
@@ -351,7 +357,7 @@ export function registerDocsRoutes(app) {
             .send({ error: "edit_rejected", message: err.message });
         throw err;
       }
-      const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+      const merged = mergeBodyLinks(storeDir, types.ids(), type, null, {
         ...submitted,
         body: resolvedBody,
       });
@@ -369,6 +375,8 @@ export function registerDocsRoutes(app) {
       const relpath = `${type}/${doc.id}.json`;
       const result = await queue.enqueue(
         async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
           if (readJson(storeDir, relpath))
             return { status: 409, body: { error: "already_exists" } };
           const conflict = dataIdConflict(doc);
@@ -390,7 +398,7 @@ export function registerDocsRoutes(app) {
     { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
-      const bodySchema = refs[`${type}/v1`];
+      const bodySchema = types.bodySchema(type);
       if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
       const ifMatch = request.headers["if-match"];
       if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
@@ -398,6 +406,8 @@ export function registerDocsRoutes(app) {
 
       const result = await queue.enqueue(
         async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
           // S5: rev re-validation happens HERE, inside the worker, right before commit.
           const relpath = `${type}/${id}.json`;
           const currentDoc = readJson(storeDir, relpath);
@@ -473,7 +483,7 @@ export function registerDocsRoutes(app) {
           }
 
           // [[ ]] the edit added or dropped move links[] with it.
-          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, currentDoc, {
+          const merged = mergeBodyLinks(storeDir, types.ids(), type, currentDoc, {
             ...currentDoc,
             body: mergedBody,
           });
@@ -512,7 +522,7 @@ export function registerDocsRoutes(app) {
     async (request, reply) => {
       const { type } = request.params;
       const schemaId = `${type}/v1`;
-      const bodySchema = refs[schemaId];
+      const bodySchema = types.bodySchema(type);
       if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
       const submitted = request.body?.docs;
       if (!Array.isArray(submitted) || submitted.length === 0)
@@ -556,7 +566,7 @@ export function registerDocsRoutes(app) {
           }
           throw err;
         }
-        const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, null, {
+        const merged = mergeBodyLinks(storeDir, types.ids(), type, null, {
           ...raw,
           status: "inactive",
           body,
@@ -586,6 +596,8 @@ export function registerDocsRoutes(app) {
 
       const result = await queue.enqueue(
         async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
           const existing = docs
             .filter((d) => readJson(storeDir, `${type}/${d.id}.json`))
             .map((d) => d.id);
@@ -612,18 +624,7 @@ export function registerDocsRoutes(app) {
               };
           }
 
-          // docWrites recompiles the index per document, so N documents mean N
-          // writes to the same index path. Keyed by relpath, last wins — which
-          // is the same file either way, since nothing in a batch is active
-          // and compileIndex only ever lists active documents.
-          const byPath = new Map();
-          const removes = [];
-          for (const doc of docs) {
-            const w = docWrites(storeDir, type, doc);
-            for (const write of w.writes) byPath.set(write.relpath, write);
-            removes.push(...w.removes);
-          }
-          const writes = [...byPath.values()];
+          const { writes, removes } = docsWrites(storeDir, type, docs);
           const rev = commitFiles(storeDir, {
             author: request.user.id,
             message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}`,
@@ -652,7 +653,7 @@ export function registerDocsRoutes(app) {
     async (request, reply) => {
       const { type, id } = request.params;
       const schemaId = `${type}/v1`;
-      const bodySchema = refs[schemaId];
+      const bodySchema = types.bodySchema(type);
       if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
       const submitted = request.body;
       if (!submitted || typeof submitted !== "object")
@@ -660,6 +661,8 @@ export function registerDocsRoutes(app) {
 
       const result = await queue.enqueue(
         async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
           const relpath = `${type}/${id}.json`;
           const current = readJson(storeDir, relpath);
           const now = new Date().toISOString();
@@ -680,6 +683,7 @@ export function registerDocsRoutes(app) {
                 id,
                 keywords: submitted.keywords ?? [],
                 status: "inactive",
+                ...(submitted.origin !== undefined ? { origin: submitted.origin } : {}),
                 body,
               };
           const errors = validateForStore(doc, refs, inStore);
@@ -714,7 +718,7 @@ export function registerDocsRoutes(app) {
     { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
-      if (!refs[`${type}/v1`])
+      if (!types.bodySchema(type))
         return reply.code(400).send({ error: "unknown_type" });
       const ifMatch = request.headers["if-match"];
       if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
@@ -724,6 +728,8 @@ export function registerDocsRoutes(app) {
 
       const result = await queue.enqueue(
         async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
           const relpath = `${type}/${id}.json`;
           const doc = readJson(storeDir, relpath);
           if (!doc) return { status: 404, body: { error: "not_found" } };
@@ -736,7 +742,7 @@ export function registerDocsRoutes(app) {
 
           // The body's [[ ]] stay linked whatever the list says: they are
           // removed by editing the body, not here.
-          const merged = mergeBodyLinks(storeDir, DOC_TYPES, type, doc, doc, links);
+          const merged = mergeBodyLinks(storeDir, types.ids(), type, doc, doc, links);
           if (merged.error) return { status: 400, body: merged.error };
           const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
@@ -885,7 +891,7 @@ export function registerDocsRoutes(app) {
       { config: { roles: ["admin"] } },
       async (request, reply) => {
         const { type, id } = request.params;
-        if (!refs[`${type}/v1`])
+        if (!types.bodySchema(type))
           return reply.code(400).send({ error: "unknown_type" });
         const ifMatch = request.headers["if-match"];
         if (!ifMatch)
@@ -893,6 +899,8 @@ export function registerDocsRoutes(app) {
 
         const result = await queue.enqueue(
           async () => {
+            const closed = action === "activate" ? closedType(type) : null;
+            if (closed) return closed;
             const relpath = `${type}/${id}.json`;
             const doc = readJson(storeDir, relpath);
             if (!doc) return { status: 404, body: { error: "not_found" } };
@@ -936,6 +944,127 @@ export function registerDocsRoutes(app) {
     );
   }
 
+  // The envelope's origin — the original the document was taken from. PUT
+  // /api/docs/:type/:id carries a body only, so it gets its own write, with
+  // the same If-Match rule as links. `origin: null` drops it.
+  app.put(
+    "/api/docs/:type/:id/origin",
+    { config: { roles: ["admin"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const origin = request.body?.origin;
+      if (origin === undefined) return reply.code(400).send({ error: "origin_required" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
+
+          // origin sits after status and role, before links and body.
+          const { schema, id: did, keywords, status, role, origin: _old, ...rest } = doc;
+          const newDoc = {
+            schema,
+            id: did,
+            keywords,
+            status,
+            ...(role !== undefined ? { role } : {}),
+            ...(origin !== null ? { origin } : {}),
+            ...rest,
+          };
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `origin ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // An md document moved to another md type: its file, its schema, the links[]
+  // of the documents that point at it and its rendered md, in one commit.
+  app.post(
+    "/api/docs/:type/:id/retype",
+    { config: { roles: ["admin"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      const to = request.body?.type;
+      if (typeof to !== "string" || !types.get(to))
+        return reply.code(400).send({ error: "unknown_type", type: to ?? null });
+      if (!types.isMd(type) || !types.isMd(to))
+        return reply.code(400).send({ error: "structured_type", message: "재분류는 md 타입끼리만 합니다" });
+      if (to === type) return reply.code(400).send({ error: "same_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const closed = closedType(to);
+          if (closed) return closed;
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
+          if (readJson(storeDir, `${to}/${id}.json`))
+            return { status: 409, body: { error: "already_exists", type: to, id } };
+
+          const newDoc = { ...doc, schema: `${to}/v1` };
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
+
+          const pointsHere = (l) => l.type === type && l.id === id;
+          const relinked = [];
+          const writes = [];
+          const removes = [relpath, docMdPath(type, doc, { md: true })];
+          for (const t of types.ids()) {
+            const changed = [];
+            for (const sid of listIds(storeDir, t)) {
+              if (t === type && sid === id) continue;
+              const d = readJson(storeDir, `${t}/${sid}.json`);
+              if (!d?.links?.some(pointsHere)) continue;
+              changed.push({ ...d, links: d.links.map((l) => (pointsHere(l) ? { ...l, type: to } : l)) });
+              relinked.push({ type: t, id: sid });
+            }
+            if (changed.length) {
+              const w = docsWrites(storeDir, t, changed);
+              writes.push(...w.writes);
+              removes.push(...w.removes);
+            }
+          }
+          const moved = docsWrites(storeDir, to, [newDoc]);
+          writes.push(...moved.writes);
+          removes.push(...moved.removes);
+
+          const rev = commitFiles(storeDir, {
+            author: request.user.id,
+            message: `retype ${type}/${id} → ${to}`,
+            writes,
+            removes,
+          });
+          return { status: 200, body: { ...docView(to, id, newDoc, rev), relinked } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
   // §6 DELETE — soft archive (status: archived): dropped from the compiled
   // injection index, but the JSON + git history are preserved.
   app.delete(
@@ -945,7 +1074,7 @@ export function registerDocsRoutes(app) {
       const { type, id } = request.params;
       // Same allowlist as PUT: archiving score/<agent>.json turned its array
       // into an object that no later POST /api/score could read.
-      if (!refs[`${type}/v1`]) return reply.code(400).send({ error: "unknown_type" });
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
       const result = await queue.enqueue(
         async () => {
           const relpath = `${type}/${id}.json`;
@@ -964,4 +1093,4 @@ export function registerDocsRoutes(app) {
   );
 }
 
-export { DOC_TYPES, mdRelPath, priorityOf, listSlotAddresses };
+export { priorityOf, listSlotAddresses };

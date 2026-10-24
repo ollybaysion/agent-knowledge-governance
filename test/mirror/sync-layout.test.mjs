@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
 import { commitFiles } from "../../server/store.mjs";
-import { syncMirror, AkgSyncError, REJECTED } from "../../src/mirror/sync.mjs";
+import { syncMirror, AkgSyncError, REJECTED, listedTypeIds } from "../../src/mirror/sync.mjs";
 
 const BIN = fileURLToPath(new URL("../../bin/akg.mjs", import.meta.url));
 
@@ -131,6 +131,30 @@ test("manual and voc — types the server renders — are accepted", async () =>
   assert.equal(result.changed, true);
   assert.ok(existsSync(join(mirrorDir, "manual", "docs", "m.md")));
   assert.ok(existsSync(join(mirrorDir, "voc", "v", "VOC.md")));
+  await cleanup();
+});
+
+test("a type the bundle's types.json lists is accepted, and the list lands in the mirror", async () => {
+  const { app, storeDir, cleanup } = await setupServer();
+  commitFiles(storeDir, {
+    author: "renoir",
+    message: "an admin registered meeting-notes",
+    writes: [
+      { relpath: "rendered/types.json", content: JSON.stringify({ types: [{ id: "meeting-notes" }, { id: "../x" }] }) },
+      { relpath: "rendered/meeting-notes/w1.md", content: "# w1\n" },
+    ],
+  });
+  const mirrorDir = join(mkdtempSync(join(tmpdir(), "akg-layout-mirror-")), "akg");
+
+  const result = await syncMirror({
+    serverUrl: "http://x",
+    token: "vtok",
+    mirrorDir,
+    fetchImpl: fetchImplFromApp(app, "vtok"),
+  });
+  assert.equal(result.changed, true);
+  assert.ok(existsSync(join(mirrorDir, "meeting-notes", "w1.md")));
+  assert.deepEqual(listedTypeIds(mirrorDir), ["meeting-notes"]);
   await cleanup();
 });
 

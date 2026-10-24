@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,6 +128,33 @@ test("cli propose: missing <type>/<id> slash -> exit 1, usage printed", async ()
     assert.match(r.stderr, /usage:/);
     rmSync(dir, { recursive: true, force: true });
   } finally {
+    await cleanup();
+  }
+});
+
+test("cli propose: the type is checked against the mirror's types.json, or the CLI's own list without one", async () => {
+  const { serverUrl, cleanup } = await setupServer();
+  const dir = mkdtempSync(join(tmpdir(), "akg-cli-propose-type-"));
+  try {
+    const proposalPath = join(dir, "proposal.json");
+    writeFileSync(proposalPath, JSON.stringify({ slots: { x: { text: "y", tier: "inferred", evidence: ["z"] } } }));
+    const run = (spec, mirror) =>
+      runCli(["propose", spec, proposalPath, "--mirror", mirror], { serverUrl });
+
+    const bare = join(dir, "bare");
+    const unknown = await run("meeting-notes/w1", bare);
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /모르는 타입 "meeting-notes"/);
+
+    const synced = join(dir, "synced");
+    mkdirSync(synced);
+    writeFileSync(join(synced, "types.json"), JSON.stringify({ types: [{ id: "db-schema" }, { id: "meeting-notes" }] }));
+    const listed = await run("meeting-notes/w1", synced);
+    assert.doesNotMatch(listed.stderr, /모르는 타입/, "the type check passes; the server answers the rest");
+    const dropped = await run("voc/v", synced);
+    assert.match(dropped.stderr, /모르는 타입 "voc"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
     await cleanup();
   }
 });

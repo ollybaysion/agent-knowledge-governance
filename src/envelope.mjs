@@ -1,8 +1,8 @@
 // The common envelope (json-spec §2) isn't its own schema FILE in the
 // documented tree (schemas/ only lists common/tiered-value + one file per
 // type) — it's shared shape validated in code, while each type schema file
-// validates just `body` (unclassified is the one exception: its schema file
-// validates the whole sidecar meta document, §1.4).
+// validates just `body`. Every md type (voc, unclassified, each registered
+// type) has the one body shape md/v1.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,11 @@ const SCHEMA_FILES = {
   "manual/v1": "manual/v1.schema.json",
   "voc/v1": "voc/v1.schema.json",
   "unclassified/v1": "unclassified/v1.schema.json",
+  "md/v1": "md/v1.schema.json",
 };
+
+// md types the repo ships; a registered type is md too, named by the caller.
+const BUILTIN_MD_SCHEMAS = new Set(["voc/v1", "unclassified/v1", "md/v1"]);
 
 // Contracts that are not document types: what the store hands out and takes
 // in besides documents. Kept out of loadSchemas so no document route accepts
@@ -72,15 +76,14 @@ const KEYWORD_SCHEMA = {
   },
 };
 
-// json-spec §2 — the keys fixed for every type EXCEPT unclassified
-// (§1.4: envelope with body dropped, validated by its own schema file).
-// `links` and `role` are the optional keys.
+// json-spec §2 — the keys fixed for every type. `links`, `role` and `origin`
+// are the optional keys.
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["schema", "id", "keywords", "status", "body"],
   properties: {
-    schema: { type: "string", pattern: "^[a-z-]+/v[0-9]+$" },
+    schema: { type: "string", pattern: "^[a-z][a-z0-9-]*/v[0-9]+$" },
     id: { type: "string", pattern: "^[a-z0-9._-]+$" },
     keywords: { type: "array", minItems: 1, items: KEYWORD_SCHEMA },
     // "inactive": exists and is readable through the API, but is kept out of
@@ -94,6 +97,16 @@ const ENVELOPE_SCHEMA = {
     // domain-skill only: a main skill is one an agent can be; a sub is
     // knowledge a main points at. Absent reads as main.
     role: { type: "string", enum: ["main", "sub"] },
+    // Where the document came from, for a reader to open the original.
+    origin: {
+      type: "object",
+      additionalProperties: false,
+      required: ["url"],
+      properties: {
+        url: { type: "string", pattern: "^https?://[^\\s/?#]+([/?#]\\S*)?$" },
+        title: { type: "string", pattern: "\\S" },
+      },
+    },
   },
 };
 
@@ -106,8 +119,9 @@ function fail(errors, msg) {
 // validation. Null when the body lacks the field the id comes from: the
 // schema layer reports the missing field, and a second complaint about the id
 // would only bury it.
-export function deriveId(schema, body) {
+export function deriveId(schema, body, { md = BUILTIN_MD_SCHEMAS.has(schema) } = {}) {
   if (!body || typeof body !== "object") return null;
+  if (md) return body.name ?? null;
   switch (schema) {
     case "db-schema/v1": {
       // The id is the bare table name — `owner` is a plain attribute of the
@@ -121,7 +135,6 @@ export function deriveId(schema, body) {
         ? body.command.toLowerCase().replace(/_/g, "-")
         : null;
     case "domain-skill/v1":
-    case "voc/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -147,19 +160,19 @@ const ID_SOURCE = {
   "db-schema/v1": () => "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
-  "voc/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
 
+const idSource = (schema, md) => (md ? "== body.name" : ID_SOURCE[schema]?.() ?? "derived from body");
+
 // Cross-field checks the JSON-Schema layer can't express (sibling-node
 // comparisons) — one function per type, kept intentionally small.
 /** Shared by every type: the id must be what deriveId() says it is. */
-function checkDerivedId(doc, errors) {
-  const wantId = deriveId(doc.schema, doc.body);
+function checkDerivedId(doc, errors, md = false) {
+  const wantId = deriveId(doc.schema, doc.body, { md });
   if (wantId !== null && doc.id !== wantId) {
-    const how = ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body";
-    fail(errors, `$.id: expected "${wantId}" (${how}), got "${doc.id}"`);
+    fail(errors, `$.id: expected "${wantId}" (${idSource(doc.schema, md)}), got "${doc.id}"`);
   }
 }
 
@@ -253,10 +266,6 @@ const SEMANTIC_CHECKS = {
     checkDerivedId(doc, errors);
   },
   "fab-line/v1"(doc, errors) {
-    checkDerivedId(doc, errors);
-  },
-  // A VOC is free md: no section rule, only the id.
-  "voc/v1"(doc, errors) {
     checkDerivedId(doc, errors);
   },
   "screen-map/v1"(doc, errors) {
@@ -370,26 +379,25 @@ function relaxedOf(schema) {
 }
 
 /**
- * Validate a full document (envelope + body, or unclassified's flat meta).
+ * Validate a full document (envelope + body).
  * @param {object} doc
  * @param {object} refs from loadSchemas()
- * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean}} [opts]
+ * @param {{draft?: boolean, assetExists?: (sha256: string) => boolean, mdTypes?: string[]}} [opts]
  *   draft = relaxed body (inactive drafts, see relaxSchema); assetExists = the
- *   store lookup the manual check needs (omitted offline)
+ *   store lookup the manual check needs (omitted offline); mdTypes = the md
+ *   type ids, whose `<id>/v1` is checked against md/v1
  * @returns {string[]} empty when valid
  */
-export function validateDocument(doc, refs, { draft = false, assetExists } = {}) {
+export function validateDocument(doc, refs, { draft = false, assetExists, mdTypes = [] } = {}) {
   const errors = [];
   if (!doc || typeof doc !== "object" || typeof doc.schema !== "string") {
     return ['$: missing or invalid "schema" field'];
   }
-  const typeSchema = refs[doc.schema];
+  const [type, version] = doc.schema.split("/");
+  const registered = version === "v1" && mdTypes.includes(type);
+  const typeSchema = refs[doc.schema] ?? (registered ? refs["md/v1"] : undefined);
   if (!typeSchema) return [`$.schema: unknown schema version "${doc.schema}"`];
-
-  if (doc.schema === "unclassified/v1") {
-    validateNode(typeSchema, doc, "$", refs, errors);
-    return errors;
-  }
+  const md = registered || BUILTIN_MD_SCHEMAS.has(doc.schema);
 
   validateNode(ENVELOPE_SCHEMA, doc, "$", refs, errors);
   if (doc.body && typeof doc.body === "object") {
@@ -410,7 +418,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
       // every later edit key off it. A body with no name has no id to save
       // under, so it is rejected here (the dashboard blocks 저장 for the same
       // reason). An authored id has nothing to be compared against.
-      const want = deriveId(doc.schema, doc.body);
+      const want = deriveId(doc.schema, doc.body, { md });
       // A data id is a key the moment the skill exists, draft or not.
       if (doc.schema === "domain-skill/v1") checkSkillDataIds(doc, errors);
       if (AUTHORED_ID.has(doc.schema)) return errors;
@@ -420,10 +428,10 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
           "$.id: 이름이 없어 문서 id 를 만들 수 없습니다 (테이블/커맨드/스킬명 필요)",
         );
       else if (doc.id !== want)
-        fail(
-          errors,
-          `$.id: expected "${want}" (${ID_SOURCE[doc.schema]?.(doc.body) ?? "derived from body"}), got "${doc.id}"`,
-        );
+        fail(errors, `$.id: expected "${want}" (${idSource(doc.schema, md)}), got "${doc.id}"`);
+    } else if (md) {
+      // An md document is free text: no section rule, only the id.
+      checkDerivedId(doc, errors, true);
     } else {
       SEMANTIC_CHECKS[doc.schema]?.(doc, errors, { assetExists });
     }
@@ -435,10 +443,11 @@ export function validateDocument(doc, refs, { draft = false, assetExists } = {})
 // draft (relaxed — build it up over time), an active one must be complete. This
 // single rule is shared by every write route, and the activate route relies on
 // it as the completeness gate — flipping a doc to active re-runs the full schema.
-export function validateForStore(doc, refs, { assetExists } = {}) {
+export function validateForStore(doc, refs, { assetExists, mdTypes } = {}) {
   return validateDocument(doc, refs, {
     draft: doc.status === "inactive",
     assetExists,
+    mdTypes,
   });
 }
 

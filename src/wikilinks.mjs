@@ -4,7 +4,7 @@
 // imports: this file runs in the browser as it is.
 
 const WIKI = /\[\[([^[\]\n]+?)\]\]/g;
-const TYPE_RE = /^[a-z][a-z-]*$/;
+const TYPE_RE = /^[a-z][a-z0-9-]*$/;
 const ID_RE = /^[a-z0-9._-]+$/;
 
 /**
@@ -59,12 +59,11 @@ export function parseWikilinks(texts) {
 
 /** The body texts a type's `[[ ]]` are read from. */
 export function wikiTexts(type, body) {
-  // A malformed body yields no text; the schema reports it.
-  if (type === "domain-skill" || type === "voc")
-    return typeof body?.markdown === "string" ? [body.markdown] : [];
+  // A malformed body yields no text; the schema reports it. A skill and every
+  // md type keep their text in `markdown`.
   if (type === "manual")
     return Array.isArray(body?.steps)
       ? body.steps.map((s) => s?.text).filter((t) => typeof t === "string")
       : [];
-  return [];
+  return typeof body?.markdown === "string" ? [body.markdown] : [];
 }

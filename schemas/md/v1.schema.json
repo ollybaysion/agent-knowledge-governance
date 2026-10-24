@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "md/v1",
+  "title": "md document body",
+  "description": "The body of every md type (voc, unclassified, and each type an admin registers): one Markdown document stored verbatim — `name` is the document id, `markdown` the author's text. akg reads no section structure inside it; the only thing it takes from the text is its [[ ]] links (src/wikilinks.mjs). Rendered as-is to rendered/<type>/<name>.md (voc: rendered/voc/<name>/VOC.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "markdown"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Document name = document id."
+    },
+    "markdown": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The whole document as the author wrote it, stored and rendered byte-for-byte."
+    }
+  }
+}

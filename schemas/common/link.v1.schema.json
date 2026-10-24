@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["type", "id", "rel"],
   "properties": {
-    "type": { "type": "string", "pattern": "^[a-z][a-z-]*$" },
+    "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "id": { "type": "string", "pattern": "^[a-z0-9._-]+$" },
     "rel": {
       "type": "string",

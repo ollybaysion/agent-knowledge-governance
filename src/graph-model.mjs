@@ -17,12 +17,13 @@ export function kindOf(doc) {
 /**
  * docs = GET /api/docs rows. Archived docs are left out, as the tree leaves
  * them out. An edge goes from the doc that holds the link to its target; links
- * to a doc not in the graph and repeated links are dropped.
+ * to a doc not in the graph and repeated links are dropped. `types` = the
+ * types drawn, in column order (GET /api/types).
  */
-export function buildGraph(docs) {
+export function buildGraph(docs, types = GRAPH_TYPES) {
   const nodes = new Map();
   for (const d of docs) {
-    if (d.status === "archived" || !GRAPH_TYPES.includes(d.type)) continue;
+    if (d.status === "archived" || !types.includes(d.type)) continue;
     const key = keyOf(d.type, d.id);
     nodes.set(key, { key, type: d.type, id: d.id, name: d.title ?? d.id, kind: kindOf(d) });
   }
@@ -40,7 +41,7 @@ export function buildGraph(docs) {
       edges.push({ from, to, rel });
     }
   }
-  return { nodes, edges };
+  return { nodes, edges, types };
 }
 
 /** Undirected BFS distance from every main; a node no main reaches is absent. */
@@ -89,7 +90,8 @@ export function layoutColumns(graph, shown = () => true) {
     byDist.get(d).push(n);
   }
   const order = [...byDist.keys()].sort((a, b) => (a === null) - (b === null) || a - b);
-  const rank = (n) => GRAPH_TYPES.indexOf(n.type) * 2 + (n.kind === "sub" ? 1 : 0);
+  const types = graph.types ?? GRAPH_TYPES;
+  const rank = (n) => types.indexOf(n.type) * 2 + (n.kind === "sub" ? 1 : 0);
   return order.map((d) => ({
     dist: d,
     label: columnLabel(d),

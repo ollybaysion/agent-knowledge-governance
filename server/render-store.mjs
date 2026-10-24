@@ -4,6 +4,7 @@
 // always move together).
 import { docMdPath, renderDocMd, rendersToMd } from "../src/render/index.mjs";
 import { commitFiles, listIds, readJson } from "./store.mjs";
+import { isMdType } from "./types.mjs";
 
 const INDEXED_TYPES = new Set(["db-schema", "msg-format", "manual"]);
 
@@ -52,33 +53,41 @@ export { renderDocMd };
  * @returns {{writes: {relpath:string, content:string}[], removes: string[]}}
  */
 export function docWrites(storeDir, type, doc) {
-  const writes = [
-    { relpath: `${type}/${doc.id}.json`, content: stableJson(doc) },
-  ];
-  const removes = [];
+  return docsWrites(storeDir, type, [doc]);
+}
 
-  // Only an active doc gets a rendered md; inactive (a draft being built up, or
-  // #7 bulk-loaded) or archived has its md REMOVED instead — a stale file left
-  // in rendered/ would ship to every mirror via /api/bundle. A draft body can
-  // be incomplete and unrenderable, so a non-active doc is NEVER rendered: we
-  // only drop the file its id/name would map to. `rendersToMd` answers "does
-  // this type render at all" (false for unclassified) without touching the body,
-  // which renderDocMd would throw on.
-  if (rendersToMd(type, doc)) {
-    if (doc.status === "active") {
-      writes.push({ relpath: docMdPath(type, doc), content: renderDocMd(type, doc) });
-    } else {
-      removes.push(docMdPath(type, doc));
+/**
+ * docWrites for several docs of one type in one commit: the index is compiled
+ * once, from the store with every one of `docs` in place of its stored copy.
+ */
+export function docsWrites(storeDir, type, docs) {
+  const md = isMdType(storeDir, type);
+  const writes = [];
+  const removes = [];
+  for (const doc of docs) {
+    writes.push({ relpath: `${type}/${doc.id}.json`, content: stableJson(doc) });
+    // Only an active doc gets a rendered md; inactive (a draft being built up,
+    // or #7 bulk-loaded) or archived has its md REMOVED instead — a stale file
+    // left in rendered/ would ship to every mirror via /api/bundle. A draft
+    // body can be incomplete and unrenderable, so a non-active doc is NEVER
+    // rendered: we only drop the file its id/name would map to. `rendersToMd`
+    // answers "does this type render at all" without touching the body, which
+    // renderDocMd would throw on.
+    if (rendersToMd(type, doc, { md })) {
+      if (doc.status === "active") {
+        writes.push({ relpath: docMdPath(type, doc, { md }), content: renderDocMd(type, doc, { md }) });
+      } else {
+        removes.push(docMdPath(type, doc, { md }));
+      }
     }
   }
 
   if (INDEXED_TYPES.has(type)) {
+    const changed = new Map(docs.map((d) => [d.id, d]));
     const allDocs = listIds(storeDir, type)
-      .map((id) =>
-        id === doc.id ? doc : readJson(storeDir, `${type}/${id}.json`),
-      )
+      .map((id) => changed.get(id) ?? readJson(storeDir, `${type}/${id}.json`))
       .filter(Boolean);
-    if (!allDocs.some((d) => d.id === doc.id)) allDocs.push(doc);
+    for (const d of docs) if (!allDocs.includes(d)) allDocs.push(d);
     writes.push({
       relpath: `rendered/${type}/index.json`,
       content: stableJson(compileIndex(allDocs)),

@@ -47,7 +47,7 @@ export function registerMiscRoutes(app) {
     { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const id = `${request.params.type}/v1`;
-      const schema = refs[id] ?? contracts[id];
+      const schema = refs[id] ?? contracts[id] ?? app.akg.types.bodySchema(request.params.type);
       if (!schema) return reply.code(404).send({ error: "not_found" });
       return schema;
     },
