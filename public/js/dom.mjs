@@ -88,6 +88,8 @@ export function svgEl(tag, attrs, children) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === "text") node.textContent = v;
     else if (k === "class") node.setAttribute("class", v);
+    else if (k === "style" && v && typeof v === "object")
+      for (const [p, val] of Object.entries(v)) node.style.setProperty(p, val);
     else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
     else if (v !== false && v != null) node.setAttribute(k, v);
   }

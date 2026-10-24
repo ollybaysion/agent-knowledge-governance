@@ -1,5 +1,5 @@
-// GET /api/docs rows carry updatedAt: when the doc's file last changed, for
-// the 문서 탭's "최근 수정 순".
+// GET /api/docs rows carry updatedAt (the 문서 탭's "최근 수정 순") and the
+// body's [[ ]] (the graph's thin edges and 끊긴 연결).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -40,6 +40,29 @@ test("each list row has updatedAt, the author time of the doc's last commit", as
     assert.equal(changedAtOfPath(storeDir, "voc/a.json"), rows.find((r) => r.id === "a").updatedAt);
     assert.equal(revOfPath(storeDir, "voc/a.json"), rows.find((r) => r.id === "a").rev);
     assert.equal(changedAtOfPath(storeDir, "voc/none.json"), null);
+  } finally {
+    await app.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a list row carries its body's [[ ]] with where each points, and none when the body has none", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-wikirows-test-"));
+  const auth = await signIn(home, [{ id: "renoir", group: "admin", token: "a" }]);
+  const app = await buildApp({ storeDir: join(home, "store"), auth });
+  try {
+    const post = (doc) => app.inject({ method: "POST", url: "/api/docs/voc", headers: as("a"), payload: doc });
+    assert.equal((await post(voc("a"))).statusCode, 201);
+    const b = voc("b");
+    b.body.markdown = "# b\n\n## 정리\n\n[[a]] 와 [[nowhere]]\n";
+    assert.equal((await post(b)).statusCode, 201);
+    const rows = (await app.inject({ method: "GET", url: "/api/docs?type=voc", headers: as("a") })).json().docs;
+    const rowB = rows.find((r) => r.id === "b");
+    assert.deepEqual(rowB.wikilinks, [
+      { text: "a", type: "voc", id: "a", found: true },
+      { text: "nowhere", type: null, id: "nowhere", found: false },
+    ]);
+    assert.equal(rows.find((r) => r.id === "a").wikilinks, undefined);
   } finally {
     await app.close();
     rmSync(home, { recursive: true, force: true });

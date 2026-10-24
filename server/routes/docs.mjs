@@ -128,6 +128,11 @@ export function registerDocsRoutes(app) {
       : null;
   };
 
+  const wikilinksOf = (type, doc, typeIds) => {
+    const wikilinks = resolveWikilinks(storeDir, typeIds, type, doc).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
+    return wikilinks.length ? { wikilinks } : {};
+  };
+
   // GET /api/docs/:type/:id's JSON answer.
   const docView = (type, id, doc, rev) => {
     const bodySchema = types.bodySchema(type);
@@ -156,6 +161,7 @@ export function registerDocsRoutes(app) {
     async (request) => {
       const { type, tier, q } = request.query ?? {};
       const docs = [];
+      const typeIds = types.ids();
       for (const t of type ? [type] : types.ids()) {
         const bodySchema = types.bodySchema(t);
         if (!bodySchema) continue;
@@ -178,6 +184,9 @@ export function registerDocsRoutes(app) {
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
             updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
+            // The body's [[ ]] with where each points: the graph draws them
+            // thin and the unresolved ones as 끊긴 연결.
+            ...wikilinksOf(t, doc, typeIds),
           });
         }
       }

@@ -33,6 +33,13 @@ import { touch } from "../shelf.mjs";
 let docTicket = 0;
 const enc = encodeURIComponent;
 
+// The right panel tab the next open starts on (the graph opens 연결).
+let pendingTab = null;
+export function openDocWithPanel(type, id, tab) {
+  pendingTab = tab;
+  location.hash = `#/doc/${type}/${enc(id)}`;
+}
+
 /** The name a document is shown by. */
 export function docTitle(type, doc) {
   const b = doc.body ?? {};
@@ -47,6 +54,10 @@ export function docTitle(type, doc) {
  */
 export async function renderDocScreen(type, id, opts = {}) {
   const ticket = ++docTicket;
+  if (opts.tab === undefined && pendingTab) {
+    opts = { ...opts, tab: pendingTab };
+    pendingTab = null;
+  }
   const [res, docs] = await Promise.all([api(`/api/docs/${type}/${enc(id)}`), allDocs()]);
   if (ticket !== docTicket) return;
   if (!res.ok) {

@@ -2428,3 +2428,309 @@ h6.md-h {
     display: none;
   }
 }
+
+/* ==========================================================================
+ * 그래프 탭 5-v2 — 필터 패널 · 맞춘 전체 그래프 · 연결 없음 · 미니맵
+ * ========================================================================== */
+.cols.graph-cols {
+  grid-template-columns: 288px minmax(0, 1fr);
+}
+.gpanel {
+  padding: 0 16px 12px;
+}
+.gf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.gf-n {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.gf-sub {
+  margin-top: 10px;
+}
+.gf-roles {
+  display: flex;
+  gap: 16px;
+}
+.gf-subtag {
+  --c: var(--primary);
+}
+.gf-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+.gcard {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--field);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gcard-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gcard-t {
+  font-size: 13px;
+  color: var(--body);
+}
+.gcard-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chip.scorechip {
+  font-family: var(--sans);
+  background: var(--diff);
+  color: var(--diff-ink);
+  border-color: transparent;
+}
+.gbroken {
+  color: var(--error-ink) !important;
+}
+.gopen {
+  justify-content: center;
+}
+.gcard-note {
+  font-size: 11.5px;
+  margin: 0;
+}
+.gl-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.gl-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--body);
+}
+.gl-fill {
+  fill: var(--muted);
+}
+.gl-note {
+  font-size: 11.5px;
+  margin: 6px 0 0;
+}
+.gmain.main {
+  padding-top: 0;
+}
+.gbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline-soft);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--panel);
+  font-size: 12.5px;
+}
+.gsel-chip {
+  font-family: var(--sans);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.gbar-hint {
+  font-size: 12px;
+}
+.gzoom {
+  min-width: 40px;
+  text-align: right;
+  font-size: 12px;
+}
+.gstage {
+  position: relative;
+  height: calc(100vh - 72px - 48px);
+  min-height: 360px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--field);
+  overflow: hidden;
+}
+.gcanvas {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  outline: none;
+}
+.gsvg {
+  display: block;
+}
+.gcol-h {
+  font: 600 15px var(--sans);
+  fill: var(--muted);
+}
+.ge {
+  fill: none;
+  stroke: var(--muted-soft);
+  stroke-width: 1.6;
+}
+.ge.body {
+  stroke-width: 1;
+}
+.ge.scr {
+  stroke: var(--amber);
+  stroke-dasharray: 5 4;
+}
+.ge.broken {
+  stroke: var(--error);
+  stroke-dasharray: 4 4;
+}
+.ge.on {
+  stroke: var(--primary);
+  stroke-width: 2.2;
+}
+.ge.on.body {
+  stroke-width: 1.4;
+}
+.ge.on.scr {
+  stroke: var(--amber);
+}
+.ge.on.broken {
+  stroke: var(--error);
+}
+.ge.dim {
+  opacity: 0.18;
+}
+.gn {
+  cursor: pointer;
+  outline: none;
+}
+.gn .gsel-ring {
+  fill: var(--field);
+  stroke: transparent;
+  stroke-width: 2;
+}
+.gn.sel .gsel-ring,
+.gn.sel.kind-main .gsel-ring {
+  stroke: var(--primary);
+}
+.gn.sel:not(.kind-main) .gshape {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.gn:focus-visible .gshape {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.gtag {
+  fill: color-mix(in srgb, var(--c) 20%, transparent);
+}
+.gtag-t {
+  font: 700 11px var(--sans);
+  fill: var(--ink);
+}
+.gname {
+  font: 14px var(--mono);
+  fill: var(--ink);
+}
+.gn.sel .gname {
+  font-weight: 700;
+}
+.gn.dim {
+  opacity: 0.28;
+}
+.gmissing {
+  fill: none;
+  stroke: var(--error);
+  stroke-dasharray: 3 2;
+}
+.gnoreg {
+  fill: var(--error-soft);
+  stroke: color-mix(in srgb, var(--error) 50%, transparent);
+}
+.gnoreg-t {
+  font: 600 11px var(--sans);
+  fill: var(--error-ink);
+}
+.gcorner {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  pointer-events: none;
+}
+.gcorner > * {
+  pointer-events: auto;
+}
+.gorphans {
+  min-width: 220px;
+  max-width: 280px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1.5px dashed var(--hairline);
+  border-radius: 10px;
+  background: var(--field);
+}
+.gorph-h {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.gorphans ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gorph {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.gorph:hover,
+.gorph.on {
+  background: var(--surface-card);
+  color: var(--ink);
+}
+.gmini-h {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.gmini svg {
+  display: block;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--canvas);
+}
+.gmini-view {
+  fill: var(--accent-soft);
+  stroke: var(--primary);
+  stroke-width: 1.5;
+}
+@media (max-width: 760px) {
+  .cols.graph-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gcorner {
+    display: none;
+  }
+}
