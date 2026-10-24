@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildApp } from "../../server/app.mjs";
+import { buildApp, frameAncestors } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
@@ -102,4 +102,28 @@ test("GET /api/me is BE's {id, group} plus the logout address", async () => {
     logout: "http://fdc.test/logout",
   });
   await cleanup();
+});
+
+test("GET /api/config hands the FE address to anyone, signed in or not", async () => {
+  const { app, cleanup } = await setup();
+  const res = await app.inject({ method: "GET", url: "/api/config" });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json(), { feUrl: "http://fdc.test" });
+  await cleanup();
+});
+
+test("the CSP lets only this origin and the FE origin frame the page", async () => {
+  const { app, cleanup } = await setup();
+  for (const url of ["/", "/api/config", "/js/main.mjs"]) {
+    const res = await app.inject({ method: "GET", url });
+    assert.match(res.headers["content-security-policy"], /frame-ancestors 'self' http:\/\/fdc\.test(;|$)/, url);
+  }
+  await cleanup();
+});
+
+test("frameAncestors takes the FE origin, and only 'self' when the address is not an http(s) URL", () => {
+  assert.equal(frameAncestors("https://fe.example:8443/chat/"), "'self' https://fe.example:8443");
+  assert.equal(frameAncestors("javascript:alert(1)"), "'self'");
+  assert.equal(frameAncestors("not a url"), "'self'");
+  assert.equal(frameAncestors(undefined), "'self'");
 });

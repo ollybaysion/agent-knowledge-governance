@@ -47,3 +47,32 @@ export async function api(path, opts = {}) {
     data,
   };
 }
+
+// GET /api/docs once per change: the agent list, the browser columns, ⌘K and
+// the body chips all read the same rows. A write calls invalidateDocs().
+let docsPromise = null;
+export function allDocs() {
+  if (!docsPromise)
+    docsPromise = api("/api/docs").then((r) => (r.ok ? r.data.docs.filter((d) => d.status !== "archived") : []));
+  return docsPromise;
+}
+export function invalidateDocs() {
+  docsPromise = null;
+  scorePromises.clear();
+}
+
+// An agent's last machine run ({score, band, G, A, R, at}), or null.
+const scorePromises = new Map();
+export function lastScore(agent) {
+  if (!scorePromises.has(agent))
+    scorePromises.set(
+      agent,
+      api(`/api/score/${encodeURIComponent(agent)}`).then((r) => {
+        if (!r.ok) return { run: null, lines: [] };
+        const lines = r.data.lines ?? [];
+        const last = [...lines].reverse().find((l) => l.machine && l.run);
+        return { run: last ? { ...last.run, at: last.at } : null, lines };
+      }),
+    );
+  return scorePromises.get(agent);
+}

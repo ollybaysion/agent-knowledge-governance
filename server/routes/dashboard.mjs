@@ -14,6 +14,7 @@ const JS = "text/javascript; charset=utf-8";
 const FILES = {
   "/": { path: "index.html", type: "text/html; charset=utf-8" },
   "/app.css": { path: "app.css", type: "text/css; charset=utf-8" },
+  "/ui.css": { path: "ui.css", type: "text/css; charset=utf-8" },
 };
 
 // The server's own modules the page runs as they are, so the page splits,

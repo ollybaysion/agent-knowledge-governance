@@ -2,9 +2,29 @@ import { api } from "../api.mjs";
 import { $, el } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, renderTreeActions } from "../drafts.mjs";
 import { openDoc } from "../router.mjs";
-import { DOC_TYPES, TYPE_LABEL, closedGroups, lastDoc, setGroupClosed, typeInfo } from "../state.mjs";
+import { DOC_TYPES, TYPE_LABEL, lastDoc, typeInfo } from "../state.mjs";
+
+const TREE_FOLD_KEY = "akg_tree_closed";
+function closedGroups() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(TREE_FOLD_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+function setGroupClosed(type, closed) {
+  const set = closedGroups();
+  if (closed) set.add(type);
+  else set.delete(type);
+  try {
+    localStorage.setItem(TREE_FOLD_KEY, JSON.stringify([...set]));
+  } catch {
+    /* storage off: the fold lasts until the next draw */
+  }
+}
 
 export async function renderDocTree() {
+  if (!$("doc-tree")) return 0;
   renderTreeActions();
   const tree = $("doc-tree");
   tree.replaceChildren();
@@ -138,6 +158,7 @@ export function skillTree(docs, docItem) {
   return out;
 }
 export function highlightTree() {
+  if (!$("doc-tree")) return;
   highlightResults();
   const draftHash = location.hash.match(/^#\/draft\/[\w-]+\/([\w-]+)/);
   for (const b of $("doc-tree").querySelectorAll(".doc-item")) {
@@ -208,17 +229,34 @@ export async function runSearch() {
   highlightResults();
 }
 export function highlightResults() {
+  if (!$("search-results")) return;
   for (const b of $("search-results").querySelectorAll(".doc-item"))
     b.classList.toggle("on", !!lastDoc && b.dataset.type === lastDoc.type && b.dataset.id === lastDoc.id);
 }
-$("search-input").addEventListener("input", (e) => {
-  searchState.q = e.currentTarget.value;
-  runSearch();
-});
-$("search-input").addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && e.currentTarget.value) {
-    e.currentTarget.value = "";
-    searchState.q = "";
+/** The left tree panel's parts: search · results · tree · 새 문서. */
+export function treeParts() {
+  const input = el("input", {
+    id: "search-input",
+    type: "search",
+    placeholder: "문서 찾기 — id · 키워드 · 제목",
+    "aria-label": "문서 찾기",
+    autocomplete: "off",
+  });
+  input.addEventListener("input", (e) => {
+    searchState.q = e.currentTarget.value;
     runSearch();
-  }
-});
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && e.currentTarget.value) {
+      e.currentTarget.value = "";
+      searchState.q = "";
+      runSearch();
+    }
+  });
+  return [
+    el("div", { id: "doc-search" }, input),
+    el("div", { id: "search-results", hidden: true }),
+    el("div", { id: "doc-tree" }),
+    el("div", { id: "tree-actions" }),
+  ];
+}

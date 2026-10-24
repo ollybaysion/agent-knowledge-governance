@@ -42,6 +42,12 @@ export function registerMiscRoutes(app) {
     },
   );
 
+  // What the page needs before anyone signs in: the FE address for the rail,
+  // the app grid and the way back to an answer.
+  app.get("/api/config", { config: { public: true } }, async () => ({
+    feUrl: app.akg.auth.feUrl ?? null,
+  }));
+
   app.get(
     "/api/schemas/:type",
     { config: { roles: ["user", "agent"] } },

@@ -48,6 +48,8 @@ export async function openAuth(config) {
       ? `Keycloak ${config.keycloakIssuer}`
       : `비밀번호 파일 ${config.usersFile}`,
     sessions,
+    /** The FE address: the page's 채팅 · 관리 links and the one origin that may frame it. */
+    feUrl: fdcUrl,
     /** Where a person without a session logs in — BE's two login paths. */
     loginUrl: keycloak ? `${fdcUrl}/oauth2/authorization/keycloak` : `${fdcUrl}/login`,
     logoutUrl: `${fdcUrl}/logout`,

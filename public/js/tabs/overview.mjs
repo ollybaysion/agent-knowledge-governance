@@ -5,6 +5,7 @@ import { DOC_TYPES, TYPE_LABEL } from "../state.mjs";
 
 // ================= 개요 =================
 export async function renderOverview() {
+  $("corpus").replaceChildren($("tpl-overview").content.cloneNode(true));
   const all = [];
   const totals = { scaffold: 0, inferred: 0, confirmed: 0, deprecated: 0 };
   for (const type of DOC_TYPES) {

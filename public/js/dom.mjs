@@ -4,6 +4,13 @@ export function el(tag, attrs, children) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === "class") node.className = v;
     else if (k === "text") node.textContent = v;
+    // CSS custom properties and style go through CSSOM: style-src 'self'
+    // refuses a style="" attribute, not node.style.
+    else if (k === "style" && v && typeof v === "object")
+      for (const [p, val] of Object.entries(v)) {
+        if (p.startsWith("--")) node.style.setProperty(p, val);
+        else node.style[p] = val;
+      }
     else if (k.startsWith("on") && typeof v === "function")
       node.addEventListener(k.slice(2), v);
     else if (v !== false && v != null)
@@ -73,4 +80,68 @@ export function jsonPane(title, obj, onClose) {
     ]),
     el("pre", { class: "jm-body", text: pretty }),
   ]);
+}
+
+export const SVG_NS = "http://www.w3.org/2000/svg";
+export function svgEl(tag, attrs, children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "text") node.textContent = v;
+    else if (k === "class") node.setAttribute("class", v);
+    else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) node.setAttribute(k, v);
+  }
+  for (const c of [].concat(children || [])) if (c) node.appendChild(c);
+  return node;
+}
+
+// Line icons (24 grid, stroke), drawn inline: the page loads nothing from outside.
+const ICONS = {
+  chat: [["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z" }]],
+  book: [["path", { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }]],
+  admin: [["path", { d: "M20 7h-9" }], ["path", { d: "M14 17H5" }], ["circle", { cx: 17, cy: 17, r: 3 }], ["circle", { cx: 7, cy: 7, r: 3 }]],
+  sun: [["circle", { cx: 12, cy: 12, r: 4 }], ["path", { d: "M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" }]],
+  moon: [["path", { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }]],
+  grid: [["rect", { x: 3, y: 3, width: 7, height: 7, rx: 1 }], ["rect", { x: 14, y: 3, width: 7, height: 7, rx: 1 }], ["rect", { x: 14, y: 14, width: 7, height: 7, rx: 1 }], ["rect", { x: 3, y: 14, width: 7, height: 7, rx: 1 }]],
+  search: [["circle", { cx: 11, cy: 11, r: 8 }], ["path", { d: "m21 21-4.3-4.3" }]],
+  back: [["path", { d: "m12 19-7-7 7-7" }], ["path", { d: "M19 12H5" }]],
+  plus: [["path", { d: "M5 12h14" }], ["path", { d: "M12 5v14" }]],
+  star: [["polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" }]],
+  clock: [["circle", { cx: 12, cy: 12, r: 10 }], ["path", { d: "M12 6v6l4 2" }]],
+  right: [["path", { d: "m9 18 6-6-6-6" }]],
+  left: [["path", { d: "m15 18-6-6 6-6" }]],
+  down: [["path", { d: "m6 9 6 6 6-6" }]],
+  pencil: [["path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" }]],
+  external: [["path", { d: "M15 3h6v6" }], ["path", { d: "M10 14 21 3" }], ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }]],
+  graph: [["circle", { cx: 12, cy: 18, r: 3 }], ["circle", { cx: 6, cy: 6, r: 3 }], ["circle", { cx: 18, cy: 6, r: 3 }], ["path", { d: "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" }], ["path", { d: "M12 12v3" }]],
+  upload: [["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }], ["path", { d: "M17 8 12 3 7 8" }], ["path", { d: "M12 3v12" }]],
+  x: [["path", { d: "M18 6 6 18" }], ["path", { d: "m6 6 12 12" }]],
+  pin: [["path", { d: "M12 17v5" }], ["path", { d: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" }]],
+  lock: [["rect", { x: 3, y: 11, width: 18, height: 11, rx: 2 }], ["path", { d: "M7 11V7a5 5 0 0 1 10 0v4" }]],
+  grip: [9, 15].flatMap((x) => [5, 12, 19].map((y) => ["circle", { cx: x, cy: y, r: 1.2 }])),
+  columns: [["rect", { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ["path", { d: "M9 3v18" }], ["path", { d: "M15 3v18" }]],
+  file: [["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }], ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }], ["path", { d: "M16 13H8" }], ["path", { d: "M16 17H8" }]],
+  check: [["path", { d: "M20 6 9 17l-5-5" }]],
+  command: [["path", { d: "M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" }]],
+};
+
+/** An inline line icon, hidden from assistive tech (the button carries the name). */
+export function icon(name, size = 16) {
+  return svgEl(
+    "svg",
+    {
+      class: `ic ic-${name}`,
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": 1.8,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "aria-hidden": "true",
+      focusable: "false",
+    },
+    (ICONS[name] ?? []).map(([tag, attrs]) => svgEl(tag, attrs)),
+  );
 }
