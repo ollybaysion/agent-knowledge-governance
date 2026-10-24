@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { pngBytes } from "../fixtures/images.mjs";
 
 function freshHome() {
@@ -15,10 +15,10 @@ function freshHome() {
 
 async function setup(users) {
   const home = freshHome();
-  saveUsers(join(home, "users.json"), users);
+  const signedIn = await signIn(home, users);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -31,7 +31,7 @@ async function setup(users) {
 }
 
 function auth(token) {
-  return { authorization: `Bearer ${token}` };
+  return as(token);
 }
 
 function newDbSchemaDoc(overrides = {}) {
@@ -63,8 +63,8 @@ function newDbSchemaDoc(overrides = {}) {
 
 test("create -> read -> edit round trip, and a fresh POST can never smuggle confirmed", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "reader", role: "viewer", tokenHash: hashToken("vtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "reader", group: "user", token: "vtok" },
   ]);
 
   const doc = newDbSchemaDoc();
@@ -98,7 +98,7 @@ test("create -> read -> edit round trip, and a fresh POST can never smuggle conf
 
 test("PUT without If-Match is rejected (428); with a stale but non-overlapping rev it auto-rebases (S6)", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const created = await app.inject({
     method: "POST",
@@ -159,7 +159,7 @@ test("PUT without If-Match is rejected (428); with a stale but non-overlapping r
 // push`), and the returned rev has to stay usable as the next If-Match.
 test("PUT with an unchanged body is idempotent — same rev, no empty commit, still editable", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   try {
     const doc = newDbSchemaDoc();
@@ -209,7 +209,7 @@ test("PUT with an unchanged body is idempotent — same rev, no empty commit, st
 
 test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const created = await app.inject({
     method: "POST",
@@ -251,10 +251,10 @@ test("PUT with an overlapping stale edit gets 409, not a silent overwrite (S6)",
   await cleanup();
 });
 
-test("DELETE archives a doc (approver only) — dropped from the index, JSON preserved; a nonexistent route is 404 not 500", async () => {
+test("DELETE archives a doc (admin only) — dropped from the index, JSON preserved; a nonexistent route is 404 not 500", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
-    { id: "ed", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "aptok" },
+    { id: "lee", group: "user", token: "edtok" },
   ]);
   await app.inject({
     method: "POST",
@@ -263,7 +263,7 @@ test("DELETE archives a doc (approver only) — dropped from the index, JSON pre
     payload: newDbSchemaDoc(),
   });
 
-  // editor cannot archive
+  // a user cannot archive
   const forbidden = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
@@ -298,7 +298,7 @@ test("DELETE archives a doc (approver only) — dropped from the index, JSON pre
 
 test("catalog-push replaces catalog and auto-deprecates an inferred slot whose column vanished", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const created = await app.inject({
     method: "POST",
@@ -365,7 +365,7 @@ const link = (type, id, rel = "related") => ({ type, id, rel });
 
 test("links: a write naming a target the store lacks is 400 unknown_link_target; pointing at itself is 400", async () => {
   const { app, home, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   try {
     const missing = await app.inject({
@@ -403,7 +403,7 @@ test("links: a write naming a target the store lacks is 400 unknown_link_target;
 
 test("links: forward edges land in the list, the index and the read; the target computes backlinks", async () => {
   const { app, home, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   try {
     for (const payload of [
@@ -419,10 +419,10 @@ test("links: forward edges land in the list, the index and the read; the target 
       assert.equal(r.statusCode, 201, r.body);
     }
 
-    const list = await app.inject({ method: "GET", url: "/api/docs?type=db-schema" });
+    const list = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs?type=db-schema" });
     assert.deepEqual(list.json().docs[0].links, [link("screen-map", "spc-chart-config")]);
     assert.equal(list.json().docs[0].title, "X");
-    const screens = await app.inject({ method: "GET", url: "/api/docs?type=screen-map" });
+    const screens = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs?type=screen-map" });
     assert.equal(screens.json().docs[0].title, "화면 spc-chart-config");
 
     const index = JSON.parse(
@@ -430,13 +430,13 @@ test("links: forward edges land in the list, the index and the read; the target 
     );
     assert.deepEqual(index[0].links, [link("screen-map", "spc-chart-config")]);
 
-    const from = await app.inject({ method: "GET", url: "/api/docs/db-schema/x" });
+    const from = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/db-schema/x" });
     assert.deepEqual(from.json().links, [
       { ...link("screen-map", "spc-chart-config"), status: "active" },
     ]);
     assert.deepEqual(from.json().backlinks, []);
 
-    const to = await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
+    const to = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
     assert.deepEqual(to.json().backlinks, [
       { type: "db-schema", id: "x", rel: "related", status: "active" },
     ]);
@@ -448,7 +448,7 @@ test("links: forward edges land in the list, the index and the read; the target 
 
 test("links: archiving either end keeps the edge and reports the archived status", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+    { id: "renoir", group: "admin", token: "aptok" },
   ]);
   try {
     await app.inject({
@@ -469,7 +469,7 @@ test("links: archiving either end keeps the edge and reports the archived status
       url: "/api/docs/screen-map/spc-chart-config",
       headers: auth("aptok"),
     });
-    const from = await app.inject({ method: "GET", url: "/api/docs/db-schema/x" });
+    const from = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/db-schema/x" });
     assert.equal(from.json().links[0].status, "archived");
     assert.deepEqual(from.json().json.links, [link("screen-map", "spc-chart-config")]);
 
@@ -487,7 +487,7 @@ test("links: archiving either end keeps the edge and reports the archived status
     assert.equal(again.statusCode, 201, again.body);
 
     await app.inject({ method: "DELETE", url: "/api/docs/db-schema/x", headers: auth("aptok") });
-    const to = await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
+    const to = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
     assert.deepEqual(
       to.json().backlinks.map((b) => `${b.id}:${b.status}`).sort(),
       ["x:archived", "y:active"],
@@ -499,8 +499,8 @@ test("links: archiving either end keeps the edge and reports the archived status
 
 test("PUT links: If-Match required and checked; sets, checks targets, and an empty list drops the key", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "reader", role: "viewer", tokenHash: hashToken("vtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "reader", group: "user", token: "vtok" },
   ]);
   try {
     await app.inject({
@@ -571,7 +571,7 @@ test("PUT links: If-Match required and checked; sets, checks targets, and an emp
 
 test("manual: a draft saves without screen or captures; activation needs one rel:screen link to a screen-map and every capture in the store", async () => {
   const { app, home, cleanup } = await setup([
-    { id: "renoir", role: "approver", tokenHash: hashToken("aptok") },
+    { id: "renoir", group: "admin", token: "aptok" },
   ]);
   const h = auth("aptok");
   try {
@@ -596,11 +596,11 @@ test("manual: a draft saves without screen or captures; activation needs one rel
 
     const url = "/api/docs/manual/spc-chart-limit-setup";
     const activate = async () => {
-      const { rev } = (await app.inject({ method: "GET", url })).json();
+      const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url })).json();
       return app.inject({ method: "POST", url: `${url}/activate`, headers: { ...h, "if-match": rev } });
     };
     const setLinks = async (links) => {
-      const { rev } = (await app.inject({ method: "GET", url })).json();
+      const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url })).json();
       const r = await app.inject({ method: "PUT", url: `${url}/links`, headers: { ...h, "if-match": rev }, payload: { links } });
       assert.equal(r.statusCode, 200, r.body);
     };
@@ -637,7 +637,7 @@ test("manual: a draft saves without screen or captures; activation needs one rel
     ]);
 
     // An active manual keeps its screen: dropping the link is refused.
-    const { rev } = (await app.inject({ method: "GET", url })).json();
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url })).json();
     const drop = await app.inject({ method: "PUT", url: `${url}/links`, headers: { ...h, "if-match": rev }, payload: { links: [] } });
     assert.equal(drop.statusCode, 400);
   } finally {
@@ -657,7 +657,7 @@ function skillDoc(name, markdown, overrides = {}) {
 }
 
 test("[[ ]]: the body's targets join links[] as related, a missing one is kept out but reported found:false", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   try {
     await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("spc-chart-config") });
@@ -676,13 +676,13 @@ test("[[ ]]: the body's targets join links[] as related, a missing one is kept o
       link("db-schema", "x"),
     ]);
 
-    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const got = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     assert.deepEqual(got.wikilinks, [
       { text: "spc-chart-config", type: "screen-map", id: "spc-chart-config", found: true },
       { text: "db-schema/x", type: "db-schema", id: "x", found: true },
       { text: "nope", type: null, id: "nope", found: false },
     ]);
-    const back = (await app.inject({ method: "GET", url: "/api/docs/screen-map/spc-chart-config" })).json();
+    const back = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/screen-map/spc-chart-config" })).json();
     assert.deepEqual(back.backlinks, [{ type: "domain-skill", id: "s", rel: "related", status: "active" }]);
   } finally {
     await cleanup();
@@ -690,7 +690,7 @@ test("[[ ]]: the body's targets join links[] as related, a missing one is kept o
 });
 
 test("[[ ]]: a bare id in two types is 400 ambiguous_link_target; [[type/id]] resolves it", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   try {
     await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
@@ -720,7 +720,7 @@ test("[[ ]]: a bare id in two types is 400 ambiguous_link_target; [[type/id]] re
 });
 
 test("[[ ]]: PUT links cannot drop a body link; editing the [[ ]] out of the body drops it and keeps hand links", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   try {
     await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc("spc-chart-config") });
@@ -757,7 +757,7 @@ test("[[ ]]: PUT links cannot drop a body link; editing the [[ ]] out of the bod
 });
 
 test("[[ ]]: a manual's step texts are read too", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   try {
     await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
@@ -782,7 +782,7 @@ test("[[ ]]: a manual's step texts are read too", async () => {
 
 test("role: the domain-skill list carries role (absent = main); PUT role changes it under If-Match, skills only", async () => {
   const { app, cleanup } = await setup([
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const h = auth("edtok");
   const skill = (name, markdown, extra = {}) => ({
@@ -810,14 +810,14 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
     });
     assert.equal(noKnowledge.statusCode, 400);
 
-    const list = (await app.inject({ method: "GET", url: "/api/docs?type=domain-skill" })).json().docs;
+    const list = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs?type=domain-skill" })).json().docs;
     assert.deepEqual(
       list.map((d) => [d.id, d.role]).sort(),
       [["k", "sub"], ["m", "main"]],
     );
 
     const url = "/api/docs/domain-skill/m/role";
-    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/m" })).json();
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/m" })).json();
     assert.equal((await app.inject({ method: "PUT", url, headers: h, payload: { role: "sub" } })).statusCode, 428);
     assert.equal(
       (await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "x" } })).statusCode,
@@ -827,7 +827,7 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
     const toSub = await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
     assert.equal(toSub.statusCode, 400);
 
-    const kRev = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/k" })).json().rev;
+    const kRev = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/k" })).json().rev;
     const toMain = await app.inject({
       method: "PUT",
       url: "/api/docs/domain-skill/k/role",
@@ -845,7 +845,7 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
     assert.equal(stale.statusCode, 409);
 
     await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
-    const xRev = (await app.inject({ method: "GET", url: "/api/docs/db-schema/x" })).json().rev;
+    const xRev = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/db-schema/x" })).json().rev;
     const other = await app.inject({
       method: "PUT",
       url: "/api/docs/db-schema/x/role",
@@ -860,7 +860,7 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
 });
 
 test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as written, listed with its title, [[ ]] linked", async () => {
-  const { app, home, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, home, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   try {
     await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: newDbSchemaDoc() });
@@ -881,9 +881,9 @@ test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as writte
     assert.deepEqual(r.json().json.links, [link("db-schema", "x")]);
     assert.equal(readFileSync(join(home, "store", "rendered", "voc", "v", "VOC.md"), "utf8"), markdown);
 
-    const md = await app.inject({ method: "GET", url: "/api/docs/voc/v?format=md" });
+    const md = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/voc/v?format=md" });
     assert.equal(md.body, markdown);
-    const list = (await app.inject({ method: "GET", url: "/api/docs?type=voc" })).json().docs;
+    const list = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs?type=voc" })).json().docs;
     assert.deepEqual(list.map((d) => [d.id, d.title, "role" in d]), [["v", "v", false]]);
   } finally {
     await cleanup();
@@ -891,7 +891,7 @@ test("voc: stored like a skill, rendered to rendered/voc/<name>/VOC.md as writte
 });
 
 test("verification set: a skill save names unknown 정답 paths as warnings and refuses a rule break", async () => {
-  const { app, cleanup } = await setup([{ id: "renoir", role: "editor", tokenHash: hashToken("edtok") }]);
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
   const h = auth("edtok");
   const base = "# s\n\n## 도메인 지식\n\n### A\n\n글\n";
   const withSet = (set) => `${base}\n## 답변 품질 검증 Set\n\n${set}\n`;
@@ -915,7 +915,7 @@ test("verification set: a skill save names unknown 정답 paths as warnings and 
     assert.equal(ok.statusCode, 200, ok.body);
     assert.equal(ok.json().warnings.length, 2);
     assert.match(ok.json().warnings[0], /닿는 지식 조각에 없는 정답입니다 — 옛 제목/);
-    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const got = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     assert.deepEqual(got.warnings, ok.json().warnings);
     assert.deepEqual(got.backlinks, []);
   } finally {

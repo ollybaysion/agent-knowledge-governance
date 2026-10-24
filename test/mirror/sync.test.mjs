@@ -19,18 +19,18 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
-import { syncMirror } from "../../src/mirror/sync.mjs";
+import { signIn, as } from "../sign-in.mjs";
+import { syncMirror, AkgSyncError } from "../../src/mirror/sync.mjs";
 
 async function setupServer() {
   const home = mkdtempSync(join(tmpdir(), "akg-sync-server-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "viewer1", role: "viewer", tokenHash: hashToken("view-tok") },
-    { id: "editor1", role: "editor", tokenHash: hashToken("ed-tok") },
+  const signedIn = await signIn(home, [
+    { id: "viewer1", group: "agent", token: "view-tok" },
+    { id: "editor1", group: "admin", token: "ed-tok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -84,7 +84,7 @@ async function postDoc(app, doc) {
   const res = await app.inject({
     method: "POST",
     url: `/api/docs/${type}`,
-    headers: { authorization: "Bearer ed-tok" },
+    headers: as("ed-tok"),
     payload: doc,
   });
   assert.equal(res.statusCode, 201, res.body);
@@ -104,7 +104,7 @@ function fetchImplFromApp(app, token) {
       // whatever syncMirror actually sent — which is how the anonymous path
       // (no Authorization header at all) gets exercised for real.
       headers: token
-        ? { authorization: `Bearer ${token}` }
+        ? as(token)
         : (init.headers ?? {}),
     });
     return {
@@ -132,23 +132,21 @@ function siblingEntries(mirrorDir) {
   );
 }
 
-test("0. a tokenless sync works against a server with anonymous read on", async () => {
+test("0. a tokenless sync is refused — reads need an agent token", async () => {
   const { app, cleanup } = await setupServer();
   await postDoc(app, dbSchemaDoc("T_SENSOR"));
 
   const mirrorDir = tmpMirrorDir();
-  const result = await syncMirror({
-    serverUrl: "http://test.local",
-    token: null, // no ~/.claude/akg/token, no AKG_TOKEN
-    mirrorDir,
-    fetchImpl: fetchImplFromApp(app, null), // forwards syncMirror's own headers
-  });
-
-  assert.equal(result.changed, true);
-  assert.ok(
-    existsSync(join(mirrorDir, "db-schema", "index.json")),
-    "an anonymous pull must produce the same mirror a viewer token would",
+  await assert.rejects(
+    syncMirror({
+      serverUrl: "http://test.local",
+      token: null, // no ~/.claude/akg/token, no AKG_TOKEN
+      mirrorDir,
+      fetchImpl: fetchImplFromApp(app, null), // forwards syncMirror's own headers
+    }),
+    (err) => err instanceof AkgSyncError && err.status === 401,
   );
+  assert.equal(existsSync(join(mirrorDir, "db-schema", "index.json")), false);
   rmSync(mirrorDir, { recursive: true, force: true });
   await cleanup();
 });

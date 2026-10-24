@@ -1,8 +1,6 @@
 // The type → renderer dispatch (json-spec §1.1: `render(json) === md`).
-// It lives in src/ rather than server/ because rendering is pure and both
-// sides need it: the server to persist rendered/ artifacts, and `akg push
-// --dry-run` to show the caller what a document will look like before any
-// write happens.
+// It lives in src/ rather than server/ because rendering is pure; the server
+// uses it to persist rendered/ artifacts.
 import { renderDbSchemaMd } from "./db-schema.mjs";
 import { renderMsgFormatMd } from "./msg-format.mjs";
 import { renderDomainSkillMd } from "./domain-skill.mjs";

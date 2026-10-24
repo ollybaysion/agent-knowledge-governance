@@ -12,18 +12,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { commitFiles } from "../../server/store.mjs";
 
 const ONE_MB = 1024 * 1024;
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-bundle-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "viewer1", role: "viewer", tokenHash: hashToken("vtok") },
+  const signedIn = await signIn(home, [
+    { id: "viewer1", group: "user", token: "vtok" },
   ]);
   const storeDir = join(home, "store");
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir, auth: signedIn });
   return {
     app,
     storeDir,
@@ -51,7 +51,7 @@ test("bundle streams a corpus larger than the old 1MB buffer instead of 500ing",
   const res = await app.inject({
     method: "GET",
     url: "/api/bundle",
-    headers: { authorization: "Bearer vtok" },
+    headers: as("vtok"),
   });
 
   assert.equal(res.statusCode, 200);
@@ -86,7 +86,7 @@ test("bundle still answers 304 when the caller already has HEAD", async () => {
   const first = await app.inject({
     method: "GET",
     url: "/api/bundle",
-    headers: { authorization: "Bearer vtok" },
+    headers: as("vtok"),
   });
   assert.equal(first.statusCode, 200);
   const rev = first.headers.etag;
@@ -95,7 +95,7 @@ test("bundle still answers 304 when the caller already has HEAD", async () => {
   const second = await app.inject({
     method: "GET",
     url: `/api/bundle?since=${rev}`,
-    headers: { authorization: "Bearer vtok" },
+    headers: as("vtok"),
   });
   assert.equal(second.statusCode, 304);
   await cleanup();

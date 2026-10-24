@@ -1,5 +1,5 @@
-// §6: GET /health (public), GET /api/schemas/:type (public),
-// GET /api/index/:type (viewer), GET /api/bundle (viewer).
+// §6: GET /health, GET /api/schemas/:type, GET /api/index/:type,
+// GET /api/bundle, GET /api/me — all reads, all user · agent.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -13,7 +13,7 @@ const VERSION = JSON.parse(
 export function registerMiscRoutes(app) {
   const { storeDir, refs, contracts } = app.akg;
 
-  app.get("/health", { config: { public: true } }, async () => {
+  app.get("/health", { config: { roles: ["user", "agent"] } }, async () => {
     let rev = null;
     try {
       rev = git(storeDir, ["rev-parse", "HEAD"]).trim();
@@ -23,25 +23,28 @@ export function registerMiscRoutes(app) {
     return { version: VERSION, storeRev: rev };
   });
 
-  // Not in design §6's table — added so the dashboard can show "logged in as
-  // X (role)" and gate the promote button client-side without guessing.
+  // The dashboard's "id · group" pill and its client-side gating. Same
+  // {id, group} as BE's GET /api/fdc/v1/me; a session request also gets the
+  // CSRF token in X-CSRF-TOKEN (BE does the same) and the logout address.
   app.get(
     "/api/me",
-    { config: { roles: ["viewer", "editor", "approver"], anonOk: true } },
-    async (request) => {
-      // `anonymous: true` is what lets the dashboard boot straight into a
-      // read-only view instead of showing a login gate first.
+    { config: { roles: ["user", "agent"] } },
+    async (request, reply) => {
+      if (request.session) {
+        const csrf = await app.akg.auth.sessions.ensureCsrf(request.session);
+        if (csrf) reply.header("x-csrf-token", csrf);
+      }
       return {
         id: request.user.id,
-        role: request.user.role,
-        anonymous: request.user.anon === true,
+        group: request.user.group,
+        logout: app.akg.auth.logoutUrl,
       };
     },
   );
 
   app.get(
     "/api/schemas/:type",
-    { config: { public: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const id = `${request.params.type}/v1`;
       const schema = refs[id] ?? contracts[id];
@@ -52,7 +55,7 @@ export function registerMiscRoutes(app) {
 
   app.get(
     "/api/index/:type",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { type } = request.params;
       const rev =
@@ -75,7 +78,7 @@ export function registerMiscRoutes(app) {
   // (the editable JSON) — akg sync only ever needs the former (design §8.1).
   app.get(
     "/api/bundle",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       let headRev = null;
       try {

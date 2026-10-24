@@ -7,19 +7,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { catalogPush } from "../../src/client/catalog-push.mjs";
 import { AkgApiError } from "../../src/client/errors.mjs";
 
 async function setupServer() {
   const home = mkdtempSync(join(tmpdir(), "akg-catalog-push-server-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "editor1", role: "editor", tokenHash: hashToken("ed-tok") },
-    { id: "agent1", role: "agent", tokenHash: hashToken("agent-tok") },
+  const signedIn = await signIn(home, [
+    { id: "editor1", group: "admin", token: "ed-tok" },
+    { id: "agent1", group: "agent", token: "agent-tok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -51,7 +51,7 @@ async function seedSensorDoc(app) {
   const res = await app.inject({
     method: "POST",
     url: "/api/docs/db-schema",
-    headers: { authorization: "Bearer ed-tok" },
+    headers: as("ed-tok"),
     payload: {
       schema: "db-schema/v1",
       id: "sensor",
@@ -107,7 +107,7 @@ test("catalog-push: success replaces catalog, preserves a non-scaffold columnDes
     const got = await app.inject({
       method: "GET",
       url: "/api/docs/db-schema/sensor",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     const doc = got.json().json;
     assert.deepEqual(doc.body.catalog, newCatalog, "catalog fully replaced");
@@ -153,7 +153,7 @@ test("catalog-push: vanished column with a non-scaffold slot is deprecated, not 
     const got = await app.inject({
       method: "GET",
       url: "/api/docs/db-schema/sensor",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     const doc = got.json().json;
     assert.equal(

@@ -1,5 +1,5 @@
-// Capture store for manual steps: GET /api/assets/:sha256 (viewer),
-// POST /api/assets (editor). The bytes are content-addressed, so a stored
+// Capture store for manual steps: GET /api/assets/:sha256 (user · agent),
+// POST /api/assets (admin). The bytes are content-addressed, so a stored
 // asset never changes — which is what lets GET hand out an immutable cache.
 import { createHash } from "node:crypto";
 import { imageHead } from "../../src/image-head.mjs";
@@ -27,7 +27,7 @@ export function registerAssetsRoutes(app) {
 
   app.get(
     "/api/assets/:sha256",
-    { config: { roles: ["viewer"], anonOk: true } },
+    { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
       const { sha256 } = request.params;
       if (!isSha256(sha256))
@@ -47,7 +47,7 @@ export function registerAssetsRoutes(app) {
 
   app.post(
     "/api/assets",
-    { bodyLimit: ASSET_LIMIT, config: { roles: ["editor"] } },
+    { bodyLimit: ASSET_LIMIT, config: { roles: ["admin"] } },
     async (request, reply) => {
       const bytes = request.body;
       const claimed = String(request.headers["content-type"] ?? "")

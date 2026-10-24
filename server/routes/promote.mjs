@@ -1,4 +1,4 @@
-// §6 POST .../promote (approver) and .../deprecate (editor) — both slot-unit,
+// §6 POST .../promote and .../deprecate (both admin) — both slot-unit,
 // both require If-Match (S4), neither ever creates confirmed except promote.
 import { validateForStore } from "../../src/envelope.mjs";
 import { readJson, revOfPath, readJsonAtRev } from "../store.mjs";
@@ -6,7 +6,7 @@ import { persistDoc } from "../render-store.mjs";
 import { listSlotAddresses, getSlot, setSlot, diffSlots } from "../slots.mjs";
 
 function priorityOf(user) {
-  return user.role === "agent" ? "agent" : "human";
+  return user.group === "agent" ? "agent" : "human";
 }
 
 // Shared shape: load current+base, verify If-Match resolves, verify the
@@ -48,7 +48,7 @@ export function registerPromoteRoutes(app) {
 
   app.post(
     "/api/docs/:type/:id/promote",
-    { config: { roles: ["approver"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       const ifMatch = request.headers["if-match"];
@@ -131,7 +131,7 @@ export function registerPromoteRoutes(app) {
 
   app.post(
     "/api/docs/:type/:id/deprecate",
-    { config: { roles: ["editor"] } },
+    { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       const ifMatch = request.headers["if-match"];

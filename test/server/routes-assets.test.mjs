@@ -6,18 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { git } from "../../server/git.mjs";
 import { jpegBytes, pngBytes } from "../fixtures/images.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-assets-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "reader", role: "viewer", tokenHash: hashToken("vtok") },
+  const signedIn = await signIn(home, [
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "reader", group: "user", token: "vtok" },
   ]);
   const storeDir = join(home, "store");
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir, auth: signedIn });
   return {
     app,
     storeDir,
@@ -32,7 +32,7 @@ const upload = (app, bytes, contentType, token = "edtok") =>
   app.inject({
     method: "POST",
     url: "/api/assets",
-    headers: { authorization: `Bearer ${token}`, "content-type": contentType },
+    headers: { ...as(token), "content-type": contentType },
     payload: bytes,
   });
 
@@ -103,17 +103,17 @@ test("POST refuses a header that disagrees with the magic bytes, unreadable byte
 test("GET: 400 for a non-hex name, 404 when absent, bytes with type · immutable cache · ETag, 304 on If-None-Match", async () => {
   const { app, cleanup } = await setup();
   try {
-    const bad = await app.inject({ method: "GET", url: "/api/assets/..%2F..%2Fusers.json" });
+    const bad = await app.inject({ headers: as("reader"), method: "GET", url: "/api/assets/..%2F..%2Fusers.json" });
     assert.equal(bad.statusCode, 400);
-    const upper = await app.inject({ method: "GET", url: `/api/assets/${"A".repeat(64)}` });
+    const upper = await app.inject({ headers: as("reader"), method: "GET", url: `/api/assets/${"A".repeat(64)}` });
     assert.equal(upper.statusCode, 400);
 
-    const absent = await app.inject({ method: "GET", url: `/api/assets/${"0".repeat(64)}` });
+    const absent = await app.inject({ headers: as("reader"), method: "GET", url: `/api/assets/${"0".repeat(64)}` });
     assert.equal(absent.statusCode, 404);
 
     const jpg = jpegBytes(800, 600);
     await upload(app, jpg, "image/jpeg");
-    const got = await app.inject({ method: "GET", url: `/api/assets/${sha(jpg)}` });
+    const got = await app.inject({ headers: as("reader"), method: "GET", url: `/api/assets/${sha(jpg)}` });
     assert.equal(got.statusCode, 200);
     assert.equal(got.headers["content-type"], "image/jpeg");
     assert.equal(got.headers["cache-control"], "public, max-age=31536000, immutable");
@@ -123,7 +123,7 @@ test("GET: 400 for a non-hex name, 404 when absent, bytes with type · immutable
     const cached = await app.inject({
       method: "GET",
       url: `/api/assets/${sha(jpg)}`,
-      headers: { "if-none-match": `"${sha(jpg)}"` },
+      headers: { ...as("reader"), "if-none-match": `"${sha(jpg)}"` },
     });
     assert.equal(cached.statusCode, 304);
   } finally {

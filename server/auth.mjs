@@ -1,98 +1,110 @@
-// users.json — the one non-git state (design §D2, §D6). fail-closed by
-// design (§11 S1): missing/empty/unreadable users.json must refuse server
-// boot, never silently run with auth off the way the observability server's
-// loopback-trust model does.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+// Identity = { id, group }, the same record BE puts in the shared session
+// (fdc.identity). group ∈ admin · user · agent. Permission checks look at the
+// group only — where the identity came from (Keycloak or the password file)
+// never enters them.
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { parse } from "yaml";
 
 export class AuthBootError extends Error {}
 
-const ROLES = ["viewer", "editor", "approver", "agent"];
-const RANK = { viewer: 1, editor: 2, approver: 3 }; // agent is intentionally not on this ladder (D6)
+const GROUPS = ["admin", "user", "agent"];
+const RANK = { user: 1, admin: 2 }; // agent is intentionally not on this ladder (D6)
 
-export function hashToken(token) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-export function generateToken() {
-  return randomBytes(24).toString("hex");
-}
+const digest = (text) => createHash("sha256").update(text, "utf8").digest();
+const text = (value) => {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === "" ? null : s;
+};
 
 /**
- * Load + validate users.json. Throws AuthBootError (caller should refuse to
- * start the server) if the file is missing, empty, unreadable, or has 0600
- * permissions violated in a way that leaks tokens to other local users.
+ * The per-person password file (YAML), same rules as BE's UserSource: a
+ * missing, empty, or group/other-readable file refuses boot (S1).
+ * @returns {{id: string, group: string, digest: Buffer}[]}
  */
-export function loadUsers(path) {
-  if (!existsSync(path)) {
+export function loadUserFile(path) {
+  if (!path) {
     throw new AuthBootError(
-      `${path} 없음 — users.json 없이는 기동하지 않습니다(S1)`,
+      "FDC_AUTH_USERS_FILE 이 비었습니다 — Keycloak issuer 도 비면 비밀번호 파일이 있어야 뜹니다",
     );
+  }
+  if (!existsSync(path) || !statSync(path).isFile()) {
+    throw new AuthBootError(`${path} 이 없습니다 — 비밀번호 파일 없이는 뜨지 않습니다`);
   }
   const mode = statSync(path).mode & 0o777;
   if (mode & 0o077) {
     throw new AuthBootError(
-      `${path}의 권한이 ${mode.toString(8)}입니다 — 0600이어야 합니다(그룹/기타 사용자에게 토큰 해시가 읽힘)`,
+      `${path} 의 권한이 ${mode.toString(8)} 입니다 — 0600 이어야 합니다(다른 사용자가 비밀번호를 읽습니다)`,
     );
   }
-  let parsed;
+  let root;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    root = parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new AuthBootError(`${path} 파싱 실패: ${err.message}`);
+    throw new AuthBootError(`${path} 을 읽지 못했습니다: ${err.message}`);
   }
-  const users = parsed?.users;
+  const users = root?.users;
   if (!Array.isArray(users) || users.length === 0) {
-    throw new AuthBootError(`${path}에 사용자가 0명입니다 — 기동 거부(S1)`);
+    throw new AuthBootError(`${path} 에 users 가 없습니다 — 뜨지 않습니다`);
   }
-  for (const u of users) {
-    if (!u.id || !ROLES.includes(u.role) || !u.tokenHash) {
+  const ids = new Set();
+  return users.map((row) => {
+    const id = text(row?.id);
+    const password = text(row?.password);
+    if (id == null || password == null || ids.has(id)) {
       throw new AuthBootError(
-        `${path}: 유효하지 않은 사용자 항목 ${JSON.stringify(u)}`,
+        `${path} 의 사용자 줄이 틀렸습니다(id · password 가 비었거나 id 가 겹침): id=${id}`,
       );
     }
-  }
-  return users;
-}
-
-export function saveUsers(path, users) {
-  writeFileSync(path, JSON.stringify({ users }, null, 2) + "\n", {
-    mode: 0o600,
+    ids.add(id);
+    const group = text(row?.group)?.toLowerCase();
+    if (!GROUPS.includes(group)) {
+      throw new AuthBootError(
+        `${path} 의 ${id} 줄: group 은 ${GROUPS.join(" · ")} 가운데 하나입니다: ${row?.group}`,
+      );
+    }
+    return { id, group, digest: digest(password) };
   });
 }
 
-function isExpired(user, now) {
-  return user.expiresAt != null && new Date(user.expiresAt).getTime() <= now;
-}
-
-function safeEqualHex(a, b) {
-  const bufA = Buffer.from(a, "hex");
-  const bufB = Buffer.from(b, "hex");
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
-
-/** @returns the matching, non-expired user, or null. */
-export function authenticate(users, token, { now = Date.now() } = {}) {
-  if (!token) return null;
-  const hash = hashToken(token);
+/**
+ * The agent line whose password is `password`. Compares against every line —
+ * which line matched must not show in the response time. Digests are all
+ * SHA-256, so the lengths are equal.
+ * @returns {{id: string, group: "agent"} | null}
+ */
+export function matchAgent(entries, password) {
+  if (!password) return null;
+  const given = digest(password);
   let found = null;
-  // Compare against every user (not early-return) so auth latency doesn't
-  // leak which position in the list matched.
-  for (const u of users) {
-    if (safeEqualHex(hash, u.tokenHash) && !isExpired(u, now)) found = u;
+  for (const e of entries) {
+    if (timingSafeEqual(given, e.digest) && e.group === "agent") found = e;
   }
-  return found;
+  return found && { id: found.id, group: "agent" };
 }
 
-/** allowed: role names a route accepts. viewer/editor/approver form a ladder
- * (higher rank satisfies a lower requirement); agent is a separate bucket
- * that only ever passes when explicitly named in `allowed` (D6). */
-export function hasRole(user, allowed) {
-  if (allowed.includes(user.role)) return true;
-  const userRank = RANK[user.role];
-  if (userRank === undefined) return false;
-  return allowed.some((r) => RANK[r] !== undefined && RANK[r] <= userRank);
+/** Keycloak client roles → group. Same order as BE's Group.ofClientRoles. */
+export function groupOfClientRoles(roles) {
+  if (roles.includes("admin")) return "admin";
+  if (roles.includes("agent")) return "agent";
+  return "user";
+}
+
+/** allowed: groups a route accepts. user/admin form a ladder (admin satisfies
+ * a user requirement); agent is a separate bucket that only ever passes when
+ * explicitly named in `allowed` (D6). */
+export function hasGroup(identity, allowed) {
+  if (allowed.includes(identity.group)) return true;
+  const rank = RANK[identity.group];
+  if (rank === undefined) return false;
+  return allowed.some((g) => RANK[g] !== undefined && RANK[g] <= rank);
+}
+
+export function isIdentity(value) {
+  return (
+    typeof value?.id === "string" && value.id !== "" && GROUPS.includes(value.group)
+  );
 }
 
 // S14: naive in-memory failed-auth rate limit, per process (single-process
@@ -129,4 +141,4 @@ export function clearAuthFailures(key) {
   failuresByKey.delete(key);
 }
 
-export { ROLES };
+export { GROUPS };

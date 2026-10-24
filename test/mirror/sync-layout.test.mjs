@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { commitFiles } from "../../server/store.mjs";
 import { syncMirror, AkgSyncError, REJECTED } from "../../src/mirror/sync.mjs";
 
@@ -20,11 +20,11 @@ const BIN = fileURLToPath(new URL("../../bin/akg.mjs", import.meta.url));
 
 async function setupServer() {
   const home = mkdtempSync(join(tmpdir(), "akg-layout-server-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "viewer1", role: "viewer", tokenHash: hashToken("vtok") },
+  const signedIn = await signIn(home, [
+    { id: "viewer1", group: "agent", token: "vtok" },
   ]);
   const storeDir = join(home, "store");
-  const app = await buildApp({ storeDir, usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir, auth: signedIn });
   return {
     app,
     storeDir,
@@ -41,7 +41,7 @@ function fetchImplFromApp(app, token) {
     const res = await app.inject({
       method: "GET",
       url: u.pathname + u.search,
-      headers: { authorization: `Bearer ${token}` },
+      headers: as(token),
     });
     return {
       status: res.statusCode,

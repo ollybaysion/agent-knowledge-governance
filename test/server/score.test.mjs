@@ -6,19 +6,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-score-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
-    { id: "scorer", role: "agent", tokenHash: hashToken("agtok") },
+  const signedIn = await signIn(home, [
+    { id: "renoir", group: "admin", token: "edtok" },
+    { id: "scorer", group: "agent", token: "agtok" },
   ]);
-  const app = await buildApp({ storeDir: join(home, "store"), usersPath: join(home, "users.json") });
+  const app = await buildApp({ storeDir: join(home, "store"), auth: signedIn });
   const r = await app.inject({
     method: "POST",
     url: "/api/docs/domain-skill",
-    headers: { authorization: "Bearer edtok" },
+    headers: as("edtok"),
     payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: "# s\n\n## 도메인 지식\n\n### A\n\n글\n" } },
   });
   assert.equal(r.statusCode, 201, r.body);
@@ -42,7 +42,7 @@ const machine = (text, at, ok = true) => ({
 test("score: the scorer appends machine lines, one commit per write, and GET reads them back with since", async () => {
   const { app, storeDir, cleanup } = await setup();
   const post = (token, lines) =>
-    app.inject({ method: "POST", url: "/api/score/s", headers: { authorization: `Bearer ${token}` }, payload: { lines } });
+    app.inject({ method: "POST", url: "/api/score/s", headers: as(token), payload: { lines } });
   try {
     const first = await post("agtok", [machine("q1", "2026-10-14T19:30:05"), machine("q2", "2026-10-14T19:30:05", false)]);
     assert.equal(first.statusCode, 201, first.body);
@@ -51,10 +51,10 @@ test("score: the scorer appends machine lines, one commit per write, and GET rea
     const log = execFileSync("git", ["-C", storeDir, "log", "-2", "--format=%an|%s"], { encoding: "utf8" }).trim().split("\n");
     assert.deepEqual(log, ["scorer|score s: 기계 판정 1줄", "scorer|score s: 기계 판정 2줄"]);
 
-    const all = (await app.inject({ method: "GET", url: "/api/score/s" })).json();
+    const all = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/score/s" })).json();
     assert.equal(all.lines.length, 3);
     assert.deepEqual(all.lines[1], { ...machine("q2", "2026-10-14T19:30:05", false), agent: "s" });
-    const since = (await app.inject({ method: "GET", url: "/api/score/s?since=2026-10-14T19:45:00" })).json();
+    const since = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/score/s?since=2026-10-14T19:45:00" })).json();
     assert.deepEqual(since.lines.map((l) => l.at), ["2026-10-14T20:00:00"]);
   } finally {
     await cleanup();
@@ -67,11 +67,11 @@ test("score: a person's score takes by and at from the request; the scorer canno
     const r = await app.inject({
       method: "POST",
       url: "/api/score/s",
-      headers: { authorization: "Bearer edtok" },
+      headers: as("edtok"),
       payload: { lines: [{ kind: "data", text: "q", human: { score: 70, by: "someone-else", at: "2000-01-01T00:00:00" } }] },
     });
     assert.equal(r.statusCode, 201, r.body);
-    const [line] = (await app.inject({ method: "GET", url: "/api/score/s" })).json().lines;
+    const [line] = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/score/s" })).json().lines;
     assert.equal(line.human.score, 70);
     assert.equal(line.human.by, "renoir");
     assert.match(line.human.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
@@ -80,7 +80,7 @@ test("score: a person's score takes by and at from the request; the scorer canno
     const byAgent = await app.inject({
       method: "POST",
       url: "/api/score/s",
-      headers: { authorization: "Bearer agtok" },
+      headers: as("agtok"),
       payload: { lines: [{ kind: "data", text: "q", human: { score: 70 } }] },
     });
     assert.equal(byAgent.statusCode, 400);
@@ -93,12 +93,12 @@ test("score: a person's score takes by and at from the request; the scorer canno
 test("score: malformed lines are refused whole, an unknown agent is 404, a viewer cannot write", async () => {
   const { app, cleanup } = await setup();
   const post = (lines, url = "/api/score/s", token = "agtok") =>
-    app.inject({ method: "POST", url, headers: { authorization: `Bearer ${token}` }, payload: { lines } });
+    app.inject({ method: "POST", url, headers: as(token), payload: { lines } });
   try {
     const bad = await post([machine("q1", "2026-10-14T19:30:05"), { ...machine("q", "2026-10-14T19:30:05"), kind: "모르는 종류" }, { ...machine("q", "어제") }]);
     assert.equal(bad.statusCode, 400);
     assert.deepEqual(bad.json().rejected.map((r) => r.index), [1, 2]);
-    assert.equal((await app.inject({ method: "GET", url: "/api/score/s" })).json().lines.length, 0);
+    assert.equal((await app.inject({ headers: as("reader"), method: "GET", url: "/api/score/s" })).json().lines.length, 0);
     assert.equal((await post([{ kind: "general", text: "q", human: { score: 101 } }], "/api/score/s", "edtok")).statusCode, 400);
     assert.equal((await post([{ kind: "general", text: "q", machine: { ok: true } }])).statusCode, 400, "a machine line needs run · model · mdRev");
     assert.equal((await post([])).statusCode, 400);
@@ -113,14 +113,14 @@ test("score: the score-record and verification-set schemas are served; neither i
   const { app, cleanup } = await setup();
   try {
     for (const name of ["score-record", "verification-set"]) {
-      const r = await app.inject({ method: "GET", url: `/api/schemas/${name}` });
+      const r = await app.inject({ headers: as("reader"), method: "GET", url: `/api/schemas/${name}` });
       assert.equal(r.statusCode, 200);
       assert.equal(r.json().$id, `${name}/v1`);
     }
     const asDoc = await app.inject({
       method: "POST",
       url: "/api/docs/verification-set",
-      headers: { authorization: "Bearer edtok" },
+      headers: as("edtok"),
       payload: { schema: "verification-set/v1", id: "x", keywords: [{ kw: "x", inject: "full" }], status: "inactive", body: {} },
     });
     assert.equal(asDoc.json().error, "unknown_type");
@@ -131,14 +131,14 @@ test("score: the score-record and verification-set schemas are served; neither i
 
 test("verification set: GET …/verification-set is the section as the contract object; 404 without the section", async () => {
   const { app, cleanup } = await setup();
-  const h = { authorization: "Bearer edtok" };
+  const h = as("edtok");
   try {
-    assert.equal((await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-set" })).json().error, "no_verification_set");
-    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    assert.equal((await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-set" })).json().error, "no_verification_set");
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const md = "# s\n\n## 도메인 지식\n\n### A\n\n글\n\n## 답변 품질 검증 Set\n\n### 설정\n\n- 라인: L1\n- 설비: E1\n\n### 일반 지식\n\n#### q\n\n- 정답: A\n\n### 데이터 설명\n\n#### r\n\n```sql\nSELECT 1\n```\n\n### 신뢰성\n\n#### t\n";
     const put = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown: md } });
     assert.equal(put.statusCode, 200, put.body);
-    const r = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-set" });
+    const r = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-set" });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json(), {
       agent: "s",
@@ -158,9 +158,9 @@ test("verification set: GET …/verification-set is the section as the contract 
 
 test("verification set: PUT …/verification-set writes the section from the contract object in one commit; GET reads it back", async () => {
   const { app, storeDir, cleanup } = await setup();
-  const h = { authorization: "Bearer edtok" };
+  const h = as("edtok");
   try {
-    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const set = {
       settings: { line: "L1", eqp: "E1", duration: { start: "2026-10-01T00:00", end: "2026-10-01T06:00" } },
       questions: [
@@ -178,9 +178,9 @@ test("verification set: PUT …/verification-set writes the section from the con
     const log = execFileSync("git", ["-C", storeDir, "log", "-1", "--format=%an|%s"], { encoding: "utf8" }).trim();
     assert.equal(log, "renoir|verification-set domain-skill/s");
 
-    const got = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-set" })).json();
+    const got = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-set" })).json();
     assert.deepEqual(got, put.json());
-    const md = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json().json.body.markdown;
+    const md = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json().json.body.markdown;
     assert.match(md, /## 도메인 지식\n\n### A\n\n글\n\n## 답변 품질 검증 Set\n\n### 설정\n\n- 라인: L1/);
 
     // The object GET gave, edited, goes back as it is: its own rev is the base.
@@ -195,10 +195,10 @@ test("verification set: PUT …/verification-set writes the section from the con
 
 test("verification set: PUT refuses a stale or missing rev, a bad shape, a rule break, a sub skill and a non-editor", async () => {
   const { app, cleanup } = await setup();
-  const h = { authorization: "Bearer edtok" };
+  const h = as("edtok");
   const put = (headers, payload) => app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/verification-set", headers, payload });
   try {
-    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const ok = { questions: [{ kind: "reliability", text: "w" }] };
     assert.equal((await put(h, ok)).statusCode, 428);
     assert.equal((await put({ ...h, "if-match": "0".repeat(40) }, ok)).json().error, "unknown_base_rev");
@@ -209,7 +209,7 @@ test("verification set: PUT refuses a stale or missing rev, a bad shape, a rule 
     const rule = await put({ ...h, "if-match": rev }, { questions: [{ kind: "data", text: "r", sql: ["SELECT 1", "SELECT 2"] }] });
     assert.equal(rule.statusCode, 422, rule.body);
     assert.equal(rule.json().error, "invalid_verification_set");
-    assert.equal((await put({ authorization: "Bearer agtok", "if-match": rev }, ok)).statusCode, 403);
+    assert.equal((await put({ ...as("agtok"), "if-match": rev }, ok)).statusCode, 403);
     assert.equal((await put({ "if-match": rev }, ok)).statusCode, 401);
 
     const role = await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s/role", headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
@@ -222,7 +222,7 @@ test("verification set: PUT refuses a stale or missing rev, a bad shape, a rule 
 
 test("verification queries: this skill's queries then each active linked skill's, with where each bind's value comes from", async () => {
   const { app, cleanup } = await setup();
-  const h = { authorization: "Bearer edtok" };
+  const h = as("edtok");
   const skill = (id, markdown, extra = {}) =>
     app.inject({
       method: "POST",
@@ -231,7 +231,7 @@ test("verification queries: this skill's queries then each active linked skill's
       payload: { schema: "domain-skill/v1", id, keywords: [{ kw: id, inject: "full" }], status: "active", body: { name: id, markdown }, ...extra },
     });
   try {
-    const { rev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const own = [
       "# s", "", "## 도메인 지식", "", "### A", "", "글", "", "## 데이터", "",
       "### snsr_id — 센서 ID", "", "물을 센서 (예: S-0004) — 사람이 준다.", "", "```ask", "어느 센서인가요?", "```", "",
@@ -245,7 +245,7 @@ test("verification queries: this skill's queries then each active linked skill's
     assert.equal((await skill("off", "# off\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### gone — 꺼짐\n\n```sql\nSELECT 1 FROM dual\n```\n", { ...linkTo, status: "inactive" })).statusCode, 201);
     assert.equal((await skill("far", "# far\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### far_q — 먼 조회\n\n```sql\nSELECT 1 FROM dual\n```\n")).statusCode, 201);
 
-    const r = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-choices" });
+    const r = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-choices" });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json().queries, [
       {
@@ -267,18 +267,18 @@ test("verification queries: this skill's queries then each active linked skill's
         ],
       },
     ]);
-    assert.equal((await app.inject({ method: "GET", url: "/api/docs/domain-skill/none/verification-choices" })).statusCode, 404);
+    assert.equal((await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/none/verification-choices" })).statusCode, 404);
 
     // 일반 지식: own, LINK1 (sub), LINK2 (deep, linked to sub) — far and the inactive one are out of reach.
     const deep = await skill("deep", "# deep\n\n## 도메인 지식\n\n### D\n\n글\n", { role: "sub", links: [{ type: "domain-skill", id: "sub", rel: "related" }] });
     assert.equal(deep.statusCode, 201, deep.body);
-    const pieces = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s/verification-choices" })).json().pieces;
+    const pieces = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-choices" })).json().pieces;
     assert.deepEqual(pieces, [
       { skill: "s", tier: "own", paths: ["A"] },
       { skill: "sub", tier: "link1", paths: ["X"] },
       { skill: "deep", tier: "link2", paths: ["D"] },
     ]);
-    const { rev: sRev } = (await app.inject({ method: "GET", url: "/api/docs/domain-skill/s" })).json();
+    const { rev: sRev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const set = {
       questions: ["s/A", "sub/X", "deep/D", "far/X"].map((path, i) => ({ kind: "general", text: `q${i}`, answer: { path } })),
     };

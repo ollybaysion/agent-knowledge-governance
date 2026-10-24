@@ -8,20 +8,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { saveUsers, hashToken } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 import { propose } from "../../src/client/propose.mjs";
 import { AkgApiError } from "../../src/client/errors.mjs";
 
 async function setupServer() {
   const home = mkdtempSync(join(tmpdir(), "akg-propose-server-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "viewer1", role: "viewer", tokenHash: hashToken("view-tok") },
-    { id: "editor1", role: "editor", tokenHash: hashToken("ed-tok") },
-    { id: "agent1", role: "agent", tokenHash: hashToken("agent-tok") },
+  const signedIn = await signIn(home, [
+    { id: "editor1", group: "admin", token: "ed-tok" },
+    { id: "agent1", group: "agent", token: "agent-tok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   return {
     app,
@@ -76,7 +75,7 @@ test("propose: success -> 201, lands in the pending queue", async () => {
     const list = await app.inject({
       method: "GET",
       url: "/api/proposals",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     assert.equal(list.statusCode, 200);
     const { proposals } = list.json();
@@ -117,7 +116,7 @@ test("propose: identical resubmission dedups (S8) -> same id, deduped true", asy
     const list = await app.inject({
       method: "GET",
       url: "/api/proposals",
-      headers: { authorization: "Bearer ed-tok" },
+      headers: as("ed-tok"),
     });
     assert.equal(
       list.json().proposals.length,
@@ -145,29 +144,6 @@ test("propose: unknown type -> AkgApiError(400)", async () => {
         assert.ok(err instanceof AkgApiError);
         assert.equal(err.status, 400);
         assert.match(err.message, /unknown_type/);
-        return true;
-      },
-    );
-  } finally {
-    await cleanup();
-  }
-});
-
-test("propose: viewer role (not agent/editor) -> AkgApiError(403)", async () => {
-  const { app, cleanup } = await setupServer();
-  try {
-    await assert.rejects(
-      propose({
-        serverUrl: "http://x",
-        token: "view-tok",
-        type: "db-schema",
-        id: "t.sensor",
-        slots: SLOTS,
-        fetchImpl: fetchImplFromApp(app),
-      }),
-      (err) => {
-        assert.ok(err instanceof AkgApiError);
-        assert.equal(err.status, 403);
         return true;
       },
     );

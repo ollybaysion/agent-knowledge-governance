@@ -6,26 +6,18 @@
 // failure) — the caller needs to know the write did not happen.
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import { syncMirror, AkgSyncError, REJECTED } from "../src/mirror/sync.mjs";
 import { installSkills } from "../src/mirror/install-skills.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
-import { buildDocument, push, validateForPush } from "../src/client/push.mjs";
-import { renderDocMd } from "../src/render/index.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
   akg sync [--skills] [--skills-dir <dir>] [--server <url>] [--mirror <dir>]
-  akg push <type> <doc.json|skill.md> [--dry-run] [--keyword <kw[:inject]>] [--status <s>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
-
-  push takes a bare body or a full envelope; it creates the document, or
-  updates it if it already exists. A domain-skill is written as md: pass the
-  .md file and its basename becomes the skill name (body = { name, markdown }).
-  --dry-run validates and prints the rendered md without writing anything.
 `;
 
 function parseArgs(argv) {
@@ -35,28 +27,15 @@ function parseArgs(argv) {
     skillsDir: null,
     server: null,
     mirror: null,
-    dryRun: false,
-    keywords: null,
-    status: null,
   };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--skills") flags.skills = true;
     else if (a === "--skills-dir") flags.skillsDir = rest[++i];
-    else if (a === "--dry-run") flags.dryRun = true;
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
-    else if (a === "--status") flags.status = rest[++i];
-    else if (a === "--keyword") {
-      // <kw>[:full|pointer] — repeatable. Default inject is `full`, matching
-      // the envelope default a bare body would otherwise get.
-      const raw = rest[++i] ?? "";
-      const sep = raw.lastIndexOf(":");
-      const kw = sep > 0 ? raw.slice(0, sep) : raw;
-      const inject = sep > 0 ? raw.slice(sep + 1) : "full";
-      (flags.keywords ??= []).push({ kw, inject });
-    } else if (a.startsWith("--")) {
+    else if (a.startsWith("--")) {
       process.stderr.write(`akg: unknown argument: ${a}\n`);
       process.exit(1);
     } else positional.push(a);
@@ -82,20 +61,6 @@ function readJsonFile(path, label) {
     );
     process.exit(1);
   }
-}
-
-// A skill document is a Markdown file, not JSON (json-spec §4.4): the file's
-// basename is the skill name — the same "file name is the name" rule the
-// consumer applies to its bundled md — and the text goes in verbatim.
-function readMarkdownBody(path) {
-  let raw;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch (err) {
-    process.stderr.write(`akg: cannot read document file "${path}": ${err.message}\n`);
-    process.exit(1);
-  }
-  return { name: basename(path).replace(/\.md$/i, ""), markdown: raw };
 }
 
 // §8.1: token file 0600 or AKG_TOKEN env. We don't enforce the mode here
@@ -237,13 +202,6 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
     if (flags.skills) runInstall(flags, mirrorDir, result.rev);
   } catch (err) {
     process.stderr.write(`akg sync failed: ${err.message}\n`);
-    // A 401 with no token means this server has anonymous read turned off —
-    // say so, because "no token" is otherwise an invisible cause here.
-    if (err instanceof AkgSyncError && err.status === 401 && !token) {
-      process.stderr.write(
-        "akg sync: this server requires a token to read (AKG_ANON_READ=0) — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
-      );
-    }
     // Fail-open (§9.2): a sync failure must never block a CC session — the
     // existing mirror (if any) is untouched, so exit 0. Two exceptions, both
     // permanent conditions that a retry cannot clear and that leave the
@@ -260,71 +218,6 @@ async function runSync(flags, mirrorDir, token, serverUrl) {
       );
     }
     process.exit(permanent ? 1 : 0);
-  }
-}
-
-async function runPush(positional, flags, token, serverUrl) {
-  const [type, docPath] = positional;
-  if (!type || !docPath) {
-    process.stderr.write(USAGE);
-    process.exit(1);
-  }
-  const parsed = /\.md$/i.test(docPath)
-    ? readMarkdownBody(docPath)
-    : readJsonFile(docPath, "document file");
-
-  let doc;
-  try {
-    ({ doc } = buildDocument(type, parsed, {
-      keywords: flags.keywords,
-      status: flags.status,
-    }));
-  } catch (err) {
-    process.stderr.write(`akg push: ${err.message}\n`);
-    process.exit(1);
-  }
-
-  // Validate BEFORE the network. A malformed spec should fail the same way
-  // whether or not a server is reachable, and the caller gets the field path
-  // instead of an HTTP status.
-  const errors = validateForPush(doc);
-  if (errors.length) {
-    process.stderr.write(
-      `akg push: ${type}/${doc.id} 검증 실패\n${errors.map((e) => `  - ${e}`).join("\n")}\n`,
-    );
-    process.exit(1);
-  }
-
-  if (flags.dryRun) {
-    const md = renderDocMd(type, doc);
-    process.stdout.write(md ?? "(이 타입은 md 를 렌더하지 않습니다)\n");
-    process.stderr.write(
-      `\n[akg] DRY-RUN — ${type}/${doc.id} 검증 통과, 쓰기 없음. 올리려면 --dry-run 을 빼세요\n`,
-    );
-    return;
-  }
-
-  try {
-    const result = await push({ serverUrl, token, type, doc });
-    process.stdout.write(
-      result.created
-        ? `created ${type}/${doc.id} (rev ${result.rev})\n`
-        : `updated ${type}/${doc.id} (rev ${result.rev}${result.rebased ? ", rebased" : ""})\n`,
-    );
-    if (result.envelopeIgnored) {
-      process.stderr.write(
-        `akg push: ${type}/${doc.id} 는 이미 있어 body 만 갱신했습니다 — keywords/status 는 기존 값을 유지합니다(대시보드에서 변경)\n`,
-      );
-    }
-  } catch (err) {
-    process.stderr.write(`akg push failed: ${err.message}\n`);
-    if (err instanceof AkgApiError && err.status === 409) {
-      process.stderr.write(
-        `akg push: 다른 편집과 충돌했습니다 — 최신본을 받아 다시 시도하세요\n`,
-      );
-    }
-    // Fail CLOSED, same reasoning as propose/catalog-push.
-    process.exit(1);
   }
 }
 
@@ -396,26 +289,17 @@ async function runCatalogPush(positional, token, serverUrl) {
 
 async function main() {
   const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
-  if (!["sync", "push", "propose", "catalog-push"].includes(cmd)) {
+  if (!["sync", "propose", "catalog-push"].includes(cmd)) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
 
-  // A dry run touches nothing outside this process: no token, no server, no
-  // mirror. Requiring either would make "check my spec" need credentials it
-  // never uses, and the factory's approval step runs before any of that is
-  // set up.
-  const offline = cmd === "push" && flags.dryRun;
-  if (offline) return runPush(positional, flags, null, null);
-
   const mirrorDir = resolveMirrorDir(flags);
 
-  // A token is required to WRITE. `sync` only reads, and a server with
-  // anonymous read on (AKG_ANON_READ, the default) serves the bundle without
-  // one — so pulling a mirror needs no setup at all. If that server does
-  // require a token, the 401 path below says so.
+  // Every command needs the agent token — the server reads only for a
+  // signed-in person or an agent.
   const token = resolveToken();
-  if (!token && cmd !== "sync") {
+  if (!token) {
     process.stderr.write(
       "akg: no token — set AKG_TOKEN or write ~/.claude/akg/token (0600)\n",
     );
@@ -431,7 +315,6 @@ async function main() {
   }
 
   if (cmd === "sync") await runSync(flags, mirrorDir, token, serverUrl);
-  else if (cmd === "push") await runPush(positional, flags, token, serverUrl);
   else if (cmd === "propose") await runPropose(positional, token, serverUrl);
   else await runCatalogPush(positional, token, serverUrl);
 }

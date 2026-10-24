@@ -8,18 +8,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { clearAuthFailures, hashToken, saveUsers } from "../../server/auth.mjs";
+import { clearAuthFailures } from "../../server/auth.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
-const auth = (token) => ({ authorization: `Bearer ${token}` });
+const auth = (token) => as(token);
 
 test("the rate limit counts the forwarded client address, not the loopback proxy", async () => {
   const home = mkdtempSync(join(tmpdir(), "akg-trust-proxy-test-"));
-  saveUsers(join(home, "users.json"), [
-    { id: "renoir", role: "editor", tokenHash: hashToken("edtok") },
+  const signedIn = await signIn(home, [
+    { id: "renoir", group: "admin", token: "edtok" },
   ]);
   const app = await buildApp({
     storeDir: join(home, "store"),
-    usersPath: join(home, "users.json"),
+    auth: signedIn,
   });
   const get = (ip, token) =>
     app.inject({

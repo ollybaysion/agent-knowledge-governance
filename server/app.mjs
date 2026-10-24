@@ -3,6 +3,7 @@
 // (S1): buildApp() throws (AuthBootError / StoreError) instead of returning
 // an app that would silently run without auth or on a dirty store.
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,13 +11,13 @@ import { fileURLToPath } from "node:url";
 import { loadContractSchemas, loadSchemas } from "../src/envelope.mjs";
 import { initStore, isValidId } from "./store.mjs";
 import {
-  loadUsers,
-  authenticate,
-  hasRole,
+  hasGroup,
   isRateLimited,
   recordAuthFailure,
   AuthBootError,
 } from "./auth.mjs";
+import { openAuth } from "./identity.mjs";
+import { CSRF_HEADER } from "./session.mjs";
 import { createQueue } from "./queue.mjs";
 import { registerDocsRoutes } from "./routes/docs.mjs";
 import { registerPromoteRoutes } from "./routes/promote.mjs";
@@ -31,30 +32,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 const BODY_LIMIT = 512 * 1024; // S13
 
-// Anonymous read: a request carrying NO token may pass on routes that opt in
-// with `config.anonOk`. This does not loosen S1 — S1's rule is "유효 토큰 없는
-// 쓰기 = 무조건 401", and the threat S3 describes (a doc becoming a prompt
-// injection channel for every session) is a write-side threat. The defense
-// line for reads is the network boundary (S2: loopback + reverse proxy).
-// Default ON so an in-house deploy needs no flag; AKG_ANON_READ=0 requires a
-// viewer token for reads too.
-const ANON_READ = process.env.AKG_ANON_READ !== "0";
-// Frozen: this object is shared across requests, so a handler must not mutate it.
-const ANON_USER = Object.freeze({ id: null, role: "viewer", anon: true });
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function sameToken(given, expected) {
+  if (typeof given !== "string" || !expected) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 /**
- * @param {{storeDir: string, usersPath: string, schemasDir?: string}} opts
+ * @param {{storeDir: string, auth: Parameters<typeof openAuth>[0], schemasDir?: string}} opts
  * @returns {Promise<import("fastify").FastifyInstance>}
  */
-export async function buildApp({
-  storeDir,
-  usersPath,
-  schemasDir = SCHEMAS_DIR,
-}) {
+export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMAS_DIR }) {
   // Fail-closed checks run BEFORE the app object is even constructed —
   // there is no window where an app exists but auth/store are unverified.
   initStore(storeDir);
-  loadUsers(usersPath); // throws AuthBootError if missing/empty/wrong perms — validated eagerly so misconfig is caught at boot, not on first request
+  const auth = await openAuth(authConfig); // throws AuthBootError: no FE address, Keycloak unreachable, bad password file, Redis unreachable
 
   const refs = loadSchemas(schemasDir);
   const contracts = loadContractSchemas(schemasDir);
@@ -71,7 +66,8 @@ export async function buildApp({
     trustProxy: "loopback",
   });
 
-  app.decorate("akg", { storeDir, usersPath, refs, contracts, queue });
+  app.decorate("akg", { storeDir, auth, refs, contracts, queue });
+  app.addHook("onClose", () => auth.close());
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
   app.addHook("onSend", async (request, reply, payload) => {
@@ -100,7 +96,7 @@ export async function buildApp({
   });
 
   // S1/S14: every route must opt into either `config.public` or an explicit
-  // `config.roles` allowlist — there is no default-allow path.
+  // `config.roles` allowlist (groups) — there is no default-allow path.
   app.addHook("preHandler", async (request, reply) => {
     // No route matched — let the notFound handler answer (a 404), don't run
     // auth against a nonexistent endpoint (which would 500 on the missing
@@ -117,31 +113,33 @@ export async function buildApp({
       });
     }
 
-    let users;
-    try {
-      users = loadUsers(usersPath); // re-read so CLI revoke/add takes effect without a restart
-    } catch (err) {
-      return reply
-        .code(500)
-        .send({ error: "auth_store_broken", message: err.message });
-    }
-
     const authz = request.headers.authorization ?? "";
-    const token = authz.startsWith("Bearer ") ? authz.slice(7) : null;
-    // Only a request with NO credential at all can fall through to the
-    // anonymous identity. A token that is present but wrong/expired is a
-    // failed authentication, not an anonymous visit — it still 401s and still
-    // counts toward the rate limit, so anonymous read can never be used to
-    // probe tokens for free.
-    if (!token && ANON_READ && cfg.anonOk) {
-      request.user = ANON_USER;
-    } else {
-      const user = token ? authenticate(users, token) : null;
-      if (!user) {
+    if (authz.startsWith("Bearer ")) {
+      // An agent. A Bearer request carries no cookie-borne ambient authority,
+      // so it needs no CSRF token.
+      const agent = await auth.agentOf(authz.slice(7));
+      if (!agent) {
         recordAuthFailure(ip);
         return reply.code(401).send({ error: "unauthorized" });
       }
-      request.user = user;
+      request.user = agent;
+    } else {
+      let session;
+      try {
+        session = await auth.sessions.load(request.headers.cookie);
+      } catch (err) {
+        return reply
+          .code(503)
+          .send({ error: "session_store_down", message: `세션 저장소(Redis)에 닿지 않습니다: ${err.message}` });
+      }
+      if (!session) {
+        return reply.code(401).send({ error: "unauthorized", login: auth.loginUrl });
+      }
+      if (WRITE_METHODS.has(request.method) && !sameToken(request.headers[CSRF_HEADER], session.csrf)) {
+        return reply.code(403).send({ error: "invalid_csrf" });
+      }
+      request.user = session.identity;
+      request.session = session;
     }
 
     const roles = cfg.roles;
@@ -153,7 +151,7 @@ export async function buildApp({
         message: "이 경로는 config.roles가 없습니다",
       });
     }
-    if (!hasRole(request.user, roles)) {
+    if (!hasGroup(request.user, roles)) {
       return reply.code(403).send({ error: "forbidden" });
     }
   });
