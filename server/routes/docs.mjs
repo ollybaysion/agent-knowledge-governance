@@ -153,6 +153,9 @@ export function registerDocsRoutes(app) {
     { config: { roles: ["viewer"], anonOk: true } },
     async (request, reply) => {
       const { type, id } = request.params;
+      // Only a document type names a document; score/<agent> and
+      // assets/<sha> are store files of another shape.
+      if (!refs[`${type}/v1`]) return reply.code(404).send({ error: "not_found" });
       const relpath = `${type}/${id}.json`;
       const doc = readJson(storeDir, relpath);
       if (!doc) return reply.code(404).send({ error: "not_found" });
@@ -940,6 +943,9 @@ export function registerDocsRoutes(app) {
     { config: { roles: ["approver"] } },
     async (request, reply) => {
       const { type, id } = request.params;
+      // Same allowlist as PUT: archiving score/<agent>.json turned its array
+      // into an object that no later POST /api/score could read.
+      if (!refs[`${type}/v1`]) return reply.code(400).send({ error: "unknown_type" });
       const result = await queue.enqueue(
         async () => {
           const relpath = `${type}/${id}.json`;
