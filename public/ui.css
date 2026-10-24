@@ -2984,3 +2984,152 @@ h6.md-h {
     max-height: none;
   }
 }
+
+/* ==========================================================================
+ * ⌘K — 가운데 640 창
+ * ========================================================================== */
+.ck {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(600px, calc(100vh - 80px));
+  margin-top: 80px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--field);
+  color: var(--body);
+  box-shadow: 0 24px 60px rgba(20, 23, 28, 0.25);
+  overflow: hidden;
+}
+.ck[open] {
+  display: flex;
+  flex-direction: column;
+}
+.ck::backdrop {
+  background: rgba(20, 23, 28, 0.28);
+}
+.ck-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 54px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+  color: var(--muted);
+}
+.ck-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+}
+.ck-count {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ck-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+}
+.ck-g {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ck-g .dim {
+  margin-left: auto;
+  font-weight: 400;
+}
+.ck-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 0;
+}
+.ck-opt[aria-selected="true"] {
+  background: var(--surface-card);
+}
+.ck-type {
+  font-family: var(--sans);
+  flex: none;
+}
+.ck-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ck-name.mono {
+  font-weight: 600;
+}
+.ck-sec {
+  flex: none;
+  font-size: 12px;
+}
+.ck-line {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+.hit {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--ink);
+  border-radius: 3px;
+}
+.ck-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 8px;
+}
+.ck-opt.ck-typechip {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+.ck-shelf {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ck-none {
+  margin: 0;
+  padding: 4px 10px 8px;
+  font-size: 12.5px;
+}
+.ck-foot {
+  display: flex;
+  gap: 16px;
+  height: 38px;
+  align-items: center;
+  padding: 0 16px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .ck-shelf {
+    grid-template-columns: 1fr;
+  }
+  .ck-line {
+    display: none;
+  }
+}
