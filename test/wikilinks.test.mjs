@@ -29,8 +29,13 @@ test("segments give the text back unchanged when joined", () => {
   assert.deepEqual(segs.filter((s) => s.link).map((s) => s.link.text), ["a", "c/d"]);
 });
 
-test("the texts read: a skill's markdown, a manual's step texts, nothing else", () => {
+test("the texts read: a skill's and an md type's markdown, a manual's step texts, nothing else", () => {
   assert.deepEqual(wikiTexts("domain-skill", { markdown: "m" }), ["m"]);
+  assert.deepEqual(wikiTexts("meeting-notes", { name: "w", markdown: "m" }), ["m"]);
   assert.deepEqual(wikiTexts("manual", { steps: [{ text: "s1" }, { text: "s2" }] }), ["s1", "s2"]);
   assert.deepEqual(wikiTexts("db-schema", { table: "X" }), []);
+});
+
+test("a type id may carry digits: [[notes2/a]]", () => {
+  assert.deepEqual(parseWikilinks("[[notes2/a]]"), [{ text: "notes2/a", type: "notes2", id: "a" }]);
 });
