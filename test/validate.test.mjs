@@ -388,6 +388,32 @@ test("fab-line: a minimal doc is valid and the id is lower(code)", () => {
   assert.deepEqual(validateDocument(fabLineDoc(), refs), []);
 });
 
+test("fab-line: the shipped example validates", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "fab-line", "l1.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("keywords: Hangul syllables pass, upper-case Latin is still refused", () => {
+  for (const kw of ["라인", "1라인 설비", "fdc_센서"]) {
+    const doc = { ...fabLineDoc(), keywords: [{ kw, inject: "pointer" }] };
+    assert.deepEqual(validateDocument(doc, refs), [], kw);
+  }
+  for (const kw of ["Line", "ㄹㅏ", "라인!"]) {
+    const doc = { ...fabLineDoc(), keywords: [{ kw, inject: "pointer" }] };
+    assert.ok(
+      validateDocument(doc, refs).some((e) => e.includes("keywords[0].kw")),
+      kw,
+    );
+  }
+  const meta = {
+    schema: "unclassified/v1",
+    id: "deploy-guide",
+    keywords: [{ kw: "배포", inject: "pointer" }],
+    status: "active",
+  };
+  assert.deepEqual(validateDocument(meta, refs), []);
+});
+
 test("fab-line: an id that is not lower(code) is rejected", () => {
   const doc = fabLineDoc();
   doc.id = "line-1";
