@@ -150,7 +150,14 @@ export function readText(dir, relpath) {
   return readFileSync(p, "utf8");
 }
 
+// A base rev comes from the client (If-Match). Only a full commit hash, the
+// form the server hands out, is a base: "-x" would reach git as an option,
+// and "HEAD~3" or a branch name is not a rev the client was ever given.
+const REV_RE = /^[0-9a-f]{40}$/;
+
+/** The file at a commit, or null for an unknown rev, a missing file, or anything but a 40-hex rev. */
 export function readJsonAtRev(dir, relpath, rev) {
+  if (typeof rev !== "string" || !REV_RE.test(rev)) return null;
   let out;
   try {
     out = git(dir, ["show", `${rev}:${relpath}`]);
