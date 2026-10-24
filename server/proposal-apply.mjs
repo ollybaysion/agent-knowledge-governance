@@ -59,7 +59,8 @@ export function applySlots(currentDoc, slots, refs, { by, at, dataIdOwners }) {
       });
     } catch {
       // setSlot assumes the parent path exists; an address like "nope.deep.x"
-      // or "queries[3].note" against a shorter array throws a TypeError.
+      // or "queries[3].note" against a shorter array throws a TypeError, and
+      // so does any address through __proto__ / constructor / prototype.
       // Unhandled, that surfaced as a 500 — an agent could leave a proposal in
       // the queue that crashed the request whenever anyone tried to adopt it.
       return {

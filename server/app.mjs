@@ -60,7 +60,16 @@ export async function buildApp({
   const contracts = loadContractSchemas(schemasDir);
   const queue = createQueue();
 
-  const app = Fastify({ bodyLimit: BODY_LIMIT, logger: false });
+  // nginx on the same host forwards every request from 127.0.0.1. The
+  // failed-auth rate limit keys on request.ip, so without trusting that
+  // loopback hop's X-Forwarded-For, twenty bad tokens from anyone made every
+  // client 429. Only a loopback peer is trusted, and request.ip is the
+  // nearest address it did not add itself.
+  const app = Fastify({
+    bodyLimit: BODY_LIMIT,
+    logger: false,
+    trustProxy: "loopback",
+  });
 
   app.decorate("akg", { storeDir, usersPath, refs, contracts, queue });
 

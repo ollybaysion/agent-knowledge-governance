@@ -65,8 +65,9 @@ const KEYWORD_SCHEMA = {
   properties: {
     // ASCII lowercase/digits/underscore/dot (qualified identifiers like
     // "testuser.fdc_sensor") /hyphen (kebab-case skill names) plus spaces
-    // for phrase-style keywords.
-    kw: { type: "string", pattern: "^[a-z0-9_. -]+$" },
+    // for phrase-style keywords, plus Hangul syllables (the shipped fab-line
+    // example's "라인"). Upper-case Latin stays refused.
+    kw: { type: "string", pattern: "^[a-z0-9_. 가-힣-]+$" },
     inject: { type: "string", enum: ["full", "pointer"] },
   },
 };
