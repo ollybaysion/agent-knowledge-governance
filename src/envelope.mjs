@@ -25,6 +25,7 @@ const SCHEMA_FILES = {
   "db-schema/v1": "db-schema/v1.schema.json",
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
+  "domain/v1": "domain/v1.schema.json",
   "fab-line/v1": "fab-line/v1.schema.json",
   "screen-map/v1": "screen-map/v1.schema.json",
   "manual/v1": "manual/v1.schema.json",
@@ -35,6 +36,10 @@ const SCHEMA_FILES = {
 
 // md types the repo ships; a registered type is md too, named by the caller.
 const BUILTIN_MD_SCHEMAS = new Set(["voc/v1", "unclassified/v1", "md/v1"]);
+
+// A domain-skill and a domain document share the body, the section rule and
+// the data ids.
+const SKILL_SCHEMAS = new Set(["domain-skill/v1", "domain/v1"]);
 
 // Contracts that are not document types: what the store hands out and takes
 // in besides documents. Kept out of loadSchemas so no document route accepts
@@ -135,6 +140,7 @@ export function deriveId(schema, body, { md = BUILTIN_MD_SCHEMAS.has(schema) } =
         ? body.command.toLowerCase().replace(/_/g, "-")
         : null;
     case "domain-skill/v1":
+    case "domain/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -160,6 +166,7 @@ const ID_SOURCE = {
   "db-schema/v1": () => "lower(table)",
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
+  "domain/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
@@ -228,20 +235,47 @@ function checkSkillDataIds(doc, errors) {
  * conflict. Kept apart from validateDocument's errors: a conflict is a 409
  * (the store has the other side), not a 400 about this document alone.
  * @param {object} doc
- * @param {(selfId: string) => Map<string, {doc: string, query: boolean}>} [dataIdOwners]
+ * @param {(selfId: string, selfType: string) => Map<string, {doc: string, query: boolean}>} [dataIdOwners]
  *   data id → the stored skill that has it and whether its item is a query,
- *   `selfId` and archived ones left out
+ *   `selfType/selfId` and archived ones left out
  * @returns {{id: string, doc: string}[]}
  */
 export function dataIdConflicts(doc, dataIdOwners) {
-  if (doc?.schema !== "domain-skill/v1" || !dataIdOwners) return [];
+  if (!SKILL_SCHEMAS.has(doc?.schema) || !dataIdOwners) return [];
   const mine = new Map();
   for (const d of skillDataIds(doc.body?.markdown)) mine.set(d.id, mine.get(d.id) || d.query);
   if (mine.size === 0) return [];
-  const owners = dataIdOwners(doc.id);
+  const owners = dataIdOwners(doc.id, doc.schema.split("/")[0]);
   return [...mine]
     .filter(([id, query]) => owners.has(id) && (query || owners.get(id).query))
     .map(([id]) => ({ id, doc: owners.get(id).doc }));
+}
+
+// The body is the author's md verbatim (user decision 2026-09-21); what the
+// schema cannot see is only whether its `##` sections are ones the consumer
+// reads — downstream an unknown one is not an error but a silently missing
+// section (## 데이타 → no data items). Everything inside a section (items,
+// fences, :vars) is the consumer's to judge — it is the one that turns the
+// text into a skill. `knowledge` names a document that is knowledge a main
+// reads (a sub or a domain document): 도메인 지식 is the one section it must
+// have, and the verification set, which scores an agent, is not its own.
+function checkSkillMarkdown(doc, errors, knowledge) {
+  checkDerivedId(doc, errors);
+  checkSkillDataIds(doc, errors);
+  if (typeof doc.body?.markdown !== "string") return;
+  const titles = skillSections(doc.body.markdown);
+  if (knowledge && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
+    fail(errors, `$.body.markdown: ${knowledge}에는 "## 도메인 지식" 절이 있어야 합니다`);
+  if (knowledge && titles.some((t) => normalizeHeading(t) === VERIFY_SECTION))
+    fail(errors, `$.body.markdown: "## ${VERIFY_SECTION}" 은 main 스킬에만 둡니다`);
+  for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
+  for (const title of titles) {
+    if (!isSkillSection(title))
+      fail(
+        errors,
+        `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${SKILL_SECTIONS.map((t) => `## ${t.key}`).join(" · ")})`,
+      );
+  }
 }
 
 const SEMANTIC_CHECKS = {
@@ -305,32 +339,12 @@ const SEMANTIC_CHECKS = {
         fail(errors, `$.body.steps[${i}].asset: 캡처가 저장소에 없습니다 — ${step.asset}`);
     });
   },
-  // The body is the author's md verbatim (user decision 2026-09-21); what the
-  // schema cannot see is only whether its `##` sections are ones the consumer
-  // reads — downstream an unknown one is not an error but a silently missing
-  // section (## 데이타 → no data items). Everything inside a section (items,
-  // fences, :vars) is the consumer's to judge — it is the one that turns the
-  // text into a skill.
   "domain-skill/v1"(doc, errors) {
-    checkDerivedId(doc, errors);
-    checkSkillDataIds(doc, errors);
-    if (typeof doc.body?.markdown !== "string") return;
-    const titles = skillSections(doc.body.markdown);
-    // A sub is knowledge a main reads, so 도메인 지식 is the one section it
-    // must have. A main keeps the rule it had: any of the five.
-    if (doc.role === "sub" && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
-      fail(errors, '$.body.markdown: sub 스킬에는 "## 도메인 지식" 절이 있어야 합니다');
-    // The verification set scores an agent, and only a main is one.
-    if (doc.role === "sub" && titles.some((t) => normalizeHeading(t) === VERIFY_SECTION))
-      fail(errors, `$.body.markdown: "## ${VERIFY_SECTION}" 은 main 스킬에만 둡니다`);
-    for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
-    for (const title of titles) {
-      if (!isSkillSection(title))
-        fail(
-          errors,
-          `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${SKILL_SECTIONS.map((t) => `## ${t.key}`).join(" · ")})`,
-        );
-    }
+    checkSkillMarkdown(doc, errors, doc.role === "sub" ? "sub 스킬" : null);
+  },
+  // What a sub domain-skill was: the sub rule, with no role key.
+  "domain/v1"(doc, errors) {
+    checkSkillMarkdown(doc, errors, "도메인 문서");
   },
 };
 
@@ -420,7 +434,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists, mdType
       // reason). An authored id has nothing to be compared against.
       const want = deriveId(doc.schema, doc.body, { md });
       // A data id is a key the moment the skill exists, draft or not.
-      if (doc.schema === "domain-skill/v1") checkSkillDataIds(doc, errors);
+      if (SKILL_SCHEMAS.has(doc.schema)) checkSkillDataIds(doc, errors);
       if (AUTHORED_ID.has(doc.schema)) return errors;
       if (want === null)
         fail(

@@ -27,6 +27,7 @@ const CODE_DESC = {
   "db-schema": "테이블 · 컬럼",
   "msg-format": "설비 커맨드",
   "domain-skill": "스킬 문서(md)",
+  domain: "도메인 지식(md) — main 이 가리키는 지식",
   "screen-map": "화면 지도",
   manual: "화면 매뉴얼(캡처)",
   "fab-line": "라인",

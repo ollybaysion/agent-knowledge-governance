@@ -45,6 +45,7 @@ test("the shelf is per user, survives junk, and drops docs that are gone", () =>
 const TYPES = [
   { id: "db-schema", label: "DB 스키마", color: "#111111", kind: "structured", builtin: true, status: "active" },
   { id: "domain-skill", label: "에이전트", color: "#222222", kind: "structured", builtin: true, status: "active" },
+  { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", builtin: true, status: "active" },
   { id: "voc", label: "VOC", color: "#333333", kind: "md", builtin: false, status: "active" },
   { id: "old", label: "옛 타입", color: "#444444", kind: "md", builtin: false, status: "archived" },
   { id: "unclassified", label: "미분류", color: "#555555", kind: "md", builtin: true, status: "active" },
@@ -55,22 +56,30 @@ const DOCS = [
   { type: "db-schema", id: "c", updatedAt: "2026-10-01T00:00:00Z" },
   { type: "domain-skill", id: "main1", role: "main" },
   { type: "domain-skill", id: "sub1", role: "sub" },
+  { type: "domain", id: "k" },
   { type: "voc", id: "v" },
 ];
 
-test("column 1: types in order, 도메인 지식 counts subs only, closed empty types out, tags", () => {
+test("column 1: types in order, 옮길 sub 스킬 counts subs only, closed empty types out, tags", () => {
   const rows = typeRows(TYPES, DOCS);
   assert.deepEqual(rows.map((r) => [r.id, r.label, r.count, r.tag]), [
     ["db-schema", "DB 스키마", 3, null],
-    ["domain-skill", "도메인 지식", 1, null],
+    ["domain-skill", "옮길 sub 스킬", 1, null],
+    ["domain", "도메인", 1, null],
     ["voc", "VOC", 1, "등록"],
     ["unclassified", "미분류", 0, "내장"],
   ]);
 });
 
+test("column 1: with no sub left, the 옮길 sub 스킬 row is gone; an empty domain still stands", () => {
+  const rows = typeRows(TYPES, DOCS.filter((d) => d.id !== "sub1" && d.type !== "domain"));
+  assert.deepEqual(rows.map((r) => r.id), ["db-schema", "domain", "voc", "unclassified"]);
+});
+
 test("column 2: the last changed first, then by id; main skills stay out", () => {
   assert.deepEqual(docRows(DOCS, "db-schema").map((d) => d.id), ["a", "b", "c"]);
   assert.deepEqual(docRows(DOCS, "domain-skill").map((d) => d.id), ["sub1"]);
+  assert.deepEqual(docRows(DOCS, "domain").map((d) => d.id), ["k"]);
   assert.equal(rowTier({ inferred: 1, confirmed: 3 }), "inferred");
   assert.equal(rowTier({ confirmed: 3 }), "confirmed");
   assert.equal(rowTier({}), null);

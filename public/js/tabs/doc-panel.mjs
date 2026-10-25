@@ -358,7 +358,7 @@ function typeFacts(type, doc, tiers) {
     rows.push(["메뉴", (b.menuPath ?? []).join(" › ") || "—"]);
   } else if (type === "fab-line") {
     rows.push(["코드", b.code || "—"]);
-  } else if (isMdType(type)) {
+  } else if (isMdType(type) || type === "domain") {
     rows.push(["글자 수", String((b.markdown ?? "").length)]);
   }
   if (doc.origin?.url) rows.push(["원본", el("a", { href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", text: doc.origin.title || doc.origin.url })]);

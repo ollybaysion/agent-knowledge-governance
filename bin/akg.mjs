@@ -31,6 +31,7 @@ const BUILTIN_TYPES = [
   "db-schema",
   "msg-format",
   "domain-skill",
+  "domain",
   "screen-map",
   "manual",
   "fab-line",

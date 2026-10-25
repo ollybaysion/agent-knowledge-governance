@@ -1,10 +1,11 @@
-// domain-skill reading body: the md's `##` sections drawn as md (no box),
-// each with 편집 → the section editor; ## 답변 품질 검증 Set as the one card
-// (질문 줄 · 정답 조각 · ✓/✗ · 사람 점수 · 질문 추가); 설치 at the end.
+// domain-skill and domain reading body: the md's `##` sections drawn as md
+// (no box), each with 편집 → the section editor; a main's ## 답변 품질 검증 Set
+// as the one card (질문 줄 · 정답 조각 · ✓/✗ · 사람 점수 · 질문 추가); 설치 at
+// the end.
 import { api, lastScore } from "../api.mjs";
 import { downloadTextFile, el, icon, toast } from "../dom.mjs";
 import { mdNodes } from "../md.mjs";
-import { sec } from "../sec.mjs";
+import { isAnswerSection, markAnswerHeading, sec } from "../sec.mjs";
 import {
   VERIFY_KEY,
   VERIFY_KIND_LABEL,
@@ -51,12 +52,13 @@ export function lastLines(lines) {
 
 /**
  * @returns {Promise<{nodes: Node[], sections: {key: string, title: string}[],
+ *   answerHeading: Node|null,
  *   info: {main: boolean, questions: object[], last: ReturnType<typeof lastLines>, run: object|null}}>}
  */
 export async function skillBody(ctx) {
-  const { doc, rev, md, data, canEdit, reload, wiki, editSection } = ctx;
+  const { type, doc, rev, md, data, canEdit, reload, wiki, editSection } = ctx;
   const s = doc.body;
-  const main = (doc.role ?? "main") === "main";
+  const main = type === "domain-skill" && (doc.role ?? "main") === "main";
   const url = `/api/docs/domain-skill/${encodeURIComponent(doc.id)}`;
   const [lib, vlib, blib, score, choices] = await Promise.all([
     skillSectionsLib,
@@ -80,6 +82,7 @@ export async function skillBody(ctx) {
   const sections = [];
   const nodes = [];
   const mdCtx = { wiki };
+  let knowledge = null; // the ## 도메인 지식 node and its body
 
   let split = null;
   let note = null;
@@ -106,14 +109,14 @@ export async function skillBody(ctx) {
     for (const block of split.sections) {
       if (block.key === VERIFY_KEY) continue;
       sections.push({ key: block.key, title: block.heading });
-      nodes.push(
-        sec({
-          key: block.key,
-          title: block.heading,
-          onEdit: canEdit ? () => editSection(block.key) : null,
-          children: block.body.trim() === "" ? [el("p", { class: "dim", text: "비어 있습니다" })] : mdNodes(block.body, mdCtx),
-        }),
-      );
+      const node = sec({
+        key: block.key,
+        title: block.heading,
+        onEdit: canEdit ? () => editSection(block.key) : null,
+        children: block.body.trim() === "" ? [el("p", { class: "dim", text: "비어 있습니다" })] : mdNodes(block.body, mdCtx),
+      });
+      if (block.key === "도메인 지식") knowledge = { node, body: block.body };
+      nodes.push(node);
     }
     if (main) {
       const block = split.sections.find((b) => b.key === VERIFY_KEY);
@@ -170,9 +173,12 @@ export async function skillBody(ctx) {
       }),
     );
   }
+  const answerHeading =
+    knowledge && !sections.some((x) => isAnswerSection(x.title)) ? markAnswerHeading(knowledge.node, knowledge.body) : null;
   return {
     nodes,
     sections,
+    answerHeading,
     info: { main, questions: parsed?.questions ?? [], last, run: score?.run ?? null, warnings: data?.warnings ?? [] },
   };
 }

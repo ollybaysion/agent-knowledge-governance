@@ -98,7 +98,7 @@ export function registerDocsRoutes(app) {
   // ids other skills hold, the md types).
   const inStore = {
     assetExists: (sha256) => hasAsset(storeDir, sha256),
-    dataIdOwners: (selfId) => dataIdOwners(storeDir, selfId),
+    dataIdOwners: (selfId, selfType) => dataIdOwners(storeDir, selfId, selfType),
     get mdTypes() {
       return types.mdIds();
     },
@@ -232,7 +232,7 @@ export function registerDocsRoutes(app) {
       const doc = readJson(storeDir, relpath);
       if (!doc) return reply.code(404).send({ error: "not_found" });
       const rev = revOfPath(storeDir, relpath);
-      const key = `${rev}:${revOfPath(storeDir, "domain-skill")}`;
+      const key = `${rev}:${revOfPath(storeDir, "domain-skill")}:${revOfPath(storeDir, "domain")}`;
       const cached = verificationSets.get(id);
       let set = cached && cached.key === key ? cached.set : undefined;
       if (set === undefined) {
@@ -635,7 +635,7 @@ export function registerDocsRoutes(app) {
               body: { error: "already_exists", ids: existing },
             };
           // Against the store and against the batch entries before it.
-          if (type === "domain-skill") {
+          if (type === "domain-skill" || type === "domain") {
             const taken = inStore.dataIdOwners(null);
             const conflicts = [];
             for (const doc of docs) {
@@ -1022,8 +1022,9 @@ export function registerDocsRoutes(app) {
     },
   );
 
-  // An md document moved to another md type: its file, its schema, the links[]
-  // of the documents that point at it and its rendered md, in one commit.
+  // An md document moved to another md type, or a sub domain-skill moved to
+  // domain: its file, its schema, the links[] of the documents that point at
+  // it and its rendered md, in one commit.
   app.post(
     "/api/docs/:type/:id/retype",
     { config: { roles: ["admin"] } },
@@ -1033,8 +1034,9 @@ export function registerDocsRoutes(app) {
       const to = request.body?.type;
       if (typeof to !== "string" || !types.get(to))
         return reply.code(400).send({ error: "unknown_type", type: to ?? null });
-      if (!types.isMd(type) || !types.isMd(to))
-        return reply.code(400).send({ error: "structured_type", message: "재분류는 md 타입끼리만 합니다" });
+      const subToDomain = type === "domain-skill" && to === "domain";
+      if (!subToDomain && (!types.isMd(type) || !types.isMd(to)))
+        return reply.code(400).send({ error: "structured_type", message: "재분류는 md 타입끼리, 그리고 domain-skill → domain 만 합니다" });
       if (to === type) return reply.code(400).send({ error: "same_type" });
       const ifMatch = request.headers["if-match"];
       if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
@@ -1051,15 +1053,19 @@ export function registerDocsRoutes(app) {
             return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
           if (readJson(storeDir, `${to}/${id}.json`))
             return { status: 409, body: { error: "already_exists", type: to, id } };
+          if (subToDomain && (doc.role ?? "main") !== "sub")
+            return { status: 400, body: { error: "main_skill", message: "domain 으로는 sub 스킬만 옮깁니다" } };
 
-          const newDoc = { ...doc, schema: `${to}/v1` };
+          // domain has no role: the key goes with the move.
+          const { role: _role, ...kept } = doc;
+          const newDoc = { ...(subToDomain ? kept : doc), schema: `${to}/v1` };
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
 
           const pointsHere = (l) => l.type === type && l.id === id;
           const relinked = [];
           const writes = [];
-          const removes = [relpath, docMdPath(type, doc, { md: true })];
+          const removes = [relpath, docMdPath(type, doc, { md: types.isMd(type) })];
           for (const t of types.ids()) {
             const changed = [];
             for (const sid of listIds(storeDir, t)) {

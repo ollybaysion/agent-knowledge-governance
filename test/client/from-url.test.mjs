@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { acceptFrom, answerIdOf, pushRecentAnswer } from "../../public/lib/from-url.mjs";
+import { acceptFrom, answerIdOf, embedCloseMessage, pushRecentAnswer } from "../../public/lib/from-url.mjs";
 
 const FE = "https://fe.example/fdc";
 
@@ -45,4 +45,17 @@ test("the recent answers keep five, newest first, each address once", () => {
   assert.deepEqual(list.map((x) => x.url), ["u7", "u6", "u5", "u4", "u3"]);
   list = pushRecentAnswer(list, { url: "u4" });
   assert.deepEqual(list.map((x) => x.url), ["u4", "u7", "u6", "u5", "u3"]);
+});
+
+test("embed Escape: akg:close to the FE origin, only embedded, only Escape, only with nothing open", () => {
+  const base = { embed: true, feUrl: FE, key: "Escape", popupOpen: false };
+  assert.deepEqual(embedCloseMessage(base), { message: { type: "akg:close" }, targetOrigin: "https://fe.example" });
+  assert.equal(embedCloseMessage({ ...base, embed: false }), null);
+  assert.equal(embedCloseMessage({ ...base, key: "Enter" }), null);
+  assert.equal(embedCloseMessage({ ...base, popupOpen: true }), null);
+});
+
+test("embed Escape: no FE address, no message — never a \"*\" target", () => {
+  for (const feUrl of [null, "", "not a url", "javascript:alert(1)"])
+    assert.equal(embedCloseMessage({ embed: true, feUrl, key: "Escape", popupOpen: false }), null, String(feUrl));
 });

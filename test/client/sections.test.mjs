@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import * as skill from "../../src/skill-sections.mjs";
-import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock } from "../../public/lib/sections.mjs";
+import { changedKeys, headingPaths, joinBlocks, lineRanges, normSection, sameSection, splitBlocks, withBlock } from "../../public/lib/sections.mjs";
+import { knowledgePaths } from "../../src/verify-set.mjs";
 
 const SKILL = skill.joinSkill(
   "Interlock 에이전트",
@@ -64,4 +65,28 @@ test("line ranges follow the joined md", () => {
   assert.equal(lines[r.get("도메인 지식").from - 1], "## 도메인 지식");
   assert.equal(lines[r.get("도메인 지식").to - 1], "- 둘");
   assert.equal(r.get("답변 품질 검증 Set"), null);
+});
+
+test("headingPaths: a heading after the lower-level headings above it, joined with \" / \"", () => {
+  const body = ["### DB", "", "#### PARAM_INFO", "", "글", "", "#### SPEC_INFO", "", "글", "", "### 끝", "", "글", "", "```", "### 펜스 안", "```"].join("\n");
+  assert.deepEqual(headingPaths(body), ["DB", "DB / PARAM_INFO", "DB / SPEC_INFO", "끝"]);
+  assert.deepEqual(headingPaths("#### 깊게\n\n##### 더\n\n#### 다시\n"), ["깊게", "깊게 / 더", "다시"]);
+  assert.deepEqual(headingPaths("# 머리\n\n### A\n"), [null, "A"]);
+  assert.deepEqual(headingPaths("글만\n"), []);
+});
+
+test("headingPaths: the paths with text are the ones the consumer pieces (knowledgePaths)", () => {
+  const body = "### DB\n\n#### PARAM_INFO\n\n글\n\n### 답의 예\n\n글\n";
+  const md = `# s\n\n## 도메인 지식\n\n${body}`;
+  assert.deepEqual(knowledgePaths(md), ["DB / PARAM_INFO", "답의 예"]);
+  for (const p of knowledgePaths(md)) assert.ok(headingPaths(body).includes(p), p);
+});
+
+test("sameSection: the ## rule (trailing ? : and spaces) plus any spacing around /", () => {
+  assert.equal(normSection(" 언제 호출되는가? "), "언제 호출되는가");
+  assert.equal(normSection("DB/PARAM_INFO"), "DB / PARAM_INFO");
+  assert.ok(sameSection("DB/PARAM_INFO", "DB  /  PARAM_INFO"));
+  assert.ok(sameSection("언제 호출되는가", "언제 호출되는가?"));
+  assert.equal(sameSection("DB", "DB / PARAM_INFO"), false);
+  assert.equal(sameSection("", ""), false);
 });

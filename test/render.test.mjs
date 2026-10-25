@@ -22,6 +22,7 @@ import { migrateMsgFormatMd } from "../src/migrate/msg-format.mjs";
 import { renderDomainSkillMd, skillSummary } from "../src/render/domain-skill.mjs";
 import { renderManualMd } from "../src/render/manual.mjs";
 import { renderMdDoc } from "../src/render/md.mjs";
+import { docMdPath, renderDocMd, rendersToMd } from "../src/render/index.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const refs = loadSchemas(join(__dirname, "..", "schemas"));
@@ -255,13 +256,20 @@ test("manual: the example renders byte-identically to the checked-in golden", ()
   assert.equal(renderManualMd(doc), expected);
 });
 
-test("domain-skill: the sub example renders byte-identically to its golden", () => {
+test("domain: the example renders byte-identically to its golden, as a domain-skill would", () => {
   const doc = JSON.parse(
-    readFileSync(join(__dirname, "..", "examples", "domain-skill", "fdc-virtual-sensor-formula.json"), "utf8"),
+    readFileSync(join(__dirname, "..", "examples", "domain", "fdc-virtual-sensor-formula.json"), "utf8"),
   );
   assert.deepEqual(validateDocument(doc, refs), []);
-  const expected = readFileSync(join(__dirname, "fixtures", "domain-skill-sub-golden-SKILL.md"), "utf8");
-  assert.equal(renderDomainSkillMd(doc), expected);
+  const expected = readFileSync(join(__dirname, "fixtures", "domain-golden-SKILL.md"), "utf8");
+  assert.equal(renderDocMd("domain", doc), expected);
+});
+
+test("domain: SKILL.md under rendered/domain/<name>/, as domain-skill under its own folder", () => {
+  const doc = { schema: "domain/v1", id: "k", status: "active", body: { name: "k", markdown: "# k\n\n## 도메인 지식\n\n글\n" } };
+  assert.equal(rendersToMd("domain", doc), true);
+  assert.equal(docMdPath("domain", doc), "rendered/domain/k/SKILL.md");
+  assert.equal(docMdPath("domain-skill", { ...doc, schema: "domain-skill/v1" }), "rendered/domain-skill/k/SKILL.md");
 });
 
 // A VOC renders to its text as written — no frontmatter, nothing added.

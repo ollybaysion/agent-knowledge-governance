@@ -11,7 +11,8 @@ import { VERIFY_KEY, dataIdConflictText, shortRev, skillSectionsLib } from "../s
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TYPE_LABEL, canEdit, isMdType, typeColor } from "../state.mjs";
 import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock } from "/lib/sections.mjs";
-import { docTitle } from "./doc-view.mjs";
+import { docTitle, isSkillType } from "./doc-view.mjs";
+import { typeLabel } from "./docs.mjs";
 
 const enc = encodeURIComponent;
 const HEAD = "__head";
@@ -37,7 +38,7 @@ let editorTicket = 0;
 export async function renderEditor(type, id, focusKey) {
   const ticket = ++editorTicket;
   const back = `#/doc/${type}/${enc(id)}`;
-  if (type !== "domain-skill" && !isMdType(type)) return location.replace(back);
+  if (!isSkillType(type) && !isMdType(type)) return location.replace(back);
   if (!canEdit()) {
     toast("admin 만 고칠 수 있습니다.", "error");
     return location.replace(back);
@@ -54,7 +55,7 @@ export async function renderEditor(type, id, focusKey) {
   const isAgent = type === "domain-skill" && (doc.role ?? "main") === "main";
   setActiveTab(isAgent ? "agents" : "docs");
   setCrumbs([
-    ...(isAgent ? [{ label: "에이전트", href: "#/agents" }] : [{ label: "문서", href: "#/docs" }, { label: TYPE_LABEL[type] ?? type, href: `#/docs/${type}` }]),
+    ...(isAgent ? [{ label: "에이전트", href: "#/agents" }] : [{ label: "문서", href: "#/docs" }, { label: typeLabel(type), href: `#/docs/${type}` }]),
     { label: title, href: back },
     { label: "편집" },
   ]);
@@ -62,8 +63,8 @@ export async function renderEditor(type, id, focusKey) {
   // The split: a skill on its known sections (when the md splits), any other
   // md on every ##.
   const skillOpts =
-    type === "domain-skill" && lib
-      ? { skill: lib, order: (doc.role ?? "main") === "main" ? lib.SKILL_SECTIONS : lib.SKILL_SECTIONS.filter((s) => s.key !== VERIFY_KEY) }
+    isSkillType(type) && lib
+      ? { skill: lib, order: isAgent ? lib.SKILL_SECTIONS : lib.SKILL_SECTIONS.filter((s) => s.key !== VERIFY_KEY) }
       : {};
   function splitOf(md) {
     try {

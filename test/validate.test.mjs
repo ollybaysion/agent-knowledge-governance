@@ -619,11 +619,52 @@ test("role is domain-skill's alone, and only main | sub", () => {
   assert.ok(validateDocument(skillEnvelope("# s\n", "helper"), refs).some((e) => e.includes("$.role")));
 });
 
-test("domain-skill: both shipped examples validate — a main (role absent) and a sub", () => {
-  for (const name of ["fdc-explain-sensor-origin", "fdc-virtual-sensor-formula"]) {
-    const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "domain-skill", `${name}.json`), "utf8"));
+test("the shipped skill examples validate — a main domain-skill (role absent) and a domain document", () => {
+  for (const [type, name] of [["domain-skill", "fdc-explain-sensor-origin"], ["domain", "fdc-virtual-sensor-formula"]]) {
+    const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", type, `${name}.json`), "utf8"));
     assert.deepEqual(validateDocument(doc, refs), [], name);
   }
+});
+
+function domainDoc(markdown, extra = {}) {
+  return {
+    schema: "domain/v1",
+    id: "k",
+    keywords: [{ kw: "k", inject: "full" }],
+    status: "active",
+    ...extra,
+    body: { name: "k", markdown },
+  };
+}
+
+test("domain/v1: the sub rule — 도메인 지식 alone passes, the id is body.name", () => {
+  assert.deepEqual(validateDocument(domainDoc("# k\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### eqp_id — 설비\n\n```ask\n설비?\n```\n"), refs), []);
+  assert.ok(validateDocument({ ...domainDoc("# k\n\n## 도메인 지식\n\n글\n"), id: "j" }, refs).some((e) => e.includes('expected "k"')));
+});
+
+test("domain/v1: refused with a role, without 도메인 지식, with a verification set or an unknown section", () => {
+  const ok = "# k\n\n## 도메인 지식\n\n글\n";
+  assert.ok(validateDocument(domainDoc(ok, { role: "sub" }), refs).some((e) => e.includes("role 은 domain-skill 에만")));
+  assert.ok(validateDocument(domainDoc("# k\n\n## 데이터\n\nx\n"), refs).some((e) => e.includes('도메인 문서에는 "## 도메인 지식" 절이 있어야')));
+  const set = validateDocument(domainDoc(`${ok}\n## 답변 품질 검증 Set\n\n### 일반 지식\n`), refs);
+  assert.ok(set.some((e) => e.includes('"## 답변 품질 검증 Set" 은 main 스킬에만 둡니다')), set.join("\n"));
+  assert.ok(validateDocument(domainDoc(`${ok}\n## 데이타\n\nx\n`), refs).some((e) => e.includes("모르는 절")));
+});
+
+test("domain/v1: a draft checks the data ids too", () => {
+  const md = "# k\n\n## 데이터\n\n### 1bad — 나쁜 id\n\n```ask\n?\n```\n";
+  assert.ok(validateForStore(domainDoc(md, { status: "inactive" }), refs).some((e) => e.includes("ascii 식별자")));
+});
+
+test("dataIdConflicts: a domain document is checked like a skill, the lookup told its type", () => {
+  const md = "# k\n\n## 도메인 지식\n\n글\n\n## 데이터\n\n### row — 행\n\n```sql\nSELECT 1 FROM t\n```\n";
+  let asked = null;
+  const owners = (id, type) => {
+    asked = [id, type];
+    return new Map([["row", { doc: "other", query: false }]]);
+  };
+  assert.deepEqual(dataIdConflicts(domainDoc(md), owners), [{ id: "row", doc: "other" }]);
+  assert.deepEqual(asked, ["k", "domain"]);
 });
 
 function vocDoc(markdown, extra = {}) {

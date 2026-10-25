@@ -19,7 +19,7 @@ function priorityOf(user) {
 
 export function registerProposalsRoutes(app) {
   const { storeDir, refs, queue } = app.akg;
-  const owners = (selfId) => dataIdOwners(storeDir, selfId);
+  const owners = (selfId, selfType) => dataIdOwners(storeDir, selfId, selfType);
 
   app.post(
     "/api/proposals",

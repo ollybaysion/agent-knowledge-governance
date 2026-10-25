@@ -290,3 +290,30 @@ test("verification queries: this skill's queries then each active linked skill's
     await cleanup();
   }
 });
+
+test("verification-choices: a domain document a main links to is LINK1, one it links to is LINK2, as a sub skill would be", async () => {
+  const { app, cleanup } = await setup();
+  const h = as("edtok");
+  const post = (type, id, markdown, extra = {}) =>
+    app.inject({
+      method: "POST",
+      url: `/api/docs/${type}`,
+      headers: h,
+      payload: { schema: `${type}/v1`, id, keywords: [{ kw: id, inject: "full" }], status: "active", body: { name: id, markdown }, ...extra },
+    });
+  try {
+    const near = await post("domain", "near", "# near\n\n## 도메인 지식\n\n### DB\n\n#### PARAM_INFO\n\n글\n\n## 데이터\n\n### p — 파라미터\n\n```sql\nSELECT 1 FROM p\n```\n", { links: [{ type: "domain-skill", id: "s", rel: "related" }] });
+    assert.equal(near.statusCode, 201, near.body);
+    const deep = await post("domain", "deep", "# deep\n\n## 도메인 지식\n\n### D\n\n글\n", { links: [{ type: "domain", id: "near", rel: "related" }] });
+    assert.equal(deep.statusCode, 201, deep.body);
+    const r = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s/verification-choices" })).json();
+    assert.deepEqual(r.pieces, [
+      { skill: "s", tier: "own", paths: ["A"] },
+      { skill: "near", tier: "link1", paths: ["DB / PARAM_INFO"] },
+      { skill: "deep", tier: "link2", paths: ["D"] },
+    ]);
+    assert.deepEqual(r.queries.map((q) => `${q.skill}/${q.id}`), ["near/p"]);
+  } finally {
+    await cleanup();
+  }
+});

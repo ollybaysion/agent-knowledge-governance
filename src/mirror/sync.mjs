@@ -44,9 +44,8 @@ export const REJECTED = "bundle_rejected";
 // Node's spawnSync default is 1MB of captured output.
 const MAX_BUFFER = 64 * 1024 * 1024;
 
-// §5.6 mirror layout's known type folders. "domain" (domain-doc render) has
-// no schema yet (json-spec §5.5 lists it as a future type) but is allowed
-// here so a server that starts emitting it doesn't need a CLI release first.
+// §5.6 mirror layout's known type folders. "domain" holds a domain
+// document's rendered/domain/<name>/SKILL.md.
 const ALLOWED_TYPE_DIRS = new Set([
   "db-schema",
   "msg-format",
@@ -54,8 +53,8 @@ const ALLOWED_TYPE_DIRS = new Set([
   "domain-skill",
   "manual",
   "voc",
-  // Same reasoning as "domain": listed before the server emits it, so that
-  // turning it on server-side does not require every client to upgrade first.
+  // Listed before the server emits it, so that turning it on server-side does
+  // not require every client to upgrade first.
   "unclassified",
 ]);
 
