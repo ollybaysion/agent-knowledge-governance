@@ -114,10 +114,12 @@ export function openCmdk() {
     items[active].node.scrollIntoView({ block: "nearest" });
   }
   const groupHead = (label, ic, extra) => el("div", { class: "ck-g", role: "presentation" }, [ic ? icon(ic, 13) : null, ` ${label}`, extra ? el("span", { class: "dim", text: extra }) : null]);
+  // A table, a command and a skill-md document go by id; the rest by title.
+  const byId = (type) => ["db-schema", "msg-format", "domain-skill", "domain"].includes(type);
   const docOption = (d, q, meta) =>
     option([
       el("span", { class: "chip ck-type" }, [el("span", { class: "tdot", style: { "--c": typeColor(d.type) } }), ` ${d.type === "domain-skill" ? "스킬 문서" : TYPES.find((t) => t.id === d.type)?.label ?? d.type}`]),
-      el("span", { class: `ck-name${d.type === "db-schema" || d.type === "msg-format" || d.type === "domain-skill" ? " mono" : ""}` }, marked(d.type === "db-schema" || d.type === "msg-format" || d.type === "domain-skill" ? d.id : d.title ?? d.id, q)),
+      el("span", { class: `ck-name${byId(d.type) ? " mono" : ""}` }, marked(byId(d.type) ? d.id : d.title ?? d.id, q)),
       meta?.section ? el("span", { class: "dim ck-sec", text: `› ${meta.section}` }) : null,
       el("span", { class: "sp" }),
       meta?.line ? el("span", { class: "dim ck-line" }, marked(clip(meta.line, q), q)) : meta?.when ? el("span", { class: "dim", text: meta.when }) : null,

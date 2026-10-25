@@ -1277,7 +1277,8 @@ a.chip:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sec.flash {
+  .sec.flash,
+  .md-h.flash {
     animation: none;
   }
 }
@@ -1331,6 +1332,17 @@ a.chip:hover {
   color: var(--ink);
   text-transform: none;
   letter-spacing: 0;
+}
+.md-h.answered {
+  scroll-margin-top: 120px;
+  margin-left: -6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--primary-active);
+}
+.md-h.flash {
+  animation: secflash 1.2s ease-out;
 }
 h3.md-h {
   font-size: 15px;

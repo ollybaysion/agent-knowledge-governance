@@ -2,6 +2,39 @@
 // A skill splits on its five known `##` sections (src/skill-sections.mjs,
 // passed in as `skill`) and joins back with joinSkill; any other md splits on
 // every `##` and joins back byte for byte. No DOM here; node tests it.
+import { parseBlocks } from "./md-parse.mjs";
+
+/**
+ * A section name as ?section= compares it: trimmed, a trailing ? : and
+ * spaces dropped, one space on each side of every "/".
+ */
+export const normSection = (t) =>
+  String(t ?? "")
+    .trim()
+    .replace(/[?？:：\s]+$/u, "")
+    .trim()
+    .replace(/\s*\/\s*/g, " / ");
+
+/** True when two section names are the same by normSection. */
+export const sameSection = (a, b) => normSection(a) !== "" && normSection(a) === normSection(b);
+
+/**
+ * The path of each heading in a `## 도메인 지식` body, one per parseBlocks
+ * heading in order: a `###`–`######` title after the titles of the headings
+ * above it with a lower level, joined with " / " — the piece titles of
+ * fdc-agent-be-spring SkillMarkdownTool.documents. Null for a `#` heading.
+ */
+export function headingPaths(body) {
+  const stack = [];
+  return parseBlocks(body)
+    .filter((b) => b.type === "h")
+    .map((b) => {
+      if (b.level < 3) return null;
+      while (stack.length && stack[stack.length - 1].level >= b.level) stack.pop();
+      stack.push({ level: b.level, title: b.text.trim() });
+      return stack.map((x) => x.title).join(" / ");
+    });
+}
 
 /** Trim blank lines at both ends of a line list. */
 function trimLines(lines) {

@@ -14,6 +14,7 @@ export let TYPES = [
   { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", status: "active" },
   { id: "msg-format", label: "설비 커맨드", color: "#e8a55a", kind: "structured", status: "active" },
   { id: "domain-skill", label: "에이전트", color: "#4657cf", kind: "structured", status: "active" },
+  { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", status: "active" },
   { id: "screen-map", label: "화면", color: "#b05a8a", kind: "structured", status: "active" },
   { id: "manual", label: "매뉴얼", color: "#8a5fbf", kind: "structured", status: "active" },
   { id: "fab-line", label: "라인", color: "#7a6a4f", kind: "structured", status: "active" },

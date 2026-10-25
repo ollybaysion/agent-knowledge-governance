@@ -6,7 +6,7 @@ import { allDocs, api } from "../api.mjs";
 import { $, el, icon } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
-import { docRows, move, rowTier, typeRows } from "/lib/miller.mjs";
+import { SUB_LABEL, docRows, inDocsTab, move, rowTier, typeRows } from "/lib/miller.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { shortRev, tierBadge } from "../shared.mjs";
@@ -14,7 +14,7 @@ import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, typeColor } from "../state.mjs";
 
 const enc = encodeURIComponent;
-const typeLabel = (type) => (type === "domain-skill" ? "도메인 지식" : TYPE_LABEL[type] ?? type);
+export const typeLabel = (type) => (type === "domain-skill" ? SUB_LABEL : TYPE_LABEL[type] ?? type);
 export const shortDay = (at) => (at ? String(at).slice(5, 10) : "");
 export function whenLabel(at) {
   if (!at) return "";
@@ -29,6 +29,8 @@ export function whenLabel(at) {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 const rowName = (d) => (d.type === "db-schema" || d.type === "msg-format" ? d.id : d.title && d.title !== d.id ? d.title : d.id);
+// The docs tab holds a domain-skill's sub drafts only; its mains are the 에이전트 tab's.
+const draftRole = (type) => (type === "domain-skill" ? "sub" : null);
 const tierChip = (d) => {
   const t = rowTier(d.tiers);
   return t ? tierBadge(t) : null;
@@ -135,7 +137,7 @@ export function pathPanel(type, id, docs, draftId = null) {
         el("span", {}, [el("span", { class: "tdot", style: { "--c": color } }), ` ${typeLabel(type)} `, el("span", { class: "count-pill", text: String(rows.length) })]),
         el("span", { class: "dim", text: "최근 수정 순" }),
       ]),
-      el("div", { class: "panel-scroll" }, [draftLinks(type, { current: draftId }), list, el("p", { class: "dim path-hint", text: "같은 타입 문서 — ↑ ↓ 로 옮기고 ↩ 로 엽니다." })]),
+      el("div", { class: "panel-scroll" }, [draftLinks(type, { role: draftRole(type), current: draftId }), list, el("p", { class: "dim path-hint", text: "같은 타입 문서 — ↑ ↓ 로 옮기고 ↩ 로 엽니다." })]),
       el("div", { class: "panel-foot" }, newDocButton()),
       handle,
     );
@@ -152,7 +154,7 @@ export async function renderBrowse(pickType = null) {
   const docs = await allDocs();
   const types = typeRows(TYPES, docs);
   const sh = liveShelf(shelf(), docs);
-  const docRowsIn = docs.filter((d) => d.type !== "domain-skill" || d.role === "sub");
+  const docRowsIn = docs.filter(inDocsTab);
   // Column 1: 즐겨찾기 · 최근 (documents) then the types.
   const col1 = [
     ...sh.fav.map((x) => ({ kind: "doc", group: "fav", doc: x.doc })),
@@ -260,7 +262,7 @@ export async function renderBrowse(pickType = null) {
         el("span", { class: "sp" }),
         el("span", { class: "dim", text: "최근 수정 순" }),
       ]),
-      draftLinks(type) ?? document.createTextNode(""),
+      draftLinks(type, { role: draftRole(type) }) ?? document.createTextNode(""),
       list.length
         ? el("ul", { class: "mlist" }, list.map((d, i) => {
             const on = picked ? picked.id === d.id : state.i2 === i;

@@ -1,22 +1,26 @@
 // The 문서 탭's column browser as plain data: which rows each column holds
 // and where the arrow keys go. No DOM here; node tests it.
 
-/** domain-skill shows in this tab only as its sub skills, under 도메인 지식. */
+/** domain-skill shows in this tab only as its sub skills: the ones still to move to domain. */
 export const inDocsTab = (d) => d.type !== "domain-skill" || d.role === "sub";
+
+/** The 문서 탭 name of the domain-skill row. */
+export const SUB_LABEL = "옮길 sub 스킬";
 
 /**
  * Column 1's type rows, in the type list's order: label · colour · count
  * (domain-skill counts its subs only), tag 등록 (a registered md type) or 내장
- * (unclassified). A closed type stays only while it still holds documents.
+ * (unclassified). A closed type stays only while it still holds documents;
+ * the domain-skill row stands only while a sub is left.
  */
 export function typeRows(types, docs) {
   const count = new Map();
   for (const d of docs) if (inDocsTab(d)) count.set(d.type, (count.get(d.type) ?? 0) + 1);
   return types
-    .filter((t) => t.status !== "archived" || count.get(t.id))
+    .filter((t) => (t.id === "domain-skill" || t.status === "archived" ? count.get(t.id) : true))
     .map((t) => ({
       id: t.id,
-      label: t.id === "domain-skill" ? "도메인 지식" : t.label,
+      label: t.id === "domain-skill" ? SUB_LABEL : t.label,
       color: t.color,
       count: count.get(t.id) ?? 0,
       tag: t.id === "unclassified" ? "내장" : t.kind === "md" && !t.builtin ? "등록" : null,

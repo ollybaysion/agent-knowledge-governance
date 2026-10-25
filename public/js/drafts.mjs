@@ -65,7 +65,7 @@ export function draftsOfType(type) {
 }
 
 // id 는 서버 deriveId 와 동일 규칙으로 미리보기 (db-schema=lower(table),
-// msg-format=kebab(command), domain-skill=name). owner 는 id 에 안 들어간다.
+// msg-format=kebab(command), domain-skill · domain=name). owner 는 id 에 안 들어간다.
 export function deriveDraftId(type, body) {
   if (type === "db-schema")
     return body.table ? String(body.table).toLowerCase() : "";
@@ -73,7 +73,7 @@ export function deriveDraftId(type, body) {
     return body.command
       ? String(body.command).toLowerCase().replace(/_/g, "-")
       : "";
-  if (type === "domain-skill")
+  if (type === "domain-skill" || type === "domain")
     return body.name ? String(body.name).toLowerCase() : "";
   if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
   if (isMdType(type)) return body.name ? String(body.name).toLowerCase() : "";
@@ -84,7 +84,7 @@ export function deriveDraftId(type, body) {
 // ---- 새 문서 단추 + 플라이아웃 ----
 // Structured types with a draft form, in the type list's order; every open md
 // type; last, 타입 없이 올리기 for anyone who writes.
-const FORM_TYPES = { "db-schema": "테이블 · 컬럼", "msg-format": "설비 커맨드", "domain-skill": "스킬 문서(md)", manual: "화면 매뉴얼(캡처)" };
+const FORM_TYPES = { "db-schema": "테이블 · 컬럼", "msg-format": "설비 커맨드", "domain-skill": "스킬 문서(md)", domain: "도메인 지식(md)", manual: "화면 매뉴얼(캡처)" };
 export function newDocOpts() {
   if (!canCreate()) return [];
   return TYPES.filter((t) => t.status === "active" && t.id !== "unclassified" && (FORM_TYPES[t.id] || t.kind === "md")).map((t) => ({
@@ -195,7 +195,9 @@ export function idSourceField(type, body, onIdChange) {
     title: true,
     placeholder: isMdType(type)
       ? `${TYPE_LABEL[type] ?? type} 이름 클릭해서 입력 (예: line-a-rf-power-drift)`
-      : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+      : type === "domain"
+        ? "도메인 문서 이름 클릭해서 입력 (예: fdc-virtual-sensor-formula)"
+        : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
   });
 }
@@ -274,7 +276,9 @@ function paintDraft(section, type, localId, body) {
           ? draftManual(body, persist)
           : isMdType(type)
             ? draftVoc(body, persist)
-            : draftDomainSkill(body, onIdChange, persist, rerender);
+            : type === "domain"
+              ? draftDomain(body, persist)
+              : draftDomainSkill(body, persist);
   section.replaceChildren(head, note, fields);
   updateSave();
 }
@@ -475,23 +479,9 @@ export function draftMsgFormat(body, onIdChange, persist, rerender) {
 }
 
 // ---- domain-skill 드래프트 폼 — 스킬은 md 한 장이라 붙여 넣는 칸 하나 ----
-export function draftDomainSkill(body, onIdChange, persist, rerender) {
+// 새 스킬은 main(에이전트)이다. main 이 가리키는 지식은 domain 새 문서가 맡는다.
+export function draftDomainSkill(body, persist) {
   const wrap = el("div", { class: "dfwrap" });
-  wrap.append(
-    dfRow(
-      "role",
-      true,
-      eSelect(
-        () => body.role || "main",
-        (v) => (body.role = v),
-        [
-          { value: "main", label: "main — 에이전트가 될 스킬" },
-          { value: "sub", label: "sub — main 이 가리키는 지식 (## 도메인 지식 필수)" },
-        ],
-        persist,
-      ),
-    ),
-  );
   wrap.append(
     dfRow(
       "markdown",
@@ -505,7 +495,26 @@ export function draftDomainSkill(body, onIdChange, persist, rerender) {
     ),
   );
   wrap.append(
-    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 다섯만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · main 만 ## 답변 품질 검증 Set), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 다섯만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · ## 답변 품질 검증 Set), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
+  );
+  return wrap;
+}
+
+// ---- domain 드래프트 폼 — main 이 가리키는 지식, md 한 장 ----
+export function draftDomain(body, persist) {
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "markdown",
+      false,
+      eField(() => body.markdown, (v) => (body.markdown = v), {
+        area: true,
+        mono: true,
+        placeholder: "도메인 md 를 여기에 — # 이름 / ## 한 줄 설명 / ## 언제 호출되는가? / ## 도메인 지식 / ## 데이터",
+        onChange: persist,
+      }),
+    ),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. ## 도메인 지식 절이 있어야 하고, 절 제목은 넷만 허용됩니다(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터). ## 도메인 지식 아래 ### 소제목마다 BE 가 조각 하나로 읽습니다." }),
   );
   return wrap;
 }
@@ -584,7 +593,7 @@ export function finalizeDraftBody(type, body) {
     if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;
     return b;
   }
-  // domain-skill: { name, markdown } — 본문이 비었으면 칸 자체를 안 보낸다
+  // domain-skill · domain: { name, markdown } — 본문이 비었으면 칸 자체를 안 보낸다
   // (드래프트는 required 가 풀린 스키마로 검증되니 name 만으로 저장된다).
   const b = { name: body.name };
   if (body.markdown && body.markdown.trim() !== "") b.markdown = body.markdown;

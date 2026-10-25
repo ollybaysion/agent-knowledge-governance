@@ -1,11 +1,11 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 전체 편집), then the body as
+// id · rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 전체 편집), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { mdNodes, wikiResolver } from "../md.mjs";
-import { scrollToSec, sec, isAnswerSection } from "../sec.mjs";
+import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import {
   evidence,
   getSlot,
@@ -24,7 +24,7 @@ import { agentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
-import { pathPanel } from "./docs.mjs";
+import { pathPanel, typeLabel } from "./docs.mjs";
 import { openLinksDialog } from "../links-edit.mjs";
 import { touch } from "../shelf.mjs";
 
@@ -38,10 +38,13 @@ export function openDocWithPanel(type, id, tab) {
   location.hash = `#/doc/${type}/${enc(id)}`;
 }
 
+/** domain-skill and domain: the skill md body, editor and reading view. */
+export const isSkillType = (type) => type === "domain-skill" || type === "domain";
+
 /** The name a document is shown by. */
 export function docTitle(type, doc) {
   const b = doc.body ?? {};
-  if (type === "domain-skill" || isMdType(type)) return titleOf(b.markdown) ?? b.name ?? doc.id;
+  if (isSkillType(type) || isMdType(type)) return titleOf(b.markdown) ?? b.name ?? doc.id;
   if (type === "db-schema" || type === "msg-format") return doc.id;
   return b.title ?? b.name ?? doc.id;
 }
@@ -79,7 +82,7 @@ export async function renderDocScreen(type, id, opts = {}) {
   setCrumbs(
     isAgent
       ? [{ label: "에이전트", href: "#/agents" }, { label: title }]
-      : [{ label: "문서", href: "#/docs" }, { label: type === "domain-skill" ? "도메인 지식" : TYPE_LABEL[type] ?? type, href: `#/docs/${type}` }, { label: title }],
+      : [{ label: "문서", href: "#/docs" }, { label: typeLabel(type), href: `#/docs/${type}` }, { label: title }],
   );
 
   const scrollY = opts.keepScroll ? window.scrollY : 0;
@@ -150,12 +153,13 @@ export async function renderDocScreen(type, id, opts = {}) {
   else if (answerSection) {
     const key = built.sections.find((s) => isAnswerSection(s.title))?.key;
     if (key) requestAnimationFrame(() => scrollToSec(key, { smooth: false }));
+    else if (built.answerHeading) requestAnimationFrame(() => scrollToNode(built.answerHeading, { smooth: false }));
   }
 }
 
 async function buildBody(ctx, host) {
   const { type, doc } = ctx;
-  if (type === "domain-skill") {
+  if (isSkillType(type)) {
     const r = await skillBody(ctx);
     host.replaceChildren(...r.nodes);
     return r;
@@ -172,7 +176,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
   const { type, doc, rev, canEdit, reload } = ctx;
   const admin = isAdmin() && !embed;
   const role = type === "domain-skill" ? doc.role ?? "main" : null;
-  const sub = type === "domain-skill" ? summaryOf(doc.body?.markdown) : type === "db-schema" || type === "msg-format" ? doc.body?.purpose?.text ?? "" : type === "screen-map" ? [doc.body?.program, ...(doc.body?.menuPath ?? [])].filter(Boolean).join(" › ") : "";
+  const sub = isSkillType(type) ? summaryOf(doc.body?.markdown) : type === "db-schema" || type === "msg-format" ? doc.body?.purpose?.text ?? "" : type === "screen-map" ? [doc.body?.program, ...(doc.body?.menuPath ?? [])].filter(Boolean).join(" › ") : "";
   async function statusAction() {
     const target = doc.status === "active" ? "deactivate" : "activate";
     const r = await api(`/api/docs/${type}/${enc(doc.id)}/${target}`, { method: "POST", headers: { "if-match": ctx.rev } });
@@ -196,20 +200,23 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       ? el("a", { class: "chip linkchip", href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", title: doc.origin.title || doc.origin.url }, ["원본 ", icon("external", 12)])
       : null,
     admin && isMdType(type) ? retypeMenu(ctx) : null,
+    admin && role === "sub" && doc.status !== "archived"
+      ? el("button", { type: "button", class: "chip menuchip", title: "도메인 타입으로 옮깁니다. id 는 그대로이고, 이 문서를 가리키는 연결도 같이 고칩니다.", onclick: () => retypeTo(ctx, "domain") }, "도메인으로 옮기기")
+      : null,
     admin && doc.status !== "archived"
       ? el("button", { type: "button", class: "chip ghostchip", text: doc.origin ? "원본 고치기" : "원본 넣기", onclick: () => originForm(ctx, metaRow) })
       : null,
     ...keywordChips((doc.keywords || []).filter((k) => k.kw !== doc.id)),
   ];
   const fullEdit =
-    canEdit && (type === "domain-skill" || isMdType(type))
+    canEdit && (isSkillType(type) || isMdType(type))
       ? el("button", { type: "button", class: "btn sm doc-full-edit", onclick: () => ctx.editSection(null) }, [icon("pencil", 14), "전체 편집"])
       : null;
   return el("header", { class: "doc-head" }, [
     el("p", { class: "doc-eyebrow" }, [
       el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
       el("span", { text: type }),
-      el("span", { class: "dim", text: ` · ${type === "domain-skill" ? (isAgent ? "에이전트" : "도메인 지식") : TYPE_LABEL[type] ?? type}${role ? ` · ${role}` : ""}` }),
+      el("span", { class: "dim", text: ` · ${isAgent ? "에이전트" : typeLabel(type)}${role ? ` · ${role}` : ""}` }),
     ]),
     el("h1", { class: `doc-title${type === "db-schema" || type === "msg-format" ? " mono" : ""}`, text: title }),
     sub ? el("p", { class: "doc-sub", text: sub }) : null,
@@ -232,8 +239,34 @@ function stickyHead(head) {
   new IntersectionObserver(([e]) => bar.classList.toggle("stuck", !e.isIntersecting), { rootMargin: `-${offset}px 0px 0px 0px` }).observe(h1);
 }
 
-function retypeMenu(ctx) {
+/** POST …/retype to `to` with If-Match, then open the moved document. */
+async function retypeTo(ctx, to) {
   const { type, doc } = ctx;
+  const from = typeLabel(type);
+  if (!confirm(`${from} → ${TYPE_LABEL[to] ?? to} 로 옮깁니다. id 는 그대로이고, 이 문서를 가리키는 연결도 같이 고칩니다.`)) return;
+  const r = await api(`/api/docs/${type}/${enc(doc.id)}/retype`, { method: "POST", headers: { "if-match": ctx.rev }, body: { type: to } });
+  if (!r.ok) {
+    const d = r.data || {};
+    toast(
+      d.error === "already_exists"
+        ? `${TYPE_LABEL[to] ?? to} 에 같은 id 의 문서가 있습니다.`
+        : d.error === "type_archived"
+          ? "닫힌 타입으로는 옮기지 않습니다."
+          : r.status === 409
+            ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 옮기세요."
+            : `옮기기 실패 (${r.status})${d.message ? ` — ${d.message}` : ""}`,
+      "error",
+    );
+    return;
+  }
+  toast(`${TYPE_LABEL[to] ?? to} 로 옮겼습니다`);
+  invalidateDocs();
+  await loadTypes();
+  location.hash = `#/doc/${to}/${enc(doc.id)}`;
+}
+
+function retypeMenu(ctx) {
+  const { type } = ctx;
   const targets = activeMdTypes().filter((t) => t.id !== type && t.id !== "unclassified");
   if (!targets.length) return null;
   const btn = el("button", { type: "button", class: "chip menuchip", "aria-haspopup": "menu", "aria-expanded": "false" }, ["타입 정하기 ", icon("down", 12)]);
@@ -246,28 +279,9 @@ function retypeMenu(ctx) {
   const outside = (e) => {
     if (!wrap.contains(e.target)) close();
   };
-  async function pick(to) {
+  function pick(to) {
     close();
-    if (!confirm(`${TYPE_LABEL[type] ?? type} → ${TYPE_LABEL[to] ?? to} 로 옮깁니다. id 는 그대로이고, 이 문서를 가리키는 연결도 같이 고칩니다.`)) return;
-    const r = await api(`/api/docs/${type}/${enc(doc.id)}/retype`, { method: "POST", headers: { "if-match": ctx.rev }, body: { type: to } });
-    if (!r.ok) {
-      const d = r.data || {};
-      toast(
-        d.error === "already_exists"
-          ? `${TYPE_LABEL[to] ?? to} 에 같은 id 의 문서가 있습니다.`
-          : d.error === "type_archived"
-            ? "닫힌 타입으로는 옮기지 않습니다."
-            : r.status === 409
-              ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 옮기세요."
-              : `옮기기 실패 (${r.status})${d.message ? ` — ${d.message}` : ""}`,
-        "error",
-      );
-      return;
-    }
-    toast(`${TYPE_LABEL[to] ?? to} 로 옮겼습니다`);
-    invalidateDocs();
-    await loadTypes();
-    location.hash = `#/doc/${to}/${enc(doc.id)}`;
+    retypeTo(ctx, to);
   }
   btn.addEventListener("click", () => {
     if (wrap.querySelector(".menu")) return close();

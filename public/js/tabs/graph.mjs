@@ -77,7 +77,7 @@ export async function renderGraph(selKey) {
     el("div", { class: "gl-grid" }, [
       legendItem(svgEl("circle", { cx: 9, cy: 9, r: 8, class: "gl-fill" }), "main 스킬"),
       legendItem(svgEl("circle", { cx: 9, cy: 9, r: 4.5, class: "gl-fill" }), "sub 스킬"),
-      legendItem(svgEl("rect", { x: 4, y: 4, width: 10, height: 10, rx: 1, class: "gl-fill" }), "구조 문서(표 · msg · 매뉴얼 · 화면)"),
+      legendItem(svgEl("rect", { x: 4, y: 4, width: 10, height: 10, rx: 1, class: "gl-fill" }), "구조 문서(표 · msg · 도메인 · 매뉴얼 · 화면)"),
       legendItem(svgEl("rect", { x: 4, y: 4, width: 10, height: 10, rx: 3.5, class: "gl-fill" }), "md 문서(VOC · 등록 · 미분류)"),
       legendItem(svgEl("line", { x1: 0, y1: 9, x2: 26, y2: 9, class: "ge" }), "links", 28),
       legendItem(svgEl("line", { x1: 0, y1: 9, x2: 26, y2: 9, class: "ge body" }), "본문 [[ ]]", 28),
