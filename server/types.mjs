@@ -10,6 +10,7 @@ export const CODE_TYPES = [
   { id: "db-schema", label: "DB 스키마", color: "#3f7d8a" },
   { id: "msg-format", label: "설비 커맨드", color: "#e8a55a" },
   { id: "domain-skill", label: "에이전트", color: "#4657cf" },
+  { id: "domain", label: "도메인", color: "#4f6d8a" },
   { id: "screen-map", label: "화면", color: "#b05a8a" },
   { id: "manual", label: "매뉴얼", color: "#8a5fbf" },
   { id: "fab-line", label: "라인", color: "#7a6a4f" },

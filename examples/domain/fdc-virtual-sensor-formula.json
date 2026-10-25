@@ -1,5 +1,5 @@
 {
-  "schema": "domain-skill/v1",
+  "schema": "domain/v1",
   "id": "fdc-virtual-sensor-formula",
   "keywords": [
     {
@@ -8,7 +8,6 @@
     }
   ],
   "status": "active",
-  "role": "sub",
   "body": {
     "name": "fdc-virtual-sensor-formula",
     "markdown": "# fdc-virtual-sensor-formula\n\n## 도메인 지식\n\n### 가상 센서 수식\n\n- 가상 센서(SNSR_KIND = VIRTUAL)의 값은 FDC_FORMULA 의 수식으로 계산된다. 설비가 올려 보내는 값이 아니다.\n- 수식의 입력 센서는 FDC_FORMULA_INPUT 에 있다. ARG_ORDER 는 수식에 넣는 순서다 — 값의 크기나 중요도가 아니다.\n- 입력 센서도 가상일 수 있다. 이 문서는 한 단계만 설명하고, 입력 센서의 출처는 그 센서로 다시 묻는다.\n"

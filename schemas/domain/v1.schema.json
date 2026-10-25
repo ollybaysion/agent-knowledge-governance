@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "domain/v1",
+  "title": "domain/v1 body",
+  "description": "A domain knowledge document — what a sub domain-skill was. Same body as domain-skill/v1: the author's md, stored verbatim. The consumer (fdc-agent-be-spring SkillMarkdownTool) reads it as a sub skill: each heading under ## 도메인 지식 is one piece, a main's link makes it LINK1, its ## 데이터 queries are candidates. akg refuses an `##` section it does not know and requires ## 도메인 지식 (envelope.mjs semantic check).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "markdown"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Document id = rendered/domain/<name>/SKILL.md."
+    },
+    "markdown": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The whole document as the author wrote it. Stored and served byte-for-byte; the renderer only prefixes a SKILL.md frontmatter."
+    }
+  }
+}

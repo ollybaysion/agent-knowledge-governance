@@ -14,6 +14,7 @@ const DEFAULT_ORDER = [
   "db-schema",
   "msg-format",
   "domain-skill",
+  "domain",
   "screen-map",
   "manual",
   "fab-line",
@@ -84,6 +85,7 @@ test("GET /api/types: a user reads the default list — code types, voc, unclass
     assert.deepEqual(empty.json().types.map((x) => x.id), DEFAULT_ORDER);
     const byId = Object.fromEntries(empty.json().types.map((x) => [x.id, x]));
     assert.deepEqual(byId["db-schema"], { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", builtin: true, status: "active", count: 0 });
+    assert.deepEqual(byId.domain, { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", builtin: true, status: "active", count: 0 });
     assert.deepEqual(byId.voc, { id: "voc", label: "VOC", color: "#4e9a5a", kind: "md", builtin: false, status: "active", count: 0 });
     assert.deepEqual(byId.unclassified, { id: "unclassified", label: "미분류", color: "#8a8f98", kind: "md", builtin: true, status: "active", count: 0 });
 
@@ -225,7 +227,7 @@ test("PUT /api/types/order: every type once, unclassified pinned last, code type
   const t = await setup();
   try {
     await register(t, "meeting-notes");
-    const order = ["unclassified", "domain-skill", "meeting-notes", "voc", "db-schema", "msg-format", "screen-map", "manual", "fab-line"];
+    const order = ["unclassified", "domain-skill", "domain", "meeting-notes", "voc", "db-schema", "msg-format", "screen-map", "manual", "fab-line"];
     const r = await t.admin("PUT", "/api/types/order", { order });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json().types.map((x) => x.id), [...order.slice(1), "unclassified"]);
@@ -337,6 +339,77 @@ test("retype: unclassified → meeting-notes moves the file, the schema, the ren
     const clash = await t.admin("POST", "/api/docs/meeting-notes/u1/retype", { type: "unclassified" }, { "if-match": r.json().rev });
     assert.equal(clash.statusCode, 409);
     assert.equal(clash.json().error, "already_exists");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+const skillDoc = (name, markdown, extra = {}) => ({
+  schema: "domain-skill/v1",
+  id: name,
+  keywords: [{ kw: name, inject: "full" }],
+  status: "active",
+  ...extra,
+  body: { name, markdown },
+});
+
+test("retype: a sub domain-skill → domain drops role, moves the file and the SKILL.md, and relinks, in one commit", async () => {
+  const t = await setup();
+  try {
+    const k = await t.admin("POST", "/api/docs/domain-skill", skillDoc("k", "# k\n\n## 도메인 지식\n\n### A\n\n글\n", { role: "sub" }));
+    assert.equal(k.statusCode, 201, k.body);
+    const m = await t.admin("POST", "/api/docs/domain-skill", skillDoc("m", "# m\n\n## 한 줄 설명\n\n메인\n", { links: [{ type: "domain-skill", id: "k", rel: "related" }] }));
+    assert.equal(m.statusCode, 201, m.body);
+    assert.equal(existsSync(t.file("rendered/domain-skill/k/SKILL.md")), true);
+
+    const before = t.commits();
+    const r = await t.admin("POST", "/api/docs/domain-skill/k/retype", { type: "domain" }, { "if-match": k.json().rev });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(t.commits(), before + 1);
+    assert.equal(t.lastMessage(), "retype domain-skill/k → domain");
+    assert.equal(r.json().json.schema, "domain/v1");
+    assert.equal("role" in r.json().json, false);
+    assert.deepEqual(Object.keys(r.json().json), ["schema", "id", "keywords", "status", "body"]);
+    assert.deepEqual(r.json().relinked, [{ type: "domain-skill", id: "m" }]);
+
+    assert.equal(existsSync(t.file("domain-skill/k.json")), false);
+    assert.equal(existsSync(t.file("rendered/domain-skill/k/SKILL.md")), false);
+    assert.match(readFileSync(t.file("rendered/domain/k/SKILL.md"), "utf8"), /^---\nname: k\n[\s\S]*### A\n\n글\n$/);
+    assert.equal(existsSync(t.file("rendered/domain/index.json")), false);
+    assert.deepEqual((await t.user("GET", "/api/docs/domain-skill/m")).json().json.links, [{ type: "domain", id: "k", rel: "related" }]);
+    const rows = (await t.user("GET", "/api/docs")).json().docs;
+    const row = rows.find((d) => d.type === "domain" && d.id === "k");
+    assert.equal("role" in row, false);
+    assert.equal(rows.find((d) => d.id === "m").role, "main");
+    assert.equal((await t.user("GET", "/api/types")).json().types.find((x) => x.id === "domain").count, 1);
+    assert.equal(execFileSync("git", ["-C", t.storeDir, "status", "--porcelain"], { encoding: "utf8" }), "");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("retype: a main domain-skill is 400 main_skill; md ↔ domain and domain → domain-skill stay structured_type", async () => {
+  const t = await setup();
+  try {
+    const m = await t.admin("POST", "/api/docs/domain-skill", skillDoc("m", "# m\n\n## 한 줄 설명\n\n메인\n"));
+    const main = await t.admin("POST", "/api/docs/domain-skill/m/retype", { type: "domain" }, { "if-match": m.json().rev });
+    assert.equal(main.statusCode, 400, main.body);
+    assert.equal(main.json().error, "main_skill");
+    assert.equal(existsSync(t.file("domain-skill/m.json")), true);
+
+    const k = await t.admin("POST", "/api/docs/domain", { ...skillDoc("k", "# k\n\n## 도메인 지식\n\n글\n"), schema: "domain/v1" });
+    assert.equal(k.statusCode, 201, k.body);
+    const v = await t.admin("POST", "/api/docs/voc", mdDoc("voc", "v"));
+    for (const [url, type, rev] of [
+      ["/api/docs/voc/v/retype", "domain", v.json().rev],
+      ["/api/docs/domain/k/retype", "voc", k.json().rev],
+      ["/api/docs/domain/k/retype", "domain-skill", k.json().rev],
+      ["/api/docs/domain-skill/m/retype", "voc", m.json().rev],
+    ]) {
+      const b = await t.admin("POST", url, { type }, { "if-match": rev });
+      assert.equal(b.statusCode, 400, `${url} → ${type}`);
+      assert.equal(b.json().error, "structured_type");
+    }
   } finally {
     await t.cleanup();
   }

@@ -1,6 +1,6 @@
-// A domain-skill's `## 데이터` query ids (items with a ```sql fence) are
-// procurement keys the consumer looks up across every stored skill (active or
-// inactive; archived ones are out), so one may not sit in two skills. A
+// A domain-skill's or domain document's `## 데이터` query ids (items with a
+// ```sql fence) are procurement keys the consumer looks up across every stored
+// skill (active or inactive; archived ones are out), so one may not sit in two. A
 // question (no sql) is the skill's own and may repeat across skills.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -161,6 +161,53 @@ test("batch POST: ids shared inside the batch or with the store are 409, with th
 
     const ok = await batch([skill("b", ["row_b"]), skill("c", ["row_c"])]);
     assert.equal(ok.statusCode, 201, ok.body);
+  } finally {
+    await cleanup();
+  }
+});
+
+function domain(name, ids, status = "active") {
+  const doc = skill(name, ids, status);
+  return {
+    ...doc,
+    schema: "domain/v1",
+    body: { name, markdown: doc.body.markdown.replace("## 데이터", "## 도메인 지식\n\n글\n\n## 데이터") },
+  };
+}
+const postDomain = (app, doc) =>
+  app.inject({ method: "POST", url: "/api/docs/domain", headers: auth("edtok"), payload: doc });
+
+test("domain-skill and domain share the data ids: a query id in one type is 409 in the other, both ways", async () => {
+  const { app, cleanup } = await setup();
+  try {
+    assert.equal((await postDomain(app, domain("k", ["snsr_id"]))).statusCode, 201);
+    const fromSkill = await post(app, skill("a", ["snsr_id"]));
+    assert.equal(fromSkill.statusCode, 409, fromSkill.body);
+    assert.deepEqual(fromSkill.json().conflicts, [{ id: "snsr_id", doc: "k" }]);
+    assert.equal((await post(app, skill("a", ["row_a"]))).statusCode, 201);
+    const fromDomain = await postDomain(app, domain("j", ["row_a"], "inactive"));
+    assert.equal(fromDomain.statusCode, 409, fromDomain.body);
+    assert.deepEqual(fromDomain.json().conflicts, [{ id: "row_a", doc: "a" }]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("PUT: a domain document's own ids are not a conflict; a domain-skill of the same id is another document", async () => {
+  const { app, cleanup } = await setup();
+  try {
+    await postDomain(app, domain("a", ["snsr_id"]));
+    await post(app, skill("a", ["row_a"]));
+    const put = async (type, doc) => {
+      const url = `/api/docs/${type}/a`;
+      const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url })).json();
+      return app.inject({ method: "PUT", url, headers: { ...auth("edtok"), "if-match": rev }, payload: doc.body });
+    };
+    const same = await put("domain", domain("a", ["snsr_id", "extra"]));
+    assert.equal(same.statusCode, 200, same.body);
+    const taken = await put("domain-skill", skill("a", ["row_a", "snsr_id"]));
+    assert.equal(taken.statusCode, 409, taken.body);
+    assert.deepEqual(taken.json().conflicts, [{ id: "snsr_id", doc: "a" }]);
   } finally {
     await cleanup();
   }

@@ -4,28 +4,31 @@ import { knowledgePaths } from "../src/verify-set.mjs";
 import { listIds, readJson } from "./store.mjs";
 
 const SKILL = "domain-skill";
+// The consumer reads a domain document as it reads a sub skill.
+const LINKED_TYPES = [SKILL, "domain"];
 
 const skillLinks = (doc) =>
-  (doc.links ?? []).filter((l) => l?.type === SKILL && typeof l.id === "string").map((l) => l.id.trim());
+  (doc.links ?? []).filter((l) => LINKED_TYPES.includes(l?.type) && typeof l.id === "string").map((l) => l.id.trim());
 
 /**
- * The active skills a link or two away from `selfId`, links counted both
- * ways — the consumer's LINK1 and LINK2 (KnowledgeService.tiers) — each in
- * store order.
+ * The active skills and domain documents a link or two away from `selfId`,
+ * links counted both ways — the consumer's LINK1 and LINK2
+ * (KnowledgeService.tiers) — each in store order.
  * @returns {{link1: {id: string, markdown: string}[], link2: {id: string, markdown: string}[]}}
  */
 export function linkedSkills(storeDir, selfId, selfDoc) {
   const active = new Map();
-  for (const id of listIds(storeDir, SKILL)) {
-    if (id === selfId) continue;
-    let doc;
-    try {
-      doc = readJson(storeDir, `${SKILL}/${id}.json`);
-    } catch {
-      continue;
+  for (const type of LINKED_TYPES)
+    for (const id of listIds(storeDir, type)) {
+      if (id === selfId || active.has(id)) continue;
+      let doc;
+      try {
+        doc = readJson(storeDir, `${type}/${id}.json`);
+      } catch {
+        continue;
+      }
+      if (doc && doc.status === "active" && typeof doc.body?.markdown === "string") active.set(id, doc);
     }
-    if (doc && doc.status === "active" && typeof doc.body?.markdown === "string") active.set(id, doc);
-  }
   const links = new Map(); // id -> ids linked either way
   const join = (a, b) => {
     if (a === b) return;
