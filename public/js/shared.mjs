@@ -183,8 +183,7 @@ export const bandClass = (score) => `band-${Math.min(4, Math.max(0, Math.floor(N
 export const VERIFY_LABEL_OF_WIRE = Object.fromEntries(Object.entries(VERIFY_KIND_WIRE).map(([k, w]) => [w, VERIFY_KIND_LABEL[k]]));
 
 // A skill's role: main = an agent can be this skill, sub = knowledge a main
-// points at. An editor's click flips it (PUT …/role); the server refuses a sub
-// without ## 도메인 지식.
+// points at. An editor's click flips it (PUT …/role).
 export const ROLE_MEANING = {
   main: "main 스킬 — 에이전트 목록에 오릅니다.",
   sub: "sub 스킬 — main 이 가리키는 지식 문서입니다. 에이전트 목록에는 오르지 않습니다.",

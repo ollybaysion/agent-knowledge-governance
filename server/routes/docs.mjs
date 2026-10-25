@@ -176,7 +176,7 @@ export function registerDocsRoutes(app) {
             id,
             status: doc.status,
             tiers,
-            keywords: doc.keywords,
+            keywords: doc.keywords ?? [],
             links: doc.links ?? [],
             title: titleOf(doc),
             ...originOf(doc),

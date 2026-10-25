@@ -15,10 +15,11 @@ export function compileIndex(docs) {
   const entries = [];
   for (const doc of docs) {
     if (doc.status !== "active") continue;
-    const full = doc.keywords
+    const keywords = doc.keywords ?? [];
+    const full = keywords
       .filter((k) => k.inject === "full")
       .map((k) => k.kw);
-    const pointer = doc.keywords
+    const pointer = keywords
       .filter((k) => k.inject === "pointer")
       .map((k) => k.kw);
     const path = `docs/${doc.id}.md`;

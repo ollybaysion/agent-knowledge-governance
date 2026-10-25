@@ -7,14 +7,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, validateNode } from "./validate.mjs";
-import {
-  isSkillSection,
-  normalizeHeading,
-  SKILL_SECTIONS,
-  skillSections,
-} from "./skill-sections.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
-import { checkVerifySet, VERIFY_SECTION } from "./verify-set.mjs";
+import { checkVerifySet } from "./verify-set.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -81,16 +75,16 @@ const KEYWORD_SCHEMA = {
   },
 };
 
-// json-spec §2 — the keys fixed for every type. `links`, `role` and `origin`
-// are the optional keys.
+// json-spec §2 — the keys fixed for every type. `keywords`, `links`, `role`
+// and `origin` are the optional keys; absent keywords read as [].
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["schema", "id", "keywords", "status", "body"],
+  required: ["schema", "id", "status", "body"],
   properties: {
     schema: { type: "string", pattern: "^[a-z][a-z0-9-]*/v[0-9]+$" },
     id: { type: "string", pattern: "^[a-z0-9._-]+$" },
-    keywords: { type: "array", minItems: 1, items: KEYWORD_SCHEMA },
+    keywords: { type: "array", items: KEYWORD_SCHEMA },
     // "inactive": exists and is readable through the API, but is kept out of
     // every derivative — no rendered md, no index entry, so it never reaches a
     // mirror or an injection slot. Bulk imports land here (issue #7).
@@ -251,31 +245,14 @@ export function dataIdConflicts(doc, dataIdOwners) {
     .map(([id]) => ({ id, doc: owners.get(id).doc }));
 }
 
-// The body is the author's md verbatim (user decision 2026-09-21); what the
-// schema cannot see is only whether its `##` sections are ones the consumer
-// reads — downstream an unknown one is not an error but a silently missing
-// section (## 데이타 → no data items). Everything inside a section (items,
-// fences, :vars) is the consumer's to judge — it is the one that turns the
-// text into a skill. `knowledge` names a document that is knowledge a main
-// reads (a sub or a domain document): 도메인 지식 is the one section it must
-// have, and the verification set, which scores an agent, is not its own.
-function checkSkillMarkdown(doc, errors, knowledge) {
+// The body is the author's md verbatim (user decision 2026-09-21): which `##`
+// sections it has is the author's. Checked here: the id, the data ids, and
+// the verification set's shape when the md has one.
+function checkSkillMarkdown(doc, errors) {
   checkDerivedId(doc, errors);
   checkSkillDataIds(doc, errors);
   if (typeof doc.body?.markdown !== "string") return;
-  const titles = skillSections(doc.body.markdown);
-  if (knowledge && !titles.some((t) => normalizeHeading(t) === "도메인 지식"))
-    fail(errors, `$.body.markdown: ${knowledge}에는 "## 도메인 지식" 절이 있어야 합니다`);
-  if (knowledge && titles.some((t) => normalizeHeading(t) === VERIFY_SECTION))
-    fail(errors, `$.body.markdown: "## ${VERIFY_SECTION}" 은 main 스킬에만 둡니다`);
   for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
-  for (const title of titles) {
-    if (!isSkillSection(title))
-      fail(
-        errors,
-        `$.body.markdown: 모르는 절입니다 — "## ${title}" (허용: ${SKILL_SECTIONS.map((t) => `## ${t.key}`).join(" · ")})`,
-      );
-  }
 }
 
 const SEMANTIC_CHECKS = {
@@ -340,11 +317,10 @@ const SEMANTIC_CHECKS = {
     });
   },
   "domain-skill/v1"(doc, errors) {
-    checkSkillMarkdown(doc, errors, doc.role === "sub" ? "sub 스킬" : null);
+    checkSkillMarkdown(doc, errors);
   },
-  // What a sub domain-skill was: the sub rule, with no role key.
   "domain/v1"(doc, errors) {
-    checkSkillMarkdown(doc, errors, "도메인 문서");
+    checkSkillMarkdown(doc, errors);
   },
 };
 
