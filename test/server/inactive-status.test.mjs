@@ -199,22 +199,20 @@ test("reactivating republishes the md and the index entry", async () => {
   await cleanup();
 });
 
-test("archiving also removes the md — the pre-existing leak this closes", async () => {
+test("an archived doc has no md either — /api/bundle tars rendered/ whole", async () => {
   const { app, storeDir, cleanup } = await setup();
   await create(app, doc());
   assert.equal(existsSync(join(storeDir, MD)), true);
 
-  const del = await app.inject({
-    method: "DELETE",
-    url: "/api/docs/db-schema/x",
-    headers: auth("aptok"),
+  const archived = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema",
+    headers: auth("edtok"),
+    payload: doc({ id: "y", status: "archived", body: { ...doc().body, table: "Y" } }),
   });
-  assert.equal(del.statusCode, 200, del.payload);
-
-  // Archiving only ever dropped the index entry; the rendered md stayed in
-  // rendered/, and /api/bundle tars that directory whole — so a "deleted"
-  // doc kept shipping to every mirror.
-  assert.equal(existsSync(join(storeDir, MD)), false);
+  assert.equal(archived.statusCode, 201, archived.payload);
+  assert.equal(existsSync(join(storeDir, "rendered/db-schema/docs/y.md")), false);
+  assert.deepEqual(indexOf(storeDir).map((e) => e.path), ["docs/x.md"]);
 
   await cleanup();
 });
@@ -254,12 +252,17 @@ test("repeating a transition is a no-op, and archived docs stay archived", async
   assert.equal(again.json().unchanged, true);
   assert.equal(again.json().rev, rev);
 
-  const del = await app.inject({
-    method: "DELETE",
-    url: "/api/docs/db-schema/x",
-    headers: auth("aptok"),
+  const archived = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema",
+    headers: auth("edtok"),
+    payload: doc({ id: "y", status: "archived", body: { ...doc().body, table: "Y" } }),
   });
-  const revived = await transition(app, "activate", del.json().rev);
+  const revived = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/y/activate",
+    headers: { ...auth("aptok"), "if-match": archived.json().rev },
+  });
   assert.equal(revived.statusCode, 400);
   assert.equal(revived.json().error, "doc_archived");
 

@@ -265,12 +265,9 @@ test("domain-skill: id must equal body.name", () => {
   assert.ok(errors.some((e) => e.includes('expected "x" (== body.name)')));
 });
 
-test("domain-skill semantic: a `##` section the consumer does not read is rejected, with the allowed list", () => {
+test("domain-skill semantic: a `##` section the consumer does not read passes — the sections are the author's", () => {
   const doc = skillDoc({ name: "x", markdown: SKILL_MD().replace("## 데이터", "## 데이타") });
-  const errors = validateDocument(doc, refs);
-  assert.equal(errors.length, 1);
-  assert.match(errors[0], /\$\.body\.markdown: 모르는 절입니다 — "## 데이타"/);
-  assert.match(errors[0], /## 한 줄 설명 · ## 언제 호출되는가 · ## 도메인 지식 · ## 데이터/);
+  assert.deepEqual(validateDocument(doc, refs), []);
 });
 
 test("domain-skill semantic: a trailing ? or : on a section title is noise, and `##` inside a fence is not a section", () => {
@@ -601,16 +598,16 @@ function skillEnvelope(markdown, role) {
   };
 }
 
-test("role sub: 도메인 지식 alone is a whole sub skill; without it the doc is rejected", () => {
+test("role sub: with or without 도메인 지식, a sub passes", () => {
   assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 도메인 지식\n\n지식.\n", "sub"), refs), []);
-  const errors = validateDocument(skillEnvelope("# s\n\n## 데이터\n\nx\n", "sub"), refs);
-  assert.ok(errors.some((e) => e.includes('"## 도메인 지식" 절이 있어야')), JSON.stringify(errors));
+  assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 데이터\n\nx\n", "sub"), refs), []);
 });
 
-test("role main (or absent) keeps today's rule: any of the four sections, unknown ones refused", () => {
-  for (const role of ["main", undefined])
+test("role main, sub or absent: any `##` section passes, an unknown one too", () => {
+  for (const role of ["main", "sub", undefined]) {
     assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 데이터\n\nx\n", role), refs), []);
-  assert.ok(validateDocument(skillEnvelope("# s\n\n## 데이타\n\nx\n", "main"), refs).some((e) => e.includes("모르는 절")));
+    assert.deepEqual(validateDocument(skillEnvelope("# s\n\n## 데이타\n\nx\n", role), refs), []);
+  }
 });
 
 test("role is domain-skill's alone, and only main | sub", () => {
@@ -642,13 +639,17 @@ test("domain/v1: the sub rule — 도메인 지식 alone passes, the id is body.
   assert.ok(validateDocument({ ...domainDoc("# k\n\n## 도메인 지식\n\n글\n"), id: "j" }, refs).some((e) => e.includes('expected "k"')));
 });
 
-test("domain/v1: refused with a role, without 도메인 지식, with a verification set or an unknown section", () => {
+test("domain/v1: refused with a role; passes without 도메인 지식, with a verification set or with an unknown section", () => {
   const ok = "# k\n\n## 도메인 지식\n\n글\n";
   assert.ok(validateDocument(domainDoc(ok, { role: "sub" }), refs).some((e) => e.includes("role 은 domain-skill 에만")));
-  assert.ok(validateDocument(domainDoc("# k\n\n## 데이터\n\nx\n"), refs).some((e) => e.includes('도메인 문서에는 "## 도메인 지식" 절이 있어야')));
-  const set = validateDocument(domainDoc(`${ok}\n## 답변 품질 검증 Set\n\n### 일반 지식\n`), refs);
-  assert.ok(set.some((e) => e.includes('"## 답변 품질 검증 Set" 은 main 스킬에만 둡니다')), set.join("\n"));
-  assert.ok(validateDocument(domainDoc(`${ok}\n## 데이타\n\nx\n`), refs).some((e) => e.includes("모르는 절")));
+  assert.deepEqual(validateDocument(domainDoc("# k\n\n## 데이터\n\nx\n"), refs), []);
+  assert.deepEqual(validateDocument(domainDoc(`${ok}\n## 답변 품질 검증 Set\n\n### 일반 지식\n`), refs), []);
+  assert.deepEqual(validateDocument(domainDoc(`${ok}\n## 데이타\n\nx\n`), refs), []);
+});
+
+test("domain/v1: a verification set that is there still has its shape checked", () => {
+  const md = "# k\n\n## 도메인 지식\n\n글\n\n## 답변 품질 검증 Set\n\n### 데이터 설명\n\n#### r\n";
+  assert.ok(validateDocument(domainDoc(md), refs).some((e) => e.includes("```sql 블록이 꼭 하나")));
 });
 
 test("domain/v1: a draft checks the data ids too", () => {
@@ -712,11 +713,17 @@ test("domain-skill: ## 답변 품질 검증 Set is a section a main may have; it
   assert.deepEqual(bad, ['$.body.markdown: 13행 "#### r": 데이터 설명 질문에는 ```sql 블록이 꼭 하나 있어야 합니다 (지금 0개)']);
 });
 
-test("domain-skill: a sub may not have ## 답변 품질 검증 Set", () => {
-  const errors = validateDocument(setSkillDoc("### 일반 지식", { role: "sub" }), refs);
-  assert.ok(errors.some((e) => e.includes('"## 답변 품질 검증 Set" 은 main 스킬에만 둡니다')), errors.join("\n"));
+test("domain-skill: a sub may have ## 답변 품질 검증 Set", () => {
+  assert.deepEqual(validateDocument(setSkillDoc("### 일반 지식", { role: "sub" }), refs), []);
 });
 
 test("domain-skill: a draft skips the verification-set rules like any draft", () => {
   assert.deepEqual(validateForStore(setSkillDoc("### 데이터 설명\n\n#### r", { status: "inactive" }), refs), []);
+});
+
+test("envelope: keywords are optional — absent or [] pass, a malformed keyword is still refused", () => {
+  const { keywords: _k, ...bare } = minimalDbSchemaDoc();
+  assert.deepEqual(validateDocument(bare, refs), []);
+  assert.deepEqual(validateDocument({ ...minimalDbSchemaDoc(), keywords: [] }, refs), []);
+  assert.ok(validateDocument({ ...minimalDbSchemaDoc(), keywords: [{ kw: "X" }] }, refs).length > 0);
 });

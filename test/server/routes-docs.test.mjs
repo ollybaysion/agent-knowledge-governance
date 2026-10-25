@@ -263,7 +263,7 @@ test("DELETE archives a doc (admin only) — dropped from the index, JSON preser
     payload: newDbSchemaDoc(),
   });
 
-  // a user cannot archive
+  // a user cannot delete
   const forbidden = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
@@ -271,19 +271,20 @@ test("DELETE archives a doc (admin only) — dropped from the index, JSON preser
   });
   assert.equal(forbidden.statusCode, 403);
 
+  const { rev } = (await app.inject({ method: "GET", url: "/api/docs/db-schema/x", headers: auth("aptok") })).json();
   const del = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
-    headers: auth("aptok"),
+    headers: { ...auth("aptok"), "if-match": rev },
   });
-  assert.equal(del.statusCode, 200);
+  assert.equal(del.statusCode, 200, del.body);
 
   const after = await app.inject({
     method: "GET",
     url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
-  assert.equal(after.json().json.status, "archived"); // JSON preserved, just archived
+  assert.equal(after.statusCode, 404); // the file is gone; git history keeps it
 
   // a genuinely unknown route returns a clean 404, never a 500 route_misconfigured
   const unknown = await app.inject({
@@ -446,7 +447,7 @@ test("links: forward edges land in the list, the index and the read; the target 
   }
 });
 
-test("links: archiving either end keeps the edge and reports the archived status", async () => {
+test("links: an archived end keeps the edge and reports the archived status", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", group: "admin", token: "aptok" },
   ]);
@@ -455,20 +456,15 @@ test("links: archiving either end keeps the edge and reports the archived status
       method: "POST",
       url: "/api/docs/screen-map",
       headers: auth("aptok"),
-      payload: screenMapDoc("spc-chart-config"),
+      payload: { ...screenMapDoc("spc-chart-config"), status: "archived" },
     });
     await app.inject({
       method: "POST",
       url: "/api/docs/db-schema",
       headers: auth("aptok"),
-      payload: newDbSchemaDoc({ links: [link("screen-map", "spc-chart-config")] }),
+      payload: newDbSchemaDoc({ status: "archived", links: [link("screen-map", "spc-chart-config")] }),
     });
 
-    await app.inject({
-      method: "DELETE",
-      url: "/api/docs/screen-map/spc-chart-config",
-      headers: auth("aptok"),
-    });
     const from = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/db-schema/x" });
     assert.equal(from.json().links[0].status, "archived");
     assert.deepEqual(from.json().json.links, [link("screen-map", "spc-chart-config")]);
@@ -486,7 +482,6 @@ test("links: archiving either end keeps the edge and reports the archived status
     });
     assert.equal(again.statusCode, 201, again.body);
 
-    await app.inject({ method: "DELETE", url: "/api/docs/db-schema/x", headers: auth("aptok") });
     const to = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
     assert.deepEqual(
       to.json().backlinks.map((b) => `${b.id}:${b.status}`).sort(),
@@ -806,14 +801,14 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
       method: "POST",
       url: "/api/docs/domain-skill",
       headers: h,
-      payload: skill("bad", "# bad\n\n## 데이터\n\nx\n", { role: "sub" }),
+      payload: skill("j", "# j\n\n## 데이터\n\nx\n", { role: "sub" }),
     });
-    assert.equal(noKnowledge.statusCode, 400);
+    assert.equal(noKnowledge.statusCode, 201, "a sub without ## 도메인 지식 is stored too");
 
     const list = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs?type=domain-skill" })).json().docs;
     assert.deepEqual(
       list.map((d) => [d.id, d.role]).sort(),
-      [["k", "sub"], ["m", "main"]],
+      [["j", "sub"], ["k", "sub"], ["m", "main"]],
     );
 
     const url = "/api/docs/domain-skill/m/role";
@@ -823,9 +818,9 @@ test("role: the domain-skill list carries role (absent = main); PUT role changes
       (await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "x" } })).statusCode,
       400,
     );
-    // m has no 도메인 지식, so it cannot become a sub.
+    // m has no 도메인 지식 and becomes a sub all the same.
     const toSub = await app.inject({ method: "PUT", url, headers: { ...h, "if-match": rev }, payload: { role: "sub" } });
-    assert.equal(toSub.statusCode, 400);
+    assert.equal(toSub.statusCode, 200, toSub.body);
 
     const kRev = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/k" })).json().rev;
     const toMain = await app.inject({
@@ -918,6 +913,50 @@ test("verification set: a skill save names unknown 정답 paths as warnings and 
     const got = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     assert.deepEqual(got.warnings, ok.json().warnings);
     assert.deepEqual(got.backlinks, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("keywords are optional: a doc without them saves, lists with [] and stays out of the index", async () => {
+  const { app, home, cleanup } = await setup([{ id: "renoir", group: "admin", token: "aptok" }]);
+  try {
+    const { keywords: _k, ...bare } = newDbSchemaDoc();
+    const created = await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: auth("aptok"), payload: bare });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal("keywords" in created.json().json, false);
+    const y = { ...newDbSchemaDoc({ id: "y", body: { ...newDbSchemaDoc().body, table: "Y" } }), keywords: [] };
+    assert.equal((await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: auth("aptok"), payload: y })).statusCode, 201);
+
+    const list = (await app.inject({ method: "GET", url: "/api/docs?type=db-schema", headers: as("reader") })).json().docs;
+    assert.deepEqual(list.map((d) => [d.id, d.keywords]), [["x", []], ["y", []]]);
+    assert.deepEqual(JSON.parse(readFileSync(join(home, "store", "rendered/db-schema/index.json"), "utf8")), []);
+    assert.ok(existsSync(join(home, "store", "rendered/db-schema/docs/x.md")));
+
+    const skill = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: auth("aptok"),
+      payload: { schema: "domain-skill/v1", id: "s", status: "active", body: { name: "s", markdown: "# s\n\n## 데이터\n\n### row — 행\n\n```sql\nSELECT 1 FROM t\n```\n" } },
+    });
+    assert.equal(skill.statusCode, 201, skill.body);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a skill md with a `##` section the BE does not read saves active, and the md keeps the section", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "aptok" }]);
+  try {
+    const md = "# s\n\n## 도메인 지식\n\n글\n\n## 참고 메모\n\n메모\n";
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: auth("aptok"),
+      payload: { schema: "domain-skill/v1", id: "s", keywords: [{ kw: "s", inject: "full" }], status: "active", body: { name: "s", markdown: md } },
+    });
+    assert.equal(r.statusCode, 201, r.body);
+    assert.equal(r.json().json.body.markdown, md);
   } finally {
     await cleanup();
   }

@@ -35,6 +35,11 @@ export function docRows(docs, type) {
     .sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")) || a.id.localeCompare(b.id));
 }
 
+/** The confirm text of 삭제: the title, the type and how many documents point here. */
+export function deleteConfirmText(title, typeName, backlinks) {
+  return `"${title}"(${typeName}) 을 삭제합니다. 저장소에서 파일이 지워지고 git 이력에만 남습니다. 이 문서를 가리키는 문서 ${backlinks}개의 연결을 함께 지웁니다.`;
+}
+
 /** The tier a row shows: 추정 while any slot waits, else 확정, else 빈칸; null without slots. */
 export function rowTier(tiers) {
   if (!tiers) return null;

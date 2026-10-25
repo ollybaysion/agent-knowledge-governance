@@ -15,10 +15,11 @@ export function compileIndex(docs) {
   const entries = [];
   for (const doc of docs) {
     if (doc.status !== "active") continue;
-    const full = doc.keywords
+    const keywords = doc.keywords ?? [];
+    const full = keywords
       .filter((k) => k.inject === "full")
       .map((k) => k.kw);
-    const pointer = doc.keywords
+    const pointer = keywords
       .filter((k) => k.inject === "pointer")
       .map((k) => k.kw);
     const path = `docs/${doc.id}.md`;
@@ -59,8 +60,9 @@ export function docWrites(storeDir, type, doc) {
 /**
  * docWrites for several docs of one type in one commit: the index is compiled
  * once, from the store with every one of `docs` in place of its stored copy.
+ * `drop` = the id of a doc the same commit deletes: the index leaves it out.
  */
-export function docsWrites(storeDir, type, docs) {
+export function docsWrites(storeDir, type, docs, { drop = null } = {}) {
   const md = isMdType(storeDir, type);
   const writes = [];
   const removes = [];
@@ -85,6 +87,7 @@ export function docsWrites(storeDir, type, docs) {
   if (INDEXED_TYPES.has(type)) {
     const changed = new Map(docs.map((d) => [d.id, d]));
     const allDocs = listIds(storeDir, type)
+      .filter((id) => id !== drop)
       .map((id) => changed.get(id) ?? readJson(storeDir, `${type}/${id}.json`))
       .filter(Boolean);
     for (const d of docs) if (!allDocs.includes(d)) allDocs.push(d);

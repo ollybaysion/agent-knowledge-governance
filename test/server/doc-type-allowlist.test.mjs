@@ -89,7 +89,7 @@ test("a document type still answers GET and DELETE", async () => {
   const { app, cleanup } = await setup();
   const get = await app.inject({ method: "GET", url: "/api/docs/domain-skill/s", headers: auth("aptok") });
   assert.equal(get.statusCode, 200);
-  const del = await app.inject({ method: "DELETE", url: "/api/docs/domain-skill/s", headers: auth("aptok") });
+  const del = await app.inject({ method: "DELETE", url: "/api/docs/domain-skill/s", headers: { ...auth("aptok"), "if-match": get.json().rev } });
   assert.equal(del.statusCode, 200, del.body);
   await cleanup();
 });

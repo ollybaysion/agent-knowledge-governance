@@ -1,5 +1,5 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 전체 편집), then the body as
+// id · rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
@@ -25,6 +25,9 @@ import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
 import { pathPanel, typeLabel } from "./docs.mjs";
+import { deleteDraftsOf } from "../drafts.mjs";
+import { refreshReviewCount } from "../review-count.mjs";
+import { deleteConfirmText } from "/lib/miller.mjs";
 import { openLinksDialog } from "../links-edit.mjs";
 import { touch } from "../shelf.mjs";
 
@@ -206,6 +209,9 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     admin && doc.status !== "archived"
       ? el("button", { type: "button", class: "chip ghostchip", text: doc.origin ? "원본 고치기" : "원본 넣기", onclick: () => originForm(ctx, metaRow) })
       : null,
+    admin
+      ? el("button", { type: "button", class: "chip ghostchip delchip", text: "삭제", title: "저장소에서 이 문서 파일을 지웁니다. git 이력에만 남습니다.", onclick: () => deleteDoc(ctx, title, isAgent) })
+      : null,
     ...keywordChips((doc.keywords || []).filter((k) => k.kw !== doc.id)),
   ];
   const fullEdit =
@@ -237,6 +243,22 @@ function stickyHead(head) {
   if (!h1 || !bar || typeof IntersectionObserver === "undefined") return;
   const offset = embed ? 44 : 110;
   new IntersectionObserver(([e]) => bar.classList.toggle("stuck", !e.isIntersecting), { rootMargin: `-${offset}px 0px 0px 0px` }).observe(h1);
+}
+
+/** DELETE with If-Match after a confirm, then the type's list (an agent: the 에이전트 tab). */
+async function deleteDoc(ctx, title, isAgent) {
+  const { type, doc, data } = ctx;
+  if (!confirm(deleteConfirmText(title, isAgent ? "에이전트" : typeLabel(type), (data.backlinks || []).length))) return;
+  const r = await api(`/api/docs/${type}/${enc(doc.id)}`, { method: "DELETE", headers: { "if-match": ctx.rev } });
+  if (!r.ok) {
+    toast(r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 먼저 다시 읽기를 하세요." : `삭제 실패 (${r.status})`, "error");
+    return;
+  }
+  deleteDraftsOf(type, doc.id);
+  toast("삭제했습니다");
+  invalidateDocs();
+  refreshReviewCount();
+  location.hash = isAgent ? "#/agents" : `#/docs/${type}`;
 }
 
 /** POST …/retype to `to` with If-Match, then open the moved document. */

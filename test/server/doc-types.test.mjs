@@ -92,9 +92,10 @@ test("GET /api/types: a user reads the default list — code types, voc, unclass
     assert.equal((await t.admin("POST", "/api/docs/db-schema", dbSchemaDoc())).statusCode, 201);
     const counted = (await t.call("reader", "GET", "/api/types")).json().types;
     assert.equal(counted.find((x) => x.id === "db-schema").count, 1);
-    assert.equal((await t.admin("DELETE", "/api/docs/db-schema/x")).statusCode, 200);
-    const archived = (await t.user("GET", "/api/types")).json().types;
-    assert.equal(archived.find((x) => x.id === "db-schema").count, 0, "an archived doc is not counted");
+    const { rev } = (await t.admin("GET", "/api/docs/db-schema/x")).json();
+    assert.equal((await t.admin("DELETE", "/api/docs/db-schema/x", undefined, { "if-match": rev })).statusCode, 200);
+    const deleted = (await t.user("GET", "/api/types")).json().types;
+    assert.equal(deleted.find((x) => x.id === "db-schema").count, 0, "a deleted doc is not counted");
     assert.equal(existsSync(t.file("types.json")), false, "reading writes nothing");
   } finally {
     await t.cleanup();

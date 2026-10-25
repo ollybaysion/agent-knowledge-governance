@@ -56,6 +56,14 @@ export function deleteDraft(localId) {
   delete all[localId];
   saveDrafts(all);
 }
+// A deleted document's drafts: the ones of its type whose id would be its id.
+export function deleteDraftsOf(type, id) {
+  const all = loadDrafts();
+  const mine = Object.keys(all).filter((k) => all[k].type === type && deriveDraftId(type, all[k].body ?? {}) === id);
+  if (!mine.length) return;
+  for (const k of mine) delete all[k];
+  saveDrafts(all);
+}
 // 한 타입의 드래프트 목록(생성 순서 = localId 숫자 순서)
 export function draftsOfType(type) {
   return Object.entries(loadDrafts())
@@ -495,7 +503,7 @@ export function draftDomainSkill(body, persist) {
     ),
   );
   wrap.append(
-    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. 절 제목은 다섯만 허용되고(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · ## 답변 품질 검증 Set), 모르는 ## 절은 저장이 거절됩니다. 활성화하려면 본문이 있어야 합니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. BE 가 읽는 절은 다섯입니다(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터 · ## 답변 품질 검증 Set). 다른 ## 절이 있는 문서는 BE 가 오류로 건너뜁니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }
@@ -514,7 +522,7 @@ export function draftDomain(body, persist) {
         onChange: persist,
       }),
     ),
-    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. ## 도메인 지식 절이 있어야 하고, 절 제목은 넷만 허용됩니다(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터). ## 도메인 지식 아래 ### 소제목마다 BE 가 조각 하나로 읽습니다." }),
+    el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. BE 가 읽는 절은 넷입니다(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터). 다른 ## 절이 있는 문서는 BE 가 오류로 건너뜁니다. ## 도메인 지식 아래 ### 소제목마다 BE 가 조각 하나로 읽습니다." }),
   );
   return wrap;
 }

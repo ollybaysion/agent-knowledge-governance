@@ -36,8 +36,14 @@ test("절 저장 changes one section and leaves the others as saved", () => {
   assert.deepEqual(changedKeys(split.blocks, again.blocks), ["도메인 지식"]);
 });
 
-test("a skill md with an unknown ## section is refused, as the server refuses it", () => {
-  assert.throws(() => splitBlocks("# s\n\n## 모르는 절\n\n글\n", opts), skill.SkillSplitError);
+test("a skill md with an unknown ## section: the skill split refuses it, the every-## split keeps it through 절 저장", () => {
+  const md = "# s\n\n## 도메인 지식\n\n글\n\n## 모르는 절\n\n메모\n";
+  assert.throws(() => splitBlocks(md, opts), skill.SkillSplitError);
+  const split = splitBlocks(md, { skill });
+  assert.equal(split.mode, "plain");
+  assert.deepEqual(split.blocks.map((b) => b.key), ["도메인 지식", "모르는 절"]);
+  assert.equal(joinBlocks(split), md);
+  assert.equal(withBlock(split, "도메인 지식", "고친 글"), "# s\n\n## 도메인 지식\n\n고친 글\n\n## 모르는 절\n\n메모\n");
 });
 
 test("an md of another type splits on every ## and joins back byte for byte", () => {

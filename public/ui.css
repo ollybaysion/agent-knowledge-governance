@@ -1216,6 +1216,9 @@ a.chip:hover {
 .offbar {
   margin: 10px 0 0;
 }
+.chip.delchip {
+  color: var(--error-ink);
+}
 .json-sec {
   margin: 12px 0;
   border: 1px solid var(--hairline);

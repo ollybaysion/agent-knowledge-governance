@@ -104,11 +104,11 @@ test("POST: a malformed or repeated id is 400 validation_failed, for a draft too
   }
 });
 
-test("POST: an archived skill's ids are free again", async () => {
+test("POST: a deleted skill's ids are free again", async () => {
   const { app, cleanup } = await setup();
   try {
-    assert.equal((await post(app, skill("a", ["snsr_id"]))).statusCode, 201);
-    const del = await app.inject({ method: "DELETE", url: "/api/docs/domain-skill/a", headers: auth("aptok") });
+    const { rev } = (await post(app, skill("a", ["snsr_id"]))).json();
+    const del = await app.inject({ method: "DELETE", url: "/api/docs/domain-skill/a", headers: { ...auth("aptok"), "if-match": rev } });
     assert.equal(del.statusCode, 200, del.body);
     assert.equal((await post(app, skill("b", ["snsr_id"]))).statusCode, 201);
   } finally {
