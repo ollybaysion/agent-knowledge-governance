@@ -28,6 +28,18 @@ export function answerIdOf(url) {
   return /\bm_[0-9a-z]+\b/i.exec(String(url ?? ""))?.[0] ?? null;
 }
 
+/**
+ * What the embedded page (FE's drawer) posts to its parent on a key: Escape
+ * with no dialog or popup open → { message: {type: "akg:close"}, targetOrigin:
+ * the FE origin }. Null otherwise, and null without an FE address (the
+ * message is never sent to "*").
+ */
+export function embedCloseMessage({ embed, feUrl, key, popupOpen }) {
+  if (!embed || key !== "Escape" || popupOpen) return null;
+  const fe = typeof feUrl === "string" ? parse(feUrl) : null;
+  return fe ? { message: { type: "akg:close" }, targetOrigin: fe.origin } : null;
+}
+
 /** The answers list with `entry` first, the same address once, at most `cap`. */
 export function pushRecentAnswer(list, entry, cap = 5) {
   const rest = (Array.isArray(list) ? list : []).filter((x) => x && x.url !== entry.url);

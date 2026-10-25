@@ -3,7 +3,7 @@
 // search · who · 로그아웃) and the body columns. ?embed=1 draws none of it:
 // only the body column, for FE's drawer.
 import { $, el, icon } from "./dom.mjs";
-import { acceptFrom, pushRecentAnswer } from "/lib/from-url.mjs";
+import { acceptFrom, embedCloseMessage, pushRecentAnswer } from "/lib/from-url.mjs";
 import {
   THEME_KEY,
   answerId,
@@ -218,6 +218,12 @@ export function mountShell() {
   document.body.classList.toggle("embed", embed);
   if (embed) {
     app.replaceChildren(el("div", { class: "body", id: "body" }));
+    // Escape closes FE's drawer, once a dialog or menu has had its turn.
+    document.addEventListener("keydown", (e) => {
+      const popupOpen = e.defaultPrevented || !!document.querySelector("dialog[open], [role=menu]");
+      const out = embedCloseMessage({ embed, feUrl, key: e.key, popupOpen });
+      if (out && window.parent !== window) window.parent.postMessage(out.message, out.targetOrigin);
+    });
   } else {
     app.replaceChildren(
       el("a", { class: "skip", href: "#body", text: "본문으로 건너뛰기", onclick: (e) => { e.preventDefault(); $("body").focus(); } }),
