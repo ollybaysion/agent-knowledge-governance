@@ -3,58 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>지식 레지스트리</title>
+    <title>지식</title>
     <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="/ui.css" />
   </head>
   <body>
-    <header hidden id="topbar">
-      <button
-        type="button"
-        id="side-toggle"
-        aria-label="문서 트리 접기/펼치기"
-        aria-pressed="false"
-      >
-        ☰
-      </button>
-      <div class="wordmark">지식 레지스트리</div>
-      <nav aria-label="화면">
-        <button type="button" class="on" data-go="corpus">개요</button>
-        <button type="button" data-go="doc">문서</button>
-        <button type="button" data-go="graph">그래프</button>
-        <button type="button" data-go="queue">
-          검토 대기열 <span class="n" id="queue-count"></span>
-        </button>
-        <button type="button" data-go="audit">감사</button>
-      </nav>
-      <div id="meta">
-        <span id="meta-store"></span>
-        <button type="button" id="theme-toggle">다크 모드</button>
-      </div>
-    </header>
-
     <section hidden id="gate">
-      <h1>지식 레지스트리</h1>
+      <h1>지식</h1>
       <p id="gate-msg"></p>
     </section>
 
-    <div class="layout" hidden id="app-layout">
-      <aside aria-label="문서 트리" class="sidebar">
-        <div id="doc-search">
-          <input
-            id="search-input"
-            type="search"
-            placeholder="문서 찾기 — id · 키워드 · 제목"
-            aria-label="문서 찾기"
-            autocomplete="off"
-          />
-        </div>
-        <div id="search-results" hidden></div>
-        <div id="doc-tree"></div>
-        <div id="tree-actions"></div>
-      </aside>
-      <main>
-        <!-- 개요 -->
-        <section id="corpus" class="on">
+    <div id="app" class="app" hidden></div>
+
+    <template id="tpl-overview">
           <div class="intro-band">
             <div class="intro-copy">
               <h2 class="intro-title">지식 레지스트리</h2>
@@ -86,15 +47,8 @@
                   <p class="intro-sub">검토·승격은 슬롯 단위 (스킬만 문서 단위).</p>
                 </div>
                 <div class="intro-sec">
-                  <span class="intro-lbl">문서 종류</span>
-                  <table class="type-tbl">
-                    <tbody>
-                      <tr><td class="tt-k">db-schema</td><td>테이블 · 컬럼</td></tr>
-                      <tr><td class="tt-k">msg-format</td><td>설비 커맨드</td></tr>
-                      <tr><td class="tt-k">domain-doc</td><td>도메인 용어</td></tr>
-                      <tr><td class="tt-k">domain-skill</td><td>스킬 문서(md)</td></tr>
-                    </tbody>
-                  </table>
+                  <span class="intro-lbl">문서 종류 · 타입 관리 순서</span>
+                  <table class="type-tbl"><tbody id="ov-types"></tbody></table>
                 </div>
               </div>
 
@@ -109,7 +63,7 @@
                   <li>확정된 지식이 모든 CC 세션 프롬프트에 <b>주입</b></li>
                 </ol>
                 <p class="intro-sub">
-                  왼쪽 트리로 문서 탐색 · 개요로 검토 현황 · 검토 대기열에서 승격.
+                  문서 탭에서 탐색 · 개요에서 검토 현황 · 검토 탭에서 승격.
                 </p>
               </div>
             </div>
@@ -176,27 +130,10 @@
           <div class="stats" id="ov-stats"></div>
           <div class="typechips" id="ov-typechips" role="group" aria-label="타입 필터"></div>
           <div class="tbl-wrap" id="ov-table"></div>
-        </section>
-
-        <!-- 문서 -->
-        <section id="doc"></section>
-
-        <!-- 새 문서 드래프트 (저장 전, 로컬) -->
-        <section id="draft"></section>
-
-        <!-- 그래프 -->
-        <section id="graph"></section>
-
-        <!-- 검토 대기열 -->
-        <section id="queue"></section>
-
-        <!-- 감사 -->
-        <section id="audit"></section>
-      </main>
-    </div>
+        </template>
 
     <div id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/app.js"></script>
+    <script type="module" src="/js/main.mjs"></script>
   </body>
 </html>

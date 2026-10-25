@@ -105,7 +105,7 @@ export function assertClean(dir) {
 // S10: rev(=해당 경로 최종 커밋 해시)는 매 요청마다 `git log -1`을 부르면 이력
 // 성장과 함께 느려진다. 쓰기 직후엔 커밋 해시를 이미 알고 있으니 캐시에 채워
 // 넣고, 콜드 리드(서버 기동 직후 아직 캐시에 없는 경로)만 한 번 계산해 캐시한다.
-const revCaches = new Map(); // dir -> Map<relpath, rev>
+const revCaches = new Map(); // dir -> Map<relpath, {rev, at}>
 
 function cacheFor(dir) {
   let c = revCaches.get(dir);
@@ -125,13 +125,23 @@ function isIndexEmpty(dir) {
   }
 }
 
-export function revOfPath(dir, relpath) {
+// The last commit that touched a path: its rev and author time, cached together.
+function lastCommitOf(dir, relpath) {
   const cache = cacheFor(dir);
   if (cache.has(relpath)) return cache.get(relpath);
-  const out = git(dir, ["log", "-1", "--format=%H", "--", relpath]).trim();
-  const rev = out || null;
-  cache.set(relpath, rev);
-  return rev;
+  const [rev, at] = git(dir, ["log", "-1", "--format=%H%x1f%aI", "--", relpath]).trim().split("\x1f");
+  const entry = { rev: rev || null, at: rev ? at : null };
+  cache.set(relpath, entry);
+  return entry;
+}
+
+export function revOfPath(dir, relpath) {
+  return lastCommitOf(dir, relpath).rev;
+}
+
+/** When the path last changed (ISO 8601, the commit's author time), or null. */
+export function changedAtOfPath(dir, relpath) {
+  return lastCommitOf(dir, relpath).at;
 }
 
 function invalidateCache(dir) {
@@ -266,16 +276,16 @@ export function commitFiles(
     rollback(dir, touched, created);
     throw err;
   }
-  const rev = git(dir, ["rev-parse", "HEAD"]).trim();
+  const [rev, at] = git(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]).trim().split("\x1f");
 
   const cache = cacheFor(dir);
   for (const relpath of touched) {
-    cache.set(relpath, rev);
+    cache.set(relpath, { rev, at });
     // The directories above too: revOfPath(dir, "domain-skill") is "the last
     // commit under this directory", and a cache that learned only file paths
     // kept answering with its first cold read.
     for (let d = dirname(relpath); d !== "." && d !== "/"; d = dirname(d))
-      cache.set(d, rev);
+      cache.set(d, { rev, at });
   }
   return rev;
 }

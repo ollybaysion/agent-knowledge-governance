@@ -17,6 +17,7 @@ import {
   readJson,
   readText,
   revOfPath,
+  changedAtOfPath,
   readJsonAtRev,
   listIds,
   commitFiles,
@@ -71,6 +72,22 @@ function titleOf(doc) {
   return b.title ?? b.name ?? b.table ?? b.command ?? null;
 }
 
+// X-AKG-Note: what the editor saved ("절 저장: 도메인 지식"), URI-encoded since a
+// header carries no Hangul. One line, no control characters, 80 characters at
+// most; anything else is dropped.
+export function commitNote(raw) {
+  if (typeof raw !== "string" || raw === "") return null;
+  let text;
+  try {
+    text = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  text = text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
 function priorityOf(user) {
   return user.group === "agent" ? "agent" : "human";
 }
@@ -111,6 +128,11 @@ export function registerDocsRoutes(app) {
       : null;
   };
 
+  const wikilinksOf = (type, doc, typeIds) => {
+    const wikilinks = resolveWikilinks(storeDir, typeIds, type, doc).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
+    return wikilinks.length ? { wikilinks } : {};
+  };
+
   // GET /api/docs/:type/:id's JSON answer.
   const docView = (type, id, doc, rev) => {
     const bodySchema = types.bodySchema(type);
@@ -139,6 +161,7 @@ export function registerDocsRoutes(app) {
     async (request) => {
       const { type, tier, q } = request.query ?? {};
       const docs = [];
+      const typeIds = types.ids();
       for (const t of type ? [type] : types.ids()) {
         const bodySchema = types.bodySchema(t);
         if (!bodySchema) continue;
@@ -160,6 +183,10 @@ export function registerDocsRoutes(app) {
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
+            updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
+            // The body's [[ ]] with where each points: the graph draws them
+            // thin and the unresolved ones as 끊긴 연결.
+            ...wikilinksOf(t, doc, typeIds),
           });
         }
       }
@@ -498,9 +525,10 @@ export function registerDocsRoutes(app) {
           const conflict = dataIdConflict(newDoc);
           if (conflict) return conflict;
 
+          const note = commitNote(request.headers["x-akg-note"]);
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
-            message: `edit ${type}/${id}`,
+            message: note ? `edit ${type}/${id} · ${note}` : `edit ${type}/${id}`,
           });
           return {
             status: 200,

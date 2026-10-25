@@ -1,6 +1,7 @@
-// Serves the static dashboard (design §D7: bundle-free vanilla JS, JS split
-// into /app.js per the strict-CSP `script-src 'self'` regime app.mjs sets).
-import { readFileSync } from "node:fs";
+// Serves the static dashboard (design §D7: bundle-free vanilla JS as ES
+// modules, under the strict-CSP `script-src 'self'` regime app.mjs sets).
+// Every route here is a public GET; nothing writes.
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,50 +9,51 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "..", "public");
 const SRC_DIR = join(__dirname, "..", "..", "src");
 
+const JS = "text/javascript; charset=utf-8";
+
 const FILES = {
   "/": { path: "index.html", type: "text/html; charset=utf-8" },
-  "/app.js": { path: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { path: "app.css", type: "text/css; charset=utf-8" },
-  // The validator's own section splitter, so the editor splits where the
-  // server checks. Served from src/ rather than copied into public/.
-  "/skill-sections.mjs": {
-    dir: SRC_DIR,
-    path: "skill-sections.mjs",
-    type: "text/javascript; charset=utf-8",
-  },
-  // The verification-set reader, for the skill screen's template and counts.
-  "/verify-set.mjs": {
-    dir: SRC_DIR,
-    path: "verify-set.mjs",
-    type: "text/javascript; charset=utf-8",
-  },
-  // The consumer's bind rules, so a filled 정답 SQL is the statement it runs.
-  "/sql-bind.mjs": {
-    dir: SRC_DIR,
-    path: "sql-bind.mjs",
-    type: "text/javascript; charset=utf-8",
-  },
-  // The 그래프 screen's nodes, columns and reach — tested with node, run as is.
-  "/graph-model.mjs": {
-    dir: SRC_DIR,
-    path: "graph-model.mjs",
-    type: "text/javascript; charset=utf-8",
-  },
-  "/search.mjs": { path: "search.mjs", type: "text/javascript; charset=utf-8" },
-  // The server's own [[ ]] parser, so the page reads the brackets the way the
-  // links were made. Served from src/ rather than copied into public/.
-  "/wikilinks.mjs": {
-    dir: SRC_DIR,
-    path: "wikilinks.mjs",
-    type: "text/javascript; charset=utf-8",
-  },
+  "/ui.css": { path: "ui.css", type: "text/css; charset=utf-8" },
 };
 
+// The server's own modules the page runs as they are, so the page splits,
+// links and draws exactly as the server checks: /lib/shared/<name>.mjs.
+export const SHARED_MODULES = new Set([
+  "skill-sections.mjs",
+  "verify-set.mjs",
+  "sql-bind.mjs",
+  "graph-model.mjs",
+  "wikilinks.mjs",
+]);
+
+// A module path below /js/ or /lib/: lower-case words, one level of folder.
+const MODULE_PATH = /^(?:[a-z0-9-]+\/)?[a-z0-9-]+\.mjs$/;
+
+function sendModule(reply, dir, rel) {
+  if (!MODULE_PATH.test(rel)) return reply.code(404).send({ error: "not_found" });
+  const file = join(dir, rel);
+  if (!existsSync(file)) return reply.code(404).send({ error: "not_found" });
+  reply.type(JS);
+  return reply.send(readFileSync(file, "utf8"));
+}
+
 export function registerDashboardRoutes(app) {
-  for (const [route, { dir = PUBLIC_DIR, path, type }] of Object.entries(FILES)) {
+  for (const [route, { path, type }] of Object.entries(FILES)) {
     app.get(route, { config: { public: true } }, async (request, reply) => {
       reply.type(type);
-      return reply.send(readFileSync(join(dir, path), "utf8"));
+      return reply.send(readFileSync(join(PUBLIC_DIR, path), "utf8"));
     });
   }
+  app.get("/js/*", { config: { public: true } }, async (request, reply) =>
+    sendModule(reply, join(PUBLIC_DIR, "js"), request.params["*"]),
+  );
+  app.get("/lib/shared/:file", { config: { public: true } }, async (request, reply) => {
+    const { file } = request.params;
+    if (!SHARED_MODULES.has(file)) return reply.code(404).send({ error: "not_found" });
+    return sendModule(reply, SRC_DIR, file);
+  });
+  app.get("/lib/*", { config: { public: true } }, async (request, reply) =>
+    sendModule(reply, join(PUBLIC_DIR, "lib"), request.params["*"]),
+  );
 }

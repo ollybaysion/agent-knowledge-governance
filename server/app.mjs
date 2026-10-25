@@ -43,6 +43,17 @@ function sameToken(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** 'self' plus the FE origin, when the FE address is a URL. */
+export function frameAncestors(feUrl) {
+  try {
+    const { origin, protocol } = new URL(feUrl);
+    if (protocol === "http:" || protocol === "https:") return `'self' ${origin}`;
+  } catch {
+    /* not a URL: only this origin may frame the page */
+  }
+  return "'self'";
+}
+
 /**
  * @param {{storeDir: string, auth: Parameters<typeof openAuth>[0], schemasDir?: string}} opts
  * @returns {Promise<import("fastify").FastifyInstance>}
@@ -73,11 +84,11 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   app.addHook("onClose", () => auth.close());
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
+  // frame-ancestors: the page opens inside FE's drawer (?embed=1), and
+  // nowhere else.
+  const csp = `default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors ${frameAncestors(auth.feUrl)}`;
   app.addHook("onSend", async (request, reply, payload) => {
-    reply.header(
-      "content-security-policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'",
-    );
+    reply.header("content-security-policy", csp);
     reply.header("x-content-type-options", "nosniff");
     return payload;
   });
