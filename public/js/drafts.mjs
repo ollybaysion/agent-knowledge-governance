@@ -56,6 +56,14 @@ export function deleteDraft(localId) {
   delete all[localId];
   saveDrafts(all);
 }
+// A deleted document's drafts: the ones of its type whose id would be its id.
+export function deleteDraftsOf(type, id) {
+  const all = loadDrafts();
+  const mine = Object.keys(all).filter((k) => all[k].type === type && deriveDraftId(type, all[k].body ?? {}) === id);
+  if (!mine.length) return;
+  for (const k of mine) delete all[k];
+  saveDrafts(all);
+}
 // 한 타입의 드래프트 목록(생성 순서 = localId 숫자 순서)
 export function draftsOfType(type) {
   return Object.entries(loadDrafts())

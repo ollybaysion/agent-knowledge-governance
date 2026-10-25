@@ -26,11 +26,10 @@ import {
 } from "../store.mjs";
 import {
   persistDoc,
-  archiveDoc,
   renderDocMd,
   docsWrites,
 } from "../render-store.mjs";
-import { docMdPath } from "../../src/render/index.mjs";
+import { docMdPath, rendersToMd } from "../../src/render/index.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
 import { mergeFacts } from "../facts.mjs";
@@ -41,6 +40,7 @@ import {
   missingLinkTargets,
   resolveLinks,
   resolveWikilinks,
+  withLinks,
 } from "../links.mjs";
 import { dataIdOwners } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
@@ -1099,26 +1099,66 @@ export function registerDocsRoutes(app) {
     },
   );
 
-  // §6 DELETE — soft archive (status: archived): dropped from the compiled
-  // injection index, but the JSON + git history are preserved.
+  // §6 DELETE — the file leaves the store; git history keeps it. One commit:
+  // the JSON, its rendered md, the index, the links[] entries other documents
+  // hold to it and, for a main agent, its score record. A [[ ]] in another
+  // body stays as text: the graph shows it as 끊긴 연결.
   app.delete(
     "/api/docs/:type/:id",
     { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { type, id } = request.params;
-      // Same allowlist as PUT: archiving score/<agent>.json turned its array
-      // into an object that no later POST /api/score could read.
+      // Same allowlist as PUT: score/<agent>.json and assets/ are not documents.
       if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
       const result = await queue.enqueue(
         async () => {
           const relpath = `${type}/${id}.json`;
           const doc = readJson(storeDir, relpath);
           if (!doc) return { status: 404, body: { error: "not_found" } };
-          const rev = archiveDoc(storeDir, type, doc, {
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
+
+          const md = types.isMd(type);
+          const writes = [];
+          const removes = [relpath];
+          if (rendersToMd(type, doc, { md })) removes.push(docMdPath(type, doc, { md }));
+          if (type === "domain-skill" && (doc.role ?? "main") === "main") removes.push(`score/${id}.json`);
+
+          const pointsHere = (l) => l.type === type && l.id === id;
+          const unlinked = [];
+          let ownTypeDone = false;
+          for (const t of types.ids()) {
+            const changed = [];
+            for (const sid of listIds(storeDir, t)) {
+              if (t === type && sid === id) continue;
+              const d = readJson(storeDir, `${t}/${sid}.json`);
+              if (!d?.links?.some(pointsHere)) continue;
+              changed.push(withLinks(d, d.links.filter((l) => !pointsHere(l))));
+              unlinked.push({ type: t, id: sid });
+            }
+            if (!changed.length && t !== type) continue;
+            const w = docsWrites(storeDir, t, changed, { drop: t === type ? id : null });
+            writes.push(...w.writes);
+            removes.push(...w.removes);
+            if (t === type) ownTypeDone = true;
+          }
+          // A type the type list no longer names still drops the doc from its index.
+          if (!ownTypeDone) {
+            const w = docsWrites(storeDir, type, [], { drop: id });
+            writes.push(...w.writes);
+            removes.push(...w.removes);
+          }
+
+          const rev = commitFiles(storeDir, {
             author: request.user.id,
-            message: `archive ${type}/${id}`,
+            message: `delete ${type}/${id}`,
+            writes,
+            removes,
           });
-          return { status: 200, body: { rev } };
+          return { status: 200, body: { rev, unlinked } };
         },
         { priority: priorityOf(request.user) },
       );

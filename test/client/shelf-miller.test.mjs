@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { FAVORITE_CAP, RECENT_CAP, isFavorite, liveShelf, readShelf, toggleFavorite, touchRecent, writeShelf } from "../../public/lib/shelf.mjs";
-import { docRows, move, rowTier, typeRows } from "../../public/lib/miller.mjs";
+import { deleteConfirmText, docRows, move, rowTier, typeRows } from "../../public/lib/miller.mjs";
 
 function memory() {
   const m = new Map();
@@ -107,4 +107,11 @@ test("↩ on a 즐겨찾기 · 최근 row picks that document", () => {
   const sizes = { n1: 3, n2: () => 0, isDocRow: (i) => i < 2 };
   assert.equal(move({ col: 1, i1: 1, i2: 0 }, "Enter", sizes).action, "pick");
   assert.equal(move({ col: 1, i1: 1, i2: 0 }, "ArrowRight", sizes).state.col, 1);
+});
+
+test("the 삭제 confirm names the title, the type and the documents whose links go with it", () => {
+  assert.equal(
+    deleteConfirmText("알람 이력", "DB 스키마", 3),
+    '"알람 이력"(DB 스키마) 을 삭제합니다. 저장소에서 파일이 지워지고 git 이력에만 남습니다. 이 문서를 가리키는 문서 3개의 연결을 함께 지웁니다.',
+  );
 });

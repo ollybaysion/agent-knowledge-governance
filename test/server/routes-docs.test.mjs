@@ -263,7 +263,7 @@ test("DELETE archives a doc (admin only) — dropped from the index, JSON preser
     payload: newDbSchemaDoc(),
   });
 
-  // a user cannot archive
+  // a user cannot delete
   const forbidden = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
@@ -271,19 +271,20 @@ test("DELETE archives a doc (admin only) — dropped from the index, JSON preser
   });
   assert.equal(forbidden.statusCode, 403);
 
+  const { rev } = (await app.inject({ method: "GET", url: "/api/docs/db-schema/x", headers: auth("aptok") })).json();
   const del = await app.inject({
     method: "DELETE",
     url: "/api/docs/db-schema/x",
-    headers: auth("aptok"),
+    headers: { ...auth("aptok"), "if-match": rev },
   });
-  assert.equal(del.statusCode, 200);
+  assert.equal(del.statusCode, 200, del.body);
 
   const after = await app.inject({
     method: "GET",
     url: "/api/docs/db-schema/x",
     headers: auth("aptok"),
   });
-  assert.equal(after.json().json.status, "archived"); // JSON preserved, just archived
+  assert.equal(after.statusCode, 404); // the file is gone; git history keeps it
 
   // a genuinely unknown route returns a clean 404, never a 500 route_misconfigured
   const unknown = await app.inject({
@@ -446,7 +447,7 @@ test("links: forward edges land in the list, the index and the read; the target 
   }
 });
 
-test("links: archiving either end keeps the edge and reports the archived status", async () => {
+test("links: an archived end keeps the edge and reports the archived status", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", group: "admin", token: "aptok" },
   ]);
@@ -455,20 +456,15 @@ test("links: archiving either end keeps the edge and reports the archived status
       method: "POST",
       url: "/api/docs/screen-map",
       headers: auth("aptok"),
-      payload: screenMapDoc("spc-chart-config"),
+      payload: { ...screenMapDoc("spc-chart-config"), status: "archived" },
     });
     await app.inject({
       method: "POST",
       url: "/api/docs/db-schema",
       headers: auth("aptok"),
-      payload: newDbSchemaDoc({ links: [link("screen-map", "spc-chart-config")] }),
+      payload: newDbSchemaDoc({ status: "archived", links: [link("screen-map", "spc-chart-config")] }),
     });
 
-    await app.inject({
-      method: "DELETE",
-      url: "/api/docs/screen-map/spc-chart-config",
-      headers: auth("aptok"),
-    });
     const from = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/db-schema/x" });
     assert.equal(from.json().links[0].status, "archived");
     assert.deepEqual(from.json().json.links, [link("screen-map", "spc-chart-config")]);
@@ -486,7 +482,6 @@ test("links: archiving either end keeps the edge and reports the archived status
     });
     assert.equal(again.statusCode, 201, again.body);
 
-    await app.inject({ method: "DELETE", url: "/api/docs/db-schema/x", headers: auth("aptok") });
     const to = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/screen-map/spc-chart-config" });
     assert.deepEqual(
       to.json().backlinks.map((b) => `${b.id}:${b.status}`).sort(),
