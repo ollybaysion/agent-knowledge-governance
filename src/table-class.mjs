@@ -85,11 +85,14 @@ export function tableUses(docs) {
 /**
  * 확정 커버리지 of a db-schema body: confirmed slots over the live ones
  * (scaffold · inferred · confirmed) among purpose, columnDescs.* and
- * queries[].note. A deprecated slot counts on neither side.
+ * queries[].note. A deprecated slot and the slot of an unusedColumns column
+ * count on neither side.
  * @returns {{confirmed: number, total: number, ratio: number}}
  */
 export function coverageOf(body) {
-  const slots = [body?.purpose, ...Object.values(body?.columnDescs ?? {}), ...(body?.queries ?? []).map((q) => q?.note)];
+  const unused = new Set(body?.unusedColumns ?? []);
+  const descs = Object.entries(body?.columnDescs ?? {}).filter(([name]) => !unused.has(name)).map(([, s]) => s);
+  const slots = [body?.purpose, ...descs, ...(body?.queries ?? []).map((q) => q?.note)];
   let confirmed = 0;
   let total = 0;
   for (const s of slots) {

@@ -58,3 +58,18 @@ test("coverageOf: confirmed over scaffold + inferred + confirmed of purpose, col
   assert.deepEqual(coverageOf({ purpose: { text: null, tier: "scaffold" }, columnDescs: {} }), { confirmed: 0, total: 1, ratio: 0 });
   assert.deepEqual(coverageOf({}), { confirmed: 0, total: 0, ratio: 0 });
 });
+
+test("coverageOf: an unusedColumns column's slot counts on neither side, confirmed or not; a name without a slot changes nothing", () => {
+  const body = {
+    purpose: { text: "p", tier: "confirmed" },
+    columnDescs: {
+      A: { text: "a", tier: "confirmed" },
+      B: { text: null, tier: "scaffold" },
+      C: { text: "c", tier: "confirmed" },
+    },
+  };
+  assert.deepEqual(coverageOf(body), { confirmed: 3, total: 4, ratio: 0.75 });
+  assert.deepEqual(coverageOf({ ...body, unusedColumns: ["B"] }), { confirmed: 3, total: 3, ratio: 1 });
+  assert.deepEqual(coverageOf({ ...body, unusedColumns: ["C", "GONE"] }), { confirmed: 2, total: 3, ratio: 2 / 3 });
+  assert.deepEqual(coverageOf({ ...body, unusedColumns: [] }), coverageOf(body));
+});

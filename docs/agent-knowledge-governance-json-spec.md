@@ -336,6 +336,7 @@ unclassified(§4.5)는 "정형 타입 어디에도 분류되지 않는 md"라는
   "table": "FDC_SENSOR",                    // 필수, 대문자. id = lower(table)
   "kind": "info",                           // 선택: info | data — 표의 성격. 없으면 화면은 "미정"
   "columnOrder": ["SNSR_ID", "USE_YN"],     // 선택: 열 이름, 중복 없음 — AKG 화면의 열 표 순서
+  "unusedColumns": ["USE_YN"],              // 선택: 열 이름, 중복 없음 — 미사용 열. BE 는 이 열을 프롬프트에서 뺀다. 수집기 경로는 그대로 둔다
   "catalog": {                              // 필수. [기계 소유] catalog-push API만 갱신
     "columns": [                            // describe_table 응답 사본 (agent-db-plugin 계약)
       { "name": "SNSR_ID", "type": "VARCHAR2(30)", "nullable": false,
@@ -387,7 +388,8 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
   기타다(`src/table-class.mjs` `tablesOfSql`). `GET /api/docs` 의 db-schema 항목과
   `GET /api/docs/db-schema/:id` 가 `major` · `usedBy[]{type, id, query}` 로 싣는다.
 - **확정 커버리지** — 슬롯(`purpose` · `columnDescs.*` · `queries[].note`) 가운데
-  confirmed 수 / (scaffold + inferred + confirmed) 수. deprecated 는 분모에서 뺀다.
+  confirmed 수 / (scaffold + inferred + confirmed) 수. deprecated 슬롯과 `unusedColumns`
+  열의 슬롯은 분자 · 분모 둘 다에서 뺀다.
   같은 두 응답이 `coverage{confirmed, total, ratio}` 로 싣는다(`coverageOf`).
 
 열 순서: `columnOrder` 는 AKG 읽기 화면의 "열" 표에서 행이 서는 순서다. 값은 열

@@ -184,9 +184,13 @@ export function registerDocsRoutes(app) {
             ...originOf(doc),
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
-            // 성격 · 주요 (조회에 쓰이나) · 확정 커버리지: the db-schema list's groups and badges.
+            // 성격 · 미사용 열 · 주요 (조회에 쓰이나) · 확정 커버리지: the db-schema list's groups and badges.
             ...(t === "db-schema"
-              ? { ...(doc.body?.kind ? { kind: doc.body.kind } : {}), ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))) }
+              ? {
+                  ...(doc.body?.kind ? { kind: doc.body.kind } : {}),
+                  ...(doc.body?.unusedColumns ? { unusedColumns: doc.body.unusedColumns } : {}),
+                  ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))),
+                }
               : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
             updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
@@ -707,11 +711,12 @@ export function registerDocsRoutes(app) {
             submitted.body ?? submitted,
             { by: `deprecate:facts-push`, at: now },
           );
-          // A db-schema's kind (info · data) and columnOrder (the 열 table's
-          // row order on screen) are a person's call, not facts the collector
+          // A db-schema's kind (info · data), columnOrder (the 열 table's
+          // row order on screen) and unusedColumns (the columns BE leaves out
+          // of the prompt) are a person's call, not facts the collector
           // knows: the stored ones stay.
           if (type === "db-schema" && current) {
-            for (const key of ["kind", "columnOrder"]) {
+            for (const key of ["kind", "columnOrder", "unusedColumns"]) {
               if (current.body?.[key] !== undefined) body[key] = current.body[key];
               else delete body[key];
             }

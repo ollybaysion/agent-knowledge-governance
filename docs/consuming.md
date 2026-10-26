@@ -244,6 +244,8 @@ file" to "push the raw schema to the hub." This only ever replaces the
 which vanished from the new catalog has its `columnDescs` entry dropped (if
 still `scaffold`, i.e. never annotated) or marked `deprecated` (if it carried
 real text) — never silently deleted.
+db-schema 의 `kind` · `columnOrder` · `unusedColumns` 도 그대로 남는다(facts-push 도 같다).
+BE 는 `unusedColumns` 의 열을 프롬프트에서 뺀다.
 
 ```sh
 node bin/akg.mjs catalog-push t.sensor describe.json
