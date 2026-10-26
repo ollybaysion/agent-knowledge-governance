@@ -7,7 +7,8 @@ claude-hooks' `keyword-docs` provider at that mirror. claude-hooks itself is
 (D1), so switching to akg is a 4-line `context.json` edit.
 
 Phase 3 (design §8.1, section 7 below): push changes back to the hub with
-`akg propose` and `akg catalog-push` — the CLI's write side.
+`akg propose`, `akg catalog-push` and `akg push` — the CLI's write side.
+A program that talks HTTP itself reads section 9.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
 — present on the server and readable through the API and dashboard, but not
@@ -252,6 +253,45 @@ Prints `catalog pushed: db-schema/t.sensor (rev <rev>)`. The target doc must
 already exist — this route never creates one; a 404 means propose (or the
 dashboard) needs to create it first.
 
+### `akg push <type>/<id> <file.json|file.md>`
+
+agent 토큰으로 문서 하나를 넣고 고친다. 토큰은 다른 명령과 같다(`AKG_TOKEN` 또는
+`~/.claude/akg/token`). 요청은 Bearer 로 가므로 CSRF 헤더가 없다(9절).
+
+- `.json` 은 문서 전체(봉투 + body)다. body 는 `PUT /api/docs/:type/:id` 로,
+  links 가 서버와 다르면 `PUT …/links` 로 들어간다. keywords · status · role · origin 은
+  서버 값 그대로 두고, 파일과 다르면 stderr 에 적는다.
+- `.md` 는 body 가 `{ name, markdown }` 인 타입(md 타입 — voc · unclassified · 화면에서
+  등록한 타입 — 과 domain-skill · domain)의 본문 글이다. 서버 문서의 `body.markdown` 만
+  바꾸고 봉투 · links 는 그대로 둔다.
+
+흐름:
+
+1. `GET /api/docs/:type/:id` 로 현재 문서와 rev 를 받는다.
+2. 문서가 있으면 그 rev 를 `if-match` 로 PUT 한다. `--rev <rev>` 를 주면 그 rev 로 PUT 한다.
+3. 문서가 없으면 `--create` 일 때만 `POST /api/docs/:type` 로 만든다. `.md` 로 만든 문서는
+   비활성(`inactive`)이다. 화면의 새 문서와 같고, 활성화는 admin 이 한다. `.json` 으로 만든
+   문서는 파일의 status 를 따른다.
+   `--create` 가 없으면 "없는 문서 — --create 로 만든다" 로 멈춘다.
+4. 성공하면 `pushed <type>/<id> (rev …)` 를 찍는다. 미러는 다음 `akg sync` 에서 갱신된다.
+
+- 409(`slot_conflict` · `unknown_base_rev`)는 "서버가 앞섭니다 — sync 뒤 다시" 로 멈춘다.
+  기본 rev 는 push 직전에 받은 값이다. 앞서 읽은 판 위에서 고쳤다면 그때의 rev 를
+  `--rev` 로 준다. 그러면 그 사이의 남의 수정을 덮지 않고 409 로 멈춘다.
+- 400 은 서버의 검증 오류(`validation_failed` 의 details, `edit_rejected` 의 message,
+  `unknown_link_target` 의 대상)를 그대로 찍는다.
+- `--note <글>` 은 `x-akg-note` 로 가서 이력 메시지 끝에 붙는다.
+- `--dry-run` 은 파일만 읽어 모양(schema 가 `<type>/v1` 인지, id 가 맞는지, md 가 비었는지)을
+  보고 쓰지 않는다. 토큰 · 서버가 없어도 된다.
+- 슬롯은 추정(`inferred`)까지만 들어간다. 본문에 `confirmed` 를 적어도 `inferred` 로
+  저장되고, 확정 슬롯을 고치면 `inferred` 로 내려간다. 승격 · 삭제 · 활성화는 admin 이 한다.
+
+```sh
+node bin/akg.mjs push voc/line-alarm line-alarm.md --create
+node bin/akg.mjs push voc/line-alarm line-alarm.md --note "원인 절 보강"
+node bin/akg.mjs push db-schema/t_sensor t_sensor.json --dry-run
+```
+
 ## 8. Bulk intake: `POST .../batch` and `PUT .../facts`
 
 These are HTTP routes, not CLI subcommands yet — the importer that will call
@@ -309,3 +349,85 @@ Note that an `agent` token can write facts but cannot read documents back
 (`GET` needs `viewer`, and `agent` sits outside that ladder — D6), and cannot
 activate anything. That asymmetry is the safety argument for letting machines
 write here at all.
+
+## 9. 프로그램이 AKG 에 바로 붙는 법
+
+cc · opencode · 수집기 같은 프로그램은 HTTP 로 AKG 에 바로 붙는다. 길은 Bearer 토큰 하나다.
+Bearer 요청은 쿠키를 싣지 않으므로 CSRF 헤더가 없다. `x-csrf-token` 은 브라우저 세션(사람)의
+쓰기에만 쓴다. `akg push` 도 이 길을 쓴다.
+
+### 토큰
+
+- **비밀번호 파일 서버**(`FDC_AUTH_KEYCLOAK_ISSUER` 가 빔): `FDC_AUTH_USERS_FILE` 의
+  `group: agent` 줄 비밀번호가 그대로 토큰이다. 사람 줄(admin · user)의 비밀번호는 Bearer 로 401 이다.
+- **Keycloak 서버**: realm `fdc-voc-agent` 의 client `fdc-voc-agent-a2a` 로 client_credentials
+  토큰을 받는다. 그 client 에 agent 역할이 있어야 한다.
+
+```sh
+curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d client_secret="$A2A_SECRET" \
+  "$FDC_AUTH_KEYCLOAK_ISSUER/protocol/openid-connect/token" | jq -r .access_token
+```
+
+### 요청 모양
+
+- `Authorization: Bearer <토큰>`
+- 본문이 있으면 `content-type: application/json`
+- 문서를 고치는 쓰기(PUT 문서 · links)에는 `if-match: <rev>`. rev 는 `GET` 응답의 `rev`
+  (또는 `etag` 헤더)다. 빠지면 428 이다.
+- 이력 메시지를 남기려면 `x-akg-note: <URL 인코딩한 글>`(PUT 문서).
+- CSRF 헤더는 보내지 않는다.
+
+### 되는 경로
+
+| 할 일 | 경로 |
+| --- | --- |
+| 읽기 | `GET /api/docs` · `GET /api/docs/:type/:id`(`?format=md`) · `GET /api/bundle` · `GET /api/types` · `GET /api/me` |
+| 새 문서 | `POST /api/docs/:type` — 본문은 문서 전체(봉투 + body) |
+| 수정 | `PUT /api/docs/:type/:id` — 본문은 body 만, `if-match` |
+| links | `PUT /api/docs/:type/:id/links` — `{ "links": [...] }`, `if-match` |
+| facts | `PUT /api/docs/:type/:id/facts`(8절) |
+| catalog | `PUT /api/docs/db-schema/:id/catalog`(7절) |
+| 제안 | `POST /api/proposals`(7절) |
+| 배치 | `POST /api/docs/:type/batch`(8절, 비활성으로 들어감) |
+| 점수 | `POST /api/score/:agent` |
+
+화면에서 등록한 md 타입도 같은 경로다. `:type` 에 그 타입 id 를 넣고, body 는 `{ name, markdown }` 이다.
+
+슬롯은 추정(`inferred`)까지만 들어간다. 본문에 `confirmed` 를 적어도 `inferred` 로 저장되고,
+확정 슬롯을 고치면 `inferred` 로 내려간다. 이력의 author 는 토큰의 id 다.
+
+admin 만 하는 것(agent 는 403): 승격(`…/promote`) · 폐기(`…/deprecate`) · 활성화 · 비활성화 ·
+삭제(`DELETE /api/docs/:type/:id`) · 역할(`…/role`) · 출처(`…/origin`) · 타입 바꾸기(`…/retype`) ·
+타입 등록 · 순서(`/api/types/…`) · 제안 채택 · 기각 · 검증 Set 저장.
+
+### 오류
+
+| 코드 | 뜻 |
+| --- | --- |
+| 401 | 토큰이 틀렸다(`unauthorized`). 실패가 잦으면 429 로 잠시 막힌다 |
+| 403 | 토큰은 맞고 agent 가 못 하는 경로다(`forbidden`) |
+| 404 | 문서가 없다(`not_found`). 없는 타입도 GET 은 404 다 |
+| 409 | 서버가 앞섰다(`slot_conflict` · `unknown_base_rev` — 다시 읽고 고친다), 이미 있다(`already_exists`), 데이터 id 가 겹친다(`data_id_conflict`), 닫힌 타입이다(`type_archived`) |
+| 400 | 내용이 틀렸다: `validation_failed`(details) · `edit_rejected`(message) · `schema_mismatch` · `unknown_type` · `unknown_link_target`(missing) |
+| 428 | `if-match` 가 없다 |
+
+### curl 예시
+
+```sh
+AKG=http://127.0.0.1:8787
+TOKEN=...   # agent 토큰
+
+# 문서 읽기 — 응답의 rev 를 다음 PUT 의 if-match 로 쓴다
+curl -s -H "Authorization: Bearer $TOKEN" "$AKG/api/docs/voc/line-alarm" | jq '{rev, body: .json.body}'
+
+# 수정 — body 만 보낸다
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -H "if-match: $REV" -H "x-akg-note: $(jq -rn --arg s '원인 절 보강' '$s|@uri')" \
+  -d '{"name":"line-alarm","markdown":"# 라인 알람\n\n## 원인\n\n고친 글\n"}' \
+  "$AKG/api/docs/voc/line-alarm"
+
+# 새 문서 — 문서 전체를 보낸다
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"schema":"voc/v1","id":"line-alarm","status":"inactive","keywords":[{"kw":"line-alarm","inject":"full"}],"body":{"name":"line-alarm","markdown":"# 라인 알람\n\n글\n"}}' \
+  "$AKG/api/docs/voc"
+```

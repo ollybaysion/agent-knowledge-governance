@@ -272,6 +272,55 @@ function runCliBare(args, home) {
   });
 }
 
+test("cli push: --create a .md, edit it, a stale --rev is exit 1 with 'sync 뒤 다시'", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  const dir = mkdtempSync(join(tmpdir(), "akg-cli-push-"));
+  try {
+    const md = join(dir, "n.md");
+    writeFileSync(md, "# n\n\n첫 글\n");
+    const missing = await runCli(["push", "voc/n", md], { serverUrl });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /--create 로 만든다/);
+
+    const created = await runCli(["push", "voc/n", md, "--create"], { serverUrl });
+    assert.equal(created.status, 0, created.stderr);
+    const rev0 = created.stdout.match(/pushed voc\/n \(rev (\w+)\)/)[1];
+
+    writeFileSync(md, "# n\n\n고친 글\n");
+    const edited = await runCli(["push", "voc/n", md, "--note", "cc 수정"], { serverUrl });
+    assert.equal(edited.status, 0, edited.stderr);
+    assert.match(edited.stdout, /pushed voc\/n \(rev \w+\)/);
+
+    writeFileSync(md, "# n\n\n옛 rev 위 글\n");
+    const stale = await runCli(["push", "voc/n", md, "--rev", rev0], { serverUrl });
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /sync 뒤 다시/);
+
+    const got = await app.inject({ method: "GET", url: "/api/docs/voc/n", headers: as("ed-tok") });
+    assert.equal(got.json().json.body.markdown, "# n\n\n고친 글\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+test("cli push --dry-run: checks the file with no token and no server", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-cli-push-dry-"));
+  try {
+    const good = join(home, "n.json");
+    writeFileSync(good, JSON.stringify({ schema: "voc/v1", id: "n", status: "active", body: { name: "n", markdown: "# n\n" } }));
+    const ok = await runCliBare(["push", "voc/n", good, "--dry-run"], home);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /dry-run ok: voc\/n/);
+
+    const wrongId = await runCliBare(["push", "voc/m", good, "--dry-run"], home);
+    assert.equal(wrongId.status, 1);
+    assert.match(wrongId.stderr, /id 가 "m"/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("cli: unknown command -> exit 1, usage printed", async () => {
   const { serverUrl, cleanup } = await setupServer();
   try {

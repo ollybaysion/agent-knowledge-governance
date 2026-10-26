@@ -208,8 +208,8 @@ test("Bearer is the agent's way in: an agent line's password passes, a person's 
   }
 });
 
-// AKG 권한표 (auth 설계 2026-10-24): 읽기 = user · admin · agent, 편집 · 승격 · 삭제 = admin,
-// agent 쓰기(batch · facts · catalog · 제안 · 점수) = admin · agent.
+// AKG 권한표 (auth 설계 2026-10-24, agent 쓰기 2026-10-26): 읽기 = user · admin · agent,
+// 승격 · 삭제 = admin, 새 문서 · 수정 · links · batch · facts · catalog · 제안 · 점수 = admin · agent.
 test("permission table: each group gets exactly its rows", async () => {
   const { app, cleanup } = await setup([
     { id: "kim", group: "admin", token: "admin-pw" },
@@ -221,7 +221,10 @@ test("permission table: each group gets exactly its rows", async () => {
       ["GET", "/api/docs", { admin: true, user: true, agent: true }],
       ["GET", "/api/audit", { admin: true, user: true, agent: true }],
       ["GET", "/api/bundle", { admin: true, user: true, agent: true }],
-      ["POST", "/api/docs/db-schema", { admin: true, user: false, agent: false }],
+      ["POST", "/api/docs/db-schema", { admin: true, user: false, agent: true }],
+      ["PUT", "/api/docs/db-schema/x", { admin: true, user: false, agent: true }],
+      ["PUT", "/api/docs/db-schema/x/links", { admin: true, user: false, agent: true }],
+      ["POST", "/api/docs/db-schema/x/promote", { admin: true, user: false, agent: false }],
       ["GET", "/api/proposals", { admin: true, user: false, agent: false }],
       ["DELETE", "/api/docs/db-schema/x", { admin: true, user: false, agent: false }],
       ["POST", "/api/docs/db-schema/batch", { admin: true, user: false, agent: true }],
