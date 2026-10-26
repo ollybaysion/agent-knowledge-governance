@@ -350,7 +350,10 @@ export async function renderEditor(type, id, focusKey) {
     const r = ranges();
     const parts = [];
     const headText = saved.mode === "plain" ? editedHead.split("\n").filter((l) => !/^#\s+/.test(l)).join("\n").trim() : "";
-    if (headText) parts.push(el("div", { class: "ed-pv-head" }, mdNodes(headText, { wiki })));
+    // ```mermaid figures redraw 300ms after typing stops; errors carry the
+    // document line, as the gutter numbers it.
+    const fig = (key, lineBase) => ({ key, lineBase, delay: 300, source: false });
+    if (headText) parts.push(el("div", { class: "ed-pv-head" }, mdNodes(headText, { wiki, mermaid: fig(HEAD, null) })));
     for (const b of saved.blocks) {
       const body = edited.get(b.key) ?? "";
       const cur = cursorKey === b.key;
@@ -371,7 +374,7 @@ export async function renderEditor(type, id, focusKey) {
         }, [
           el("div", { class: "ed-pv-meta" }, [el("span", { class: "dim mono", text: r.get(b.key) ? `줄 ${r.get(b.key).from}-${r.get(b.key).to}` : "비어 있음" }), cur ? el("span", { class: "chip curchip", text: "커서 절" }) : null]),
           el("h2", { class: "sec-t", text: b.heading }),
-          el("div", { class: "sec-b" }, body.trim() ? mdNodes(body, { wiki }) : [el("p", { class: "dim", text: "비어 있습니다" })]),
+          el("div", { class: "sec-b" }, body.trim() ? mdNodes(body, { wiki, mermaid: fig(b.key, r.get(b.key)?.bodyFrom ?? null) }) : [el("p", { class: "dim", text: "비어 있습니다" })]),
         ]),
       );
     }

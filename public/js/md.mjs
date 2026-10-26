@@ -1,8 +1,11 @@
 // md → DOM for the reading view: the blocks of /lib/md-parse.mjs drawn with
 // el() (textContent only, never innerHTML). `[[id]]` becomes a chip in its
-// type's colour, resolved through the server's wikilinks answer.
+// type's colour, resolved through the server's wikilinks answer. A ```mermaid
+// fence becomes a figure (mermaid.mjs).
 import { el } from "./dom.mjs";
 import { inlineRuns, parseBlocks } from "/lib/md-parse.mjs";
+import { isMermaid } from "/lib/mermaid-src.mjs";
+import { mermaidFig } from "./mermaid.mjs";
 import { TYPE_LABEL, typeColor } from "./state.mjs";
 
 /** The short tag a chip carries: 표 · msg · 메인 · 도메인 · 매뉴얼 … */
@@ -71,9 +74,24 @@ export function inline(text, ctx = {}) {
   });
 }
 
-/** The blocks of an md text as nodes. `ctx.wiki` resolves [[ ]]. */
+/**
+ * The blocks of an md text as nodes. `ctx.wiki` resolves [[ ]].
+ * `ctx.mermaid` (editor preview) shapes the ```mermaid figures: {key, lineBase
+ * (document line of the text's first line), delay, source} — see mermaidFig.
+ */
 export function mdNodes(markdown, ctx = {}) {
+  const mm = ctx.mermaid ?? {};
+  let figNo = 0;
   return parseBlocks(markdown).map((b) => {
+    if (isMermaid(b)) {
+      const n = figNo++;
+      return mermaidFig(b.text, {
+        fenceLine: mm.lineBase == null ? null : mm.lineBase + b.line,
+        source: mm.source ?? true,
+        key: mm.key == null ? null : `${mm.key}#${n}`,
+        delay: mm.delay ?? 0,
+      });
+    }
     switch (b.type) {
       case "h": {
         const tag = `h${Math.min(6, Math.max(3, b.level + 1))}`;

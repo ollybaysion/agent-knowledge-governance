@@ -3345,3 +3345,47 @@ a.mrow.draft {
   margin-left: auto;
   white-space: nowrap;
 }
+
+/* ```mermaid 도식 — 그림은 숨은 틀(.mmd-frame)이 그리고 mermaid.mjs 가 이 자리에 넣는다 */
+.mermaid-fig {
+  margin: 10px 0 14px;
+  overflow-x: auto;
+}
+.mermaid-fig svg {
+  display: block;
+  margin: 0 auto;
+  height: auto;
+}
+.mermaid-fig.waiting {
+  min-height: 56px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.mermaid-fig.stale {
+  opacity: 0.55;
+}
+.mmd-err {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: 10px;
+  background: var(--error-soft);
+  color: var(--error-ink);
+  font-size: 13px;
+}
+.mmd-err-d {
+  margin: 6px 0 0;
+  overflow-x: auto;
+  color: var(--body);
+  font: 12px/1.5 var(--mono);
+  white-space: pre;
+}
+.mmd-frame {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 1200px;
+  height: 800px;
+  border: 0;
+  visibility: hidden;
+  pointer-events: none;
+}

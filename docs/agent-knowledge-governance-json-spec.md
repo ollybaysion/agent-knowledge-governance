@@ -481,6 +481,13 @@ JSON 이 조용히 실리지 않게). 의미 검사(`envelope.mjs`)는 하나 �
 저장은 body 전체 PUT(티어드 슬롯 없음 — 충돌 단위도 문서 전체, §conflict). 드래프트는
 `name` 만으로 저장되고(완화 스키마), 활성화에는 본문이 있어야 한다.
 
+**md 안의 ```` ```mermaid ```` 펜스.** 스킬 · 도메인 · 그 밖 md 타입 모두, 읽기 화면은
+`mermaid` 펜스를 그림으로 그린다(절 편집기의 미리보기도 같다). 원문은 글자 그대로
+`markdown` 에 저장되고, 렌더 산출물 · BE 에도 글자로 전달된다 — 그림은 화면에서만
+생긴다. 문법이 틀린 펜스는 그 자리에 오류 줄과 원문을 보인다. mermaid 는
+`public/vendor/mermaid/` 에 동봉한 배포본이고(외부 요청 0), 숨은 틀
+`/mermaid-frame.html` 안에서 돈다.
+
 **CLI.** `akg push domain-skill <skill.md>` — `.md` 파일이면 파일명(확장자 제외)이
 `name`, 내용이 `markdown`. JSON(bare body 또는 봉투)도 여전히 받는다.
 

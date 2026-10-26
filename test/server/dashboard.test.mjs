@@ -127,3 +127,22 @@ test("frameAncestors takes the FE origin, and only 'self' when the address is no
   assert.equal(frameAncestors("not a url"), "'self'");
   assert.equal(frameAncestors(undefined), "'self'");
 });
+
+test("the mermaid frame alone takes inline style; the page and the vendored mermaid keep style-src 'self'", async () => {
+  const { app, cleanup } = await setup();
+  const frame = await app.inject({ method: "GET", url: "/mermaid-frame.html" });
+  assert.equal(frame.statusCode, 200);
+  assert.match(frame.headers["content-type"], /text\/html/);
+  assert.match(frame.headers["content-security-policy"], /script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self' http:\/\/fdc\.test$/);
+  assert.ok(frame.body.includes('<script src="/vendor/mermaid/mermaid.min.js"></script>'));
+  const lib = await app.inject({ method: "GET", url: "/vendor/mermaid/mermaid.min.js" });
+  assert.equal(lib.statusCode, 200);
+  assert.match(lib.headers["content-type"], /text\/javascript/);
+  assert.ok(lib.body.includes('globalThis["mermaid"]'));
+  for (const url of ["/", "/vendor/mermaid/mermaid.min.js", "/js/mermaid.mjs"]) {
+    const res = await app.inject({ method: "GET", url });
+    assert.match(res.headers["content-security-policy"], /style-src 'self'; frame-ancestors/, url);
+  }
+  assert.equal((await app.inject({ method: "GET", url: "/vendor/mermaid/LICENSE" })).statusCode, 404);
+  await cleanup();
+});
