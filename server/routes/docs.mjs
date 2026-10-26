@@ -706,11 +706,14 @@ export function registerDocsRoutes(app) {
             submitted.body ?? submitted,
             { by: `deprecate:facts-push`, at: now },
           );
-          // A db-schema's kind (info · data) is a person's call, not a fact
-          // the collector knows: the stored one stays.
+          // A db-schema's kind (info · data) and columnOrder (the 열 table's
+          // row order on screen) are a person's call, not facts the collector
+          // knows: the stored ones stay.
           if (type === "db-schema" && current) {
-            if (current.body?.kind !== undefined) body.kind = current.body.kind;
-            else delete body.kind;
+            for (const key of ["kind", "columnOrder"]) {
+              if (current.body?.[key] !== undefined) body[key] = current.body[key];
+              else delete body[key];
+            }
           }
 
           // Creating: land inactive, like every other bulk path (#7). An

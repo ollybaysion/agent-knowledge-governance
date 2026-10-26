@@ -7,6 +7,7 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
+import { moveName, orderColumns } from "/lib/column-order.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -894,26 +895,163 @@ function slotBody(ctx, host) {
   }
 
   const b = () => ctx.doc.body;
+
+  // 열 순서 (db-schema, admin): body.columnOrder is the screen's row order
+  // only. Each move is one document PUT right away; a failure puts the old
+  // order back.
+  const canOrder = type === "db-schema" && canEdit;
+  let orderBusy = false;
+  let dragName = null;
+  const orderedNames = () => orderColumns(b().catalog?.columns, b().columnOrder).map((c) => c.name);
+  const focusGrip = (name) => host.querySelector(`tr[data-col="${CSS.escape(name)}"] .grip`)?.focus();
+  function staleOrderNotice() {
+    notice()?.replaceChildren(
+      el("div", { class: "notice" }, [
+        el("strong", { text: "문서가 그 사이 바뀌었습니다 " }),
+        el("span", { text: "— 다시 읽은 뒤 옮기세요." }),
+        el("button", { type: "button", class: "btn ghost sm", onclick: () => reload(), text: "다시 읽기" }),
+      ]),
+    );
+  }
+  async function moveColumn(name, to) {
+    const names = orderedNames();
+    const from = names.indexOf(name);
+    if (orderBusy || from < 0 || to === from || to < 0 || to >= names.length) return;
+    const next = moveName(names, from, to);
+    const before = { doc: ctx.doc, rev: ctx.rev };
+    const body = { ...before.doc.body, columnOrder: next };
+    ctx.setDocRev({ ...before.doc, body }, before.rev);
+    orderBusy = true;
+    paint();
+    focusGrip(name);
+    const r = await api(`/api/docs/db-schema/${enc(id)}`, {
+      method: "PUT",
+      headers: { "if-match": before.rev, "x-akg-note": encodeURIComponent(`열 순서: ${name}`) },
+      body,
+    });
+    orderBusy = false;
+    // A stale rev rebases at slot level and keeps the stored order: that is a miss too.
+    const landed = r.ok && JSON.stringify(r.data?.json?.body?.columnOrder) === JSON.stringify(next);
+    if (landed) {
+      ctx.setDocRev(r.data.json, r.data.rev);
+      invalidateDocs();
+      paint();
+      focusGrip(name);
+      toast(`${name} 열을 옮겼습니다`, "ok");
+      return;
+    }
+    ctx.setDocRev(before.doc, before.rev);
+    paint();
+    focusGrip(name);
+    if (r.ok || r.status === 409) {
+      toast("다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 옮기세요.", "error");
+      staleOrderNotice();
+      return;
+    }
+    const why = r.data?.message ?? r.data?.details?.join(" · ");
+    toast(`열 순서를 저장하지 못했습니다 (${r.status})${why ? ` — ${why}` : ""}`, "error");
+  }
+  /** The handle cell: drag grip (Alt+↑ · Alt+↓ on focus) and 위 · 아래. */
+  function orderCell(name, i, n, locked) {
+    const grip = el(
+      "button",
+      {
+        type: "button",
+        class: "grip",
+        draggable: locked ? null : "true",
+        disabled: locked,
+        "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓`,
+        title: locked ? "설명을 편집하는 동안은 옮기지 않습니다" : "끌거나 Alt+↑ · Alt+↓ 로 옮깁니다",
+        onkeydown: (e) => {
+          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          e.preventDefault();
+          moveColumn(name, i + (e.key === "ArrowUp" ? -1 : 1));
+        },
+      },
+      icon("grip", 14),
+    );
+    const step = (label, iconName, to, off) =>
+      el("button", { type: "button", class: "ord-btn", "aria-label": `${name} ${label}`, title: label, disabled: locked || off, onclick: () => moveColumn(name, to) }, icon(iconName, 13));
+    return el("td", { class: "td-grip nowrap" }, el("span", { class: "ord" }, [grip, step("위로", "up", i - 1, i === 0), step("아래로", "down", i + 1, i === n - 1)]));
+  }
+  function wireDrop(tr, name) {
+    const grip = tr.querySelector(".grip");
+    grip?.addEventListener("dragstart", (e) => {
+      dragName = name;
+      tr.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", name);
+      e.dataTransfer.setDragImage?.(tr, 16, tr.offsetHeight / 2);
+    });
+    grip?.addEventListener("dragend", () => {
+      dragName = null;
+      for (const r of host.querySelectorAll(".dragging, .drop-before, .drop-after")) r.classList.remove("dragging", "drop-before", "drop-after");
+    });
+    const below = (e) => {
+      const box = tr.getBoundingClientRect();
+      return e.clientY - box.top > box.height / 2;
+    };
+    tr.addEventListener("dragover", (e) => {
+      if (!dragName || dragName === name) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const after = below(e);
+      tr.classList.toggle("drop-after", after);
+      tr.classList.toggle("drop-before", !after);
+    });
+    tr.addEventListener("dragleave", (e) => {
+      if (!tr.contains(e.relatedTarget)) tr.classList.remove("drop-before", "drop-after");
+    });
+    tr.addEventListener("drop", (e) => {
+      if (!dragName || dragName === name) return;
+      e.preventDefault();
+      const names = orderedNames();
+      const from = names.indexOf(dragName);
+      let to = names.indexOf(name) + (below(e) ? 1 : 0);
+      if (from < to) to -= 1;
+      const moving = dragName;
+      dragName = null;
+      moveColumn(moving, to);
+    });
+  }
+
   function paint() {
     const parts = [];
     if (type === "db-schema") {
       parts.push(sec({ key: "설명", title: "설명", children: [slotRow(slotByAddr("purpose"), "ps")] }));
       const pk = new Set(b().catalog?.primaryKey ?? []);
       const known = new Set((b().catalog?.columns || []).map((c) => c.name));
-      const rows = (b().catalog?.columns || []).flatMap((col) =>
-        slotTableRows(
+      const ordered = orderColumns(b().catalog?.columns, b().columnOrder);
+      const rows = ordered.flatMap((col, i) => {
+        const slot = slotByAddr(`columnDescs.${col.name}`);
+        const trs = slotTableRows(
           [
+            canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
             el("td", { class: "mono nowrap" }, [col.name, pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null]),
             el("td", { class: "mono dim nowrap", text: col.type }),
             el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
-          ],
-          slotByAddr(`columnDescs.${col.name}`),
-        ),
-      );
+          ].filter(Boolean),
+          slot,
+        );
+        trs[0].dataset.col = col.name;
+        if (canOrder) wireDrop(trs[0], col.name);
+        return trs;
+      });
       for (const s of slots) {
         const m = s.address.match(/^columnDescs\.(.+)$/);
         if (m && !known.has(m[1]))
-          rows.push(...slotTableRows([el("td", { class: "mono strike nowrap", text: m[1] }), el("td", { class: "dim nowrap", text: "—" }), el("td", { class: "dim nowrap", text: "열 사라짐" })], s, "dep-row"));
+          rows.push(
+            ...slotTableRows(
+              [
+                canOrder ? el("td", { class: "td-grip nowrap" }) : null,
+                el("td", { class: "mono strike nowrap", text: m[1] }),
+                el("td", { class: "dim nowrap", text: "—" }),
+                el("td", { class: "dim nowrap", text: "열 사라짐" }),
+              ].filter(Boolean),
+              s,
+              "dep-row",
+            ),
+          );
       }
       const fk = (b().catalog?.foreignKeys || []).map((f) => `${f.column} → ${f.refTable}.${f.refColumn}`).join(" · ");
       parts.push(
@@ -922,7 +1060,10 @@ function slotBody(ctx, host) {
           title: "열",
           children: [
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
-              el("thead", {}, el("tr", {}, ["열", "타입", "빈칸", "설명"].map((t) => el("th", { scope: "col", text: t })))),
+              el("thead", {}, el("tr", {}, [
+                canOrder ? el("th", { scope: "col", class: "th-ord", title: "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)", text: "순서" }) : null,
+                ...["열", "타입", "빈칸", "설명"].map((t) => el("th", { scope: "col", text: t })),
+              ])),
               el("tbody", {}, rows),
             ])),
             el("p", { class: "dim small", text: `${fk ? `FK: ${fk} · ` : ""}수집 ${b().catalog?.fetchedAt ?? "—"} — 열 · 타입 · 빈칸은 catalog-push 로만 바뀝니다.` }),

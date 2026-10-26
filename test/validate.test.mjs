@@ -142,6 +142,46 @@ test("db-schema: a DEPRECATED columnDescs entry not in catalog.columns is allowe
   assert.deepEqual(validateDocument(doc, refs), []);
 });
 
+test("db-schema: columnOrder is an optional array of column names", () => {
+  const doc = minimalDbSchemaDoc();
+  assert.deepEqual(validateDocument(doc, refs), []);
+  doc.body.columnOrder = ["A"];
+  assert.deepEqual(validateDocument(doc, refs), []);
+  doc.body.columnOrder = [];
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("db-schema: a columnOrder name the catalog lacks passes — the screen drops it", () => {
+  const doc = minimalDbSchemaDoc();
+  doc.body.columnOrder = ["GONE", "A"];
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("db-schema: columnOrder refuses a repeated name, a non-string, a blank and a non-array", () => {
+  for (const [bad, needle] of [
+    [["A", "A"], "uniqueItems"],
+    [["A", 1], "expected type string"],
+    [[" "], "pattern"],
+    ["A", "expected type array"],
+  ]) {
+    const doc = minimalDbSchemaDoc();
+    doc.body.columnOrder = bad;
+    const errors = validateDocument(doc, refs);
+    assert.ok(
+      errors.some((e) => e.includes("columnOrder") && e.includes(needle)),
+      `${JSON.stringify(bad)}: ${JSON.stringify(errors)}`,
+    );
+  }
+});
+
+test("uniqueItems: equal items are refused, items that only look alike pass", () => {
+  const schema = { type: "array", uniqueItems: true };
+  assert.equal(validate(schema, [1, 1]).length, 1);
+  assert.equal(validate(schema, [{ a: 1 }, { a: 1 }]).length, 1);
+  assert.deepEqual(validate(schema, [1, "1", [1]]), []);
+  assert.deepEqual(validate({ type: "array", uniqueItems: false }, [1, 1]), []);
+});
+
 test("db-schema: id must be lower(table)", () => {
   const doc = minimalDbSchemaDoc();
   doc.id = "wrong.id";

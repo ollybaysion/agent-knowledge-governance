@@ -9,6 +9,11 @@
   "properties": {
     "owner": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
     "kind": { "enum": ["info", "data"] },
+    "columnOrder": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "\\S" }
+    },
     "table": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
     "catalog": {
       "type": "object",
