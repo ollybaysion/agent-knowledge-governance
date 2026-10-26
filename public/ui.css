@@ -702,6 +702,10 @@ a.chip:hover {
   color: var(--error-ink);
   border-style: dashed;
 }
+/* db-schema · msg-format 슬롯 글: 글에 든 줄바꿈을 줄로 */
+.slot-text {
+  white-space: pre-line;
+}
 
 /* ---- 패널 안 ---- */
 .psearch-w {
