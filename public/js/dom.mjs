@@ -113,6 +113,7 @@ const ICONS = {
   right: [["path", { d: "m9 18 6-6-6-6" }]],
   left: [["path", { d: "m15 18-6-6 6-6" }]],
   down: [["path", { d: "m6 9 6 6 6-6" }]],
+  up: [["path", { d: "m18 15-6-6-6 6" }]],
   pencil: [["path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" }]],
   external: [["path", { d: "M15 3h6v6" }], ["path", { d: "M10 14 21 3" }], ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }]],
   graph: [["circle", { cx: 12, cy: 18, r: 3 }], ["circle", { cx: 6, cy: 6, r: 3 }], ["circle", { cx: 18, cy: 6, r: 3 }], ["path", { d: "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" }], ["path", { d: "M12 12v3" }]],

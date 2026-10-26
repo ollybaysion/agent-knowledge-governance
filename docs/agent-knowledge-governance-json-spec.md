@@ -335,6 +335,7 @@ unclassified(§4.5)는 "정형 타입 어디에도 분류되지 않는 md"라는
   "owner": "TESTUSER",                      // 선택, 대문자 — 순수 속성. id·파일명에 관여하지 않는다
   "table": "FDC_SENSOR",                    // 필수, 대문자. id = lower(table)
   "kind": "info",                           // 선택: info | data — 표의 성격. 없으면 화면은 "미정"
+  "columnOrder": ["SNSR_ID", "USE_YN"],     // 선택: 열 이름, 중복 없음 — AKG 화면의 열 표 순서
   "catalog": {                              // 필수. [기계 소유] catalog-push API만 갱신
     "columns": [                            // describe_table 응답 사본 (agent-db-plugin 계약)
       { "name": "SNSR_ID", "type": "VARCHAR2(30)", "nullable": false,
@@ -388,6 +389,15 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 - **확정 커버리지** — 슬롯(`purpose` · `columnDescs.*` · `queries[].note`) 가운데
   confirmed 수 / (scaffold + inferred + confirmed) 수. deprecated 는 분모에서 뺀다.
   같은 두 응답이 `coverage{confirmed, total, ratio}` 로 싣는다(`coverageOf`).
+
+열 순서: `columnOrder` 는 AKG 읽기 화면의 "열" 표에서 행이 서는 순서다. 값은 열
+이름 배열이고 같은 이름은 한 번만 들어간다. admin 이 행 앞 손잡이(끌기 · 위 · 아래 단추 ·
+Alt+↑↓)로 옮기면 화면이 문서 PUT 으로 곧바로 저장한다. 화면은 `columnOrder` 의 열을
+그 순서로 세우고, 그 뒤에 `columnOrder` 에 없는 catalog 열을 catalog 순서로, 맨 뒤에
+사라진 열을 둔다(`public/lib/column-order.mjs`). catalog 에 없는 이름은 화면이 거른다.
+수집기 경로(catalog-push · facts-push)는 이 칸을 그대로 둔다. 수집기의 열 순서는
+`catalog.columns` 가 DB 정의 순으로 지닌다. BE 와 LLM 이 받는 열 순서는 `columnDescs`
+키 순서이고, BE 는 `columnOrder` 를 읽지 않는다.
 
 ### 4.2 `msg-format/v1` — 설비 커맨드 메시지 문서
 
