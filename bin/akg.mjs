@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // akg CLI (design §8.1). `sync` (Phase 2) pulls; `propose` / `catalog-push`
-// (Phase 3) push. sync fails OPEN (a down server just means "try later" —
-// it must never block a CC session). propose/catalog-push are explicit
+// (Phase 3) and `push` write. sync fails OPEN (a down server just means "try later" —
+// it must never block a CC session). propose/catalog-push/push are explicit
 // writes a caller asked for, so they fail CLOSED (non-zero exit on any
 // failure) — the caller needs to know the write did not happen.
 import { readdirSync, readFileSync } from "node:fs";
@@ -17,12 +17,19 @@ import {
 import { installSkills } from "../src/mirror/install-skills.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
+import { push, checkPushFile } from "../src/client/push.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
   akg sync [--skills] [--skills-dir <dir>] [--server <url>] [--mirror <dir>]
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
+  akg push <type>/<id> <file.json|file.md> [--create] [--note <글>] [--rev <rev>] [--dry-run] [--server <url>] [--mirror <dir>]
+
+push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
+  .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain)의 본문 글.
+  서버의 현재 rev 로 고친다(--rev 를 주면 그 rev). 없는 문서는 --create 일 때만 만든다(.md 는 비활성으로).
+  슬롯은 추정까지만 들어간다 — 승격 · 삭제 · 활성화는 admin 화면에서.
 `;
 
 // The types a proposal can name: the server's list as of the last sync, or
@@ -46,11 +53,19 @@ function parseArgs(argv) {
     skillsDir: null,
     server: null,
     mirror: null,
+    create: false,
+    dryRun: false,
+    note: null,
+    rev: null,
   };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--skills") flags.skills = true;
+    else if (a === "--create") flags.create = true;
+    else if (a === "--dry-run") flags.dryRun = true;
+    else if (a === "--note") flags.note = rest[++i];
+    else if (a === "--rev") flags.rev = rest[++i];
     else if (a === "--skills-dir") flags.skillsDir = rest[++i];
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
@@ -313,14 +328,98 @@ async function runCatalogPush(positional, token, serverUrl) {
   }
 }
 
+function parsePushArgs(positional) {
+  const [spec, filePath] = positional;
+  const slashIdx = spec ? spec.indexOf("/") : -1;
+  if (!spec || slashIdx <= 0 || slashIdx === spec.length - 1 || !filePath) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const type = spec.slice(0, slashIdx);
+  const id = spec.slice(slashIdx + 1);
+  let file;
+  if (filePath.endsWith(".md")) {
+    let markdown;
+    try {
+      markdown = readFileSync(filePath, "utf8");
+    } catch (err) {
+      process.stderr.write(`akg: cannot read md file "${filePath}": ${err.message}\n`);
+      process.exit(1);
+    }
+    file = { kind: "md", markdown };
+  } else if (filePath.endsWith(".json")) {
+    file = { kind: "json", doc: readJsonFile(filePath, "document file") };
+  } else {
+    process.stderr.write(`akg push: 파일은 .json 이나 .md 여야 합니다: ${filePath}\n`);
+    process.exit(1);
+  }
+  return { type, id, file };
+}
+
+// The server's refusal as it said it: validation details, the edit rule's
+// message, the missing link targets.
+function writeServerError(prefix, body) {
+  if (!body || typeof body !== "object") return;
+  for (const d of Array.isArray(body.details) ? body.details : [])
+    process.stderr.write(`${prefix}   - ${typeof d === "string" ? d : JSON.stringify(d)}\n`);
+  if (typeof body.message === "string") process.stderr.write(`${prefix}   ${body.message}\n`);
+  if (Array.isArray(body.missing))
+    process.stderr.write(`${prefix}   없는 대상: ${body.missing.map((m) => (typeof m === "string" ? m : `${m.type}/${m.id}`)).join(", ")}\n`);
+  if (Array.isArray(body.overlap)) process.stderr.write(`${prefix}   겹친 곳: ${body.overlap.join(", ")}\n`);
+  if (typeof body.currentRev === "string") process.stderr.write(`${prefix}   서버 rev: ${body.currentRev}\n`);
+}
+
+function runPushDryRun(positional) {
+  const { type, id, file } = parsePushArgs(positional);
+  const problems = checkPushFile({ type, id, file });
+  if (problems.length) {
+    process.stderr.write(`akg push --dry-run: ${type}/${id} 모양이 맞지 않습니다\n`);
+    for (const p of problems) process.stderr.write(`akg push   - ${p}\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`dry-run ok: ${type}/${id} (${file.kind}) — 쓰지 않았습니다\n`);
+}
+
+async function runPush(positional, flags, token, serverUrl) {
+  const { type, id, file } = parsePushArgs(positional);
+  try {
+    const result = await push({
+      serverUrl,
+      token,
+      type,
+      id,
+      file,
+      create: flags.create,
+      note: flags.note,
+      rev: flags.rev,
+    });
+    process.stdout.write(
+      `pushed ${type}/${id} (rev ${result.rev})${result.action === "created" ? " — 새 문서" : ""}\n`,
+    );
+    if (result.kept.length)
+      process.stderr.write(
+        `akg push: ${result.kept.join(", ")} 는 push 가 쓰지 않습니다 — 서버 값 그대로입니다\n`,
+      );
+    process.stdout.write("미러는 다음 akg sync 에서 갱신됩니다\n");
+  } catch (err) {
+    process.stderr.write(`akg push failed: ${err.message}\n`);
+    if (err instanceof AkgApiError) writeServerError("akg push", err.body);
+    // Fail CLOSED, same reasoning as propose.
+    process.exit(1);
+  }
+}
+
 async function main() {
   const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
-  if (!["sync", "propose", "catalog-push"].includes(cmd)) {
+  if (!["sync", "propose", "catalog-push", "push"].includes(cmd)) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
 
   const mirrorDir = resolveMirrorDir(flags);
+
+  // --dry-run reads the file only: no token, no server.
+  if (cmd === "push" && flags.dryRun) return runPushDryRun(positional);
 
   // Every command needs the agent token — the server reads only for a
   // signed-in person or an agent.
@@ -343,7 +442,8 @@ async function main() {
   if (cmd === "sync") await runSync(flags, mirrorDir, token, serverUrl);
   else if (cmd === "propose")
     await runPropose(positional, token, serverUrl, mirrorDir);
-  else await runCatalogPush(positional, token, serverUrl);
+  else if (cmd === "catalog-push") await runCatalogPush(positional, token, serverUrl);
+  else await runPush(positional, flags, token, serverUrl);
 }
 
 main();

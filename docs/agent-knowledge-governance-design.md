@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 설계 문서 (v0.4.7 초안)
+# agent-knowledge-governance — 설계 문서 (v0.4.8 초안)
 
 > claude-hooks에 keyword-docs로 들어간 **도메인 지식 코퍼스**(db-schema · msg-format ·
 > domain-aware-skill)를 독립 레포로 분리하고, **서버에 올려 여러 사람이 대시보드에서
@@ -35,6 +35,8 @@
 > 완료분이 akg `schemas/domain-skill/v1.schema.json`으로 반영되는 순간부터.
 > 이후 foundry validateSpec·renderSkill은 akg 스키마의 추종자(계약 방향 역전).
 > db-schema-docs 포맷 소유자를 claude-hooks로 이관한 것과 같은 패턴.
+> v0.4.8 개정(2026-10-26, 사용자 결정): agent 토큰 쓰기에 수정 · 새 문서 · links 를 더함(D6) —
+> 티어는 추정까지, 승격 · 삭제 · 역할 · 타입은 admin. CLI `akg push`.
 
 ---
 
@@ -344,7 +346,7 @@ inferred·confirmed 슬롯의 원천이 catalog에서 사라지는 경우(컬럼
 | **viewer** | 열람, 미러 sync |
 | **editor** | 문서 생성·수정(결과는 inferred 이하), proposal 채택/기각 |
 | **approver** | + 슬롯/문서 승격(confirmed), 삭제(아카이브) |
-| (agent 토큰) | proposal 제출과 catalog-push만. 문서 직접 쓰기 불가 |
+| (agent 토큰) | 수정 · 새 문서 · links(티어는 추정까지, 승격 · 삭제는 admin), proposal 제출, catalog-push |
 
 - 인증: 사용자별 bearer 토큰(관리 CLI로 발급, `users.json`에 sha256 해시로 저장,
   비교는 obs 서버의 timingSafeEqual 패턴 승계). 단 **기본값은 obs와 정반대의
@@ -353,8 +355,9 @@ inferred·confirmed 슬롯의 원천이 catalog에서 사라지는 경우(컬럼
   만료·회수·시도 제한을 가진다(§11 S14). 사내 배포는 HTTPS reverse proxy 뒤,
   SSO 도입 시 `X-Forwarded-User` 신뢰 모드 추가 — 앱이 클라이언트발
   `X-Forwarded-*`를 항상 덮어쓰고 프록시 우회 접속이 불가능한 바인딩(§11 S2)이 전제.
-- "승격 = 사람"의 기술적 강제: agent 토큰에는 promote/PUT 권한 자체가 없다.
-  editor가 직접 편집한 프로즈도 inferred로 저장 — confirmed는 오직 promote 액션.
+- "승격 = 사람"의 기술적 강제: agent 토큰에는 promote 권한이 없다. agent 의 PUT · POST
+  본문도 사람의 편집과 같이 inferred 로 저장되고, 확정 슬롯을 고치면 inferred 로 내려간다
+  — confirmed는 오직 promote 액션.
 - 감사: 모든 변이 = git 커밋(author) + audit 행(actor, action, doc, slot, before/after 요약).
 
 ### D7. 새 서버 (관측 수집기 확장 아님)

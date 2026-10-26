@@ -353,14 +353,15 @@ export function registerDocsRoutes(app) {
     },
   );
 
-  // Anyone who writes may file an unclassified document; every other type is
-  // the admin's.
+  // A person who writes may file an unclassified document; every other type is
+  // the admin's and the agent's. The agent's document lands at inferred like
+  // any other (D4 below).
   app.post(
     "/api/docs/:type",
-    { config: { roles: ["admin", "user"] } },
+    { config: { roles: ["admin", "user", "agent"] } },
     async (request, reply) => {
       const { type } = request.params;
-      if (type !== UNCLASSIFIED.id && !hasGroup(request.user, ["admin"]))
+      if (type !== UNCLASSIFIED.id && !hasGroup(request.user, ["admin", "agent"]))
         return reply.code(403).send({ error: "forbidden" });
       const schemaId = `${type}/v1`;
       const bodySchema = types.bodySchema(type);
@@ -428,7 +429,7 @@ export function registerDocsRoutes(app) {
 
   app.put(
     "/api/docs/:type/:id",
-    { config: { roles: ["admin"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       const bodySchema = types.bodySchema(type);
@@ -758,7 +759,7 @@ export function registerDocsRoutes(app) {
   // activate: a stale rev is a 409, not a merge.
   app.put(
     "/api/docs/:type/:id/links",
-    { config: { roles: ["admin"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       if (!types.bodySchema(type))
