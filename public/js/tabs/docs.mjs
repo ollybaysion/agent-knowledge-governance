@@ -9,7 +9,8 @@ import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
 import { SUB_LABEL, docRows, inDocsTab, move, rowTier, typeRows } from "/lib/miller.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
-import { shortRev, tierBadge } from "../shared.mjs";
+import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
+import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, readFilter, tableGroups } from "/lib/table-class.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, typeColor } from "../state.mjs";
 
@@ -45,8 +46,41 @@ function docRow(d, { on, id }) {
       d.status === "inactive" ? el("span", { class: "mini-off", text: "비활성" }) : null,
       el("span", { class: "mrow-chev" }, icon("right", 14)),
     ]),
-    el("div", { class: "mrow-sub" }, [tierChip(d), d.updatedAt ? el("span", { class: "dim", text: `수정 ${shortDay(d.updatedAt)}` }) : null]),
+    el("div", { class: "mrow-sub" }, [
+      tierChip(d),
+      d.type === "db-schema" ? kindBadge(kindOf(d)) : null,
+      d.type === "db-schema" ? coverageBar(d.coverage) : null,
+      d.updatedAt ? el("span", { class: "dim", text: `수정 ${shortDay(d.updatedAt)}` }) : null,
+    ]),
   ]);
+}
+
+// The db-schema list's filter (중요도 · 성격), kept for this tab's session.
+const FILTER_KEY = "akg_table_filter";
+function savedFilter() {
+  try {
+    return readFilter(sessionStorage.getItem(FILTER_KEY));
+  } catch {
+    return { ...DEFAULT_FILTER };
+  }
+}
+function saveFilter(f) {
+  try {
+    sessionStorage.setItem(FILTER_KEY, JSON.stringify(f));
+  } catch {
+    /* storage off: the filter lasts until the next screen */
+  }
+}
+/** The two chip rows above the db-schema list. */
+function filterChips(filter, onPick) {
+  const row = (axis, label) =>
+    el("div", { class: "tfilter-row", role: "group", "aria-label": label }, [
+      el("span", { class: "dim tfilter-k", text: label }),
+      ...TABLE_FILTERS[axis].map(([k, text]) =>
+        el("button", { type: "button", class: filter[axis] === k ? "on" : "", "aria-pressed": String(filter[axis] === k), onclick: () => onPick({ ...filter, [axis]: k }) }, text),
+      ),
+    ]);
+  return el("div", { class: "typechips tfilter" }, [row("major", "중요도"), row("kind", "성격")]);
 }
 
 /** This browser's unsaved drafts of a type, as links ("(빈 문서)" until named). */
@@ -163,9 +197,13 @@ export async function renderBrowse(pickType = null) {
   ];
   const firstType = col1.findIndex((r) => r.kind === "type" && (pickType ? r.type.id === pickType : r.type.count > 0));
   let state = { col: pickType ? 2 : 1, i1: Math.max(0, firstType), i2: 0 };
+  // db-schema: 주요 then 기타, through the filter; the arrow keys walk the same order.
+  let tableFilter = savedFilter();
+  const groupsOf = (type, filter = tableFilter) => (type === "db-schema" ? tableGroups(docRows(docs, type), filter) : null);
   const listOf = (i1) => {
     const r = col1[i1];
-    return r?.kind === "type" ? docRows(docs, r.type.id) : [];
+    if (r?.kind !== "type") return [];
+    return groupsOf(r.type.id)?.flatMap((g) => g.rows) ?? docRows(docs, r.type.id);
   };
   if (state.col === 2 && !listOf(state.i1).length) state.col = 1;
   // A doc row in column 1 shows its own type's list in column 2, itself picked.
@@ -244,9 +282,12 @@ export async function renderBrowse(pickType = null) {
     let list = listOf(state.i1);
     let type = r?.kind === "type" ? r.type.id : null;
     picked = null;
+    // A 즐겨찾기 · 최근 row shows its type's whole list, so it is always in it.
+    let groups = type ? groupsOf(type) : null;
     if (r?.kind === "doc") {
       type = r.doc.type;
-      list = docRows(docs, type);
+      groups = groupsOf(type, DEFAULT_FILTER);
+      list = groups?.flatMap((g) => g.rows) ?? docRows(docs, type);
       picked = r.doc;
     }
     if (!type) {
@@ -254,29 +295,47 @@ export async function renderBrowse(pickType = null) {
       return;
     }
     const t = types.find((x) => x.id === type);
+    const row = (d, i) => {
+      const on = picked ? picked.id === d.id : state.i2 === i;
+      const li = docRow(d, { on, id: `m2-${i}` });
+      if (on && state.col === 2) li.classList.add("cur");
+      li.addEventListener("click", () => {
+        if (r?.kind === "doc") return open(d);
+        state = { col: 2, i1: state.i1, i2: i };
+        paint();
+      });
+      li.addEventListener("dblclick", () => open(d));
+      return li;
+    };
+    const items = [];
+    if (groups) {
+      let i = 0;
+      for (const g of groups) {
+        items.push(el("li", { class: "mgroup", role: "presentation" }, [g.label, el("span", { class: "count-pill", text: String(g.rows.length) })]));
+        for (const d of g.rows) items.push(row(d, i++));
+      }
+    } else list.forEach((d, i) => items.push(row(d, i)));
+    const filtering = type === "db-schema" && r?.kind === "type";
     c2.replaceChildren(
       el("div", { class: "mcol-h" }, [
         el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
         el("b", { text: t?.label ?? typeLabel(type) }),
         el("span", { class: "dim", text: String(list.length) }),
         el("span", { class: "sp" }),
-        el("span", { class: "dim", text: "최근 수정 순" }),
+        el("span", { class: "dim", text: groups ? "주요 → 기타 · 최근 수정 순" : "최근 수정 순" }),
       ]),
+      filtering
+        ? filterChips(tableFilter, (f) => {
+            tableFilter = f;
+            saveFilter(f);
+            state = { ...state, i2: 0 };
+            paint();
+          })
+        : document.createTextNode(""),
       draftLinks(type, { role: draftRole(type) }) ?? document.createTextNode(""),
       list.length
-        ? el("ul", { class: "mlist" }, list.map((d, i) => {
-            const on = picked ? picked.id === d.id : state.i2 === i;
-            const li = docRow(d, { on, id: `m2-${i}` });
-            if (on && state.col === 2) li.classList.add("cur");
-            li.addEventListener("click", () => {
-              if (r?.kind === "doc") return open(d);
-              state = { col: 2, i1: state.i1, i2: i };
-              paint();
-            });
-            li.addEventListener("dblclick", () => open(d));
-            return li;
-          }))
-        : el("p", { class: "dim pnone", text: "문서가 없습니다." }),
+        ? el("ul", { class: "mlist" }, items)
+        : el("p", { class: "dim pnone", text: filtering && docRows(docs, type).length ? "거르기에 맞는 표가 없습니다." : "문서가 없습니다." }),
     );
     c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
   }

@@ -42,7 +42,7 @@ import {
   resolveWikilinks,
   withLinks,
 } from "../links.mjs";
-import { dataIdOwners } from "../data-ids.mjs";
+import { activeTableUses, dataIdOwners, tableClassOf } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
 import { UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
@@ -152,6 +152,7 @@ export function registerDocsRoutes(app) {
       backlinks: backlinksOf(storeDir, typeIds, type, id),
       wikilinks: resolveWikilinks(storeDir, typeIds, type, doc),
       ...warningsOf(type, doc),
+      ...(type === "db-schema" ? tableClassOf(doc, activeTableUses(storeDir)) : {}),
     };
   };
 
@@ -162,6 +163,7 @@ export function registerDocsRoutes(app) {
       const { type, tier, q } = request.query ?? {};
       const docs = [];
       const typeIds = types.ids();
+      let uses = null; // read once, at the first db-schema
       for (const t of type ? [type] : types.ids()) {
         const bodySchema = types.bodySchema(t);
         if (!bodySchema) continue;
@@ -182,6 +184,10 @@ export function registerDocsRoutes(app) {
             ...originOf(doc),
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
+            // 성격 · 주요 (조회에 쓰이나) · 확정 커버리지: the db-schema list's groups and badges.
+            ...(t === "db-schema"
+              ? { ...(doc.body?.kind ? { kind: doc.body.kind } : {}), ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))) }
+              : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),
             updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
             // The body's [[ ]] with where each points: the graph draws them
@@ -700,6 +706,12 @@ export function registerDocsRoutes(app) {
             submitted.body ?? submitted,
             { by: `deprecate:facts-push`, at: now },
           );
+          // A db-schema's kind (info · data) is a person's call, not a fact
+          // the collector knows: the stored one stays.
+          if (type === "db-schema" && current) {
+            if (current.body?.kind !== undefined) body.kind = current.body.kind;
+            else delete body.kind;
+          }
 
           // Creating: land inactive, like every other bulk path (#7). An
           // existing document keeps whatever status it already had — pushing

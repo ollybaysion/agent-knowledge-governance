@@ -334,6 +334,7 @@ unclassified(§4.5)는 "정형 타입 어디에도 분류되지 않는 md"라는
 "body": {
   "owner": "TESTUSER",                      // 선택, 대문자 — 순수 속성. id·파일명에 관여하지 않는다
   "table": "FDC_SENSOR",                    // 필수, 대문자. id = lower(table)
+  "kind": "info",                           // 선택: info | data — 표의 성격. 없으면 화면은 "미정"
   "catalog": {                              // 필수. [기계 소유] catalog-push API만 갱신
     "columns": [                            // describe_table 응답 사본 (agent-db-plugin 계약)
       { "name": "SNSR_ID", "type": "VARCHAR2(30)", "nullable": false,
@@ -373,6 +374,20 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 쓰기 때 서버가 이 링크를 `links[]`(rel `related`)로 굳히고, 읽기 화면은 칩으로 그린다.
 읽는 자리는 사람이 쓰는 티어드 값 세 자리다. 수집기 값 `catalog.columns[].comment` ·
 `tableComment` 는 글 그대로 둔다.
+
+분류: 표 하나를 두 축으로 본다. 두 축은 서로 독립이다.
+
+- **성격** `kind` — `info` 또는 `data`. 사람이
+  문서 머리 배지로 정하고 문서 PUT 으로 저장한다. 칸이 없으면 "미정"이다. 수집기
+  경로(catalog-push · facts-push)는 이 칸을 그대로 둔다.
+- **중요도** 주요 · 기타 — 저장 칸이 아니라 서버가 셈하는 값이다. 활성 domain-skill ·
+  domain 문서의 `## 데이터` 조회(```sql 펜스, `src/skill-data-ids.mjs`) 가운데 하나라도
+  FROM · JOIN 대상에 이 표(`table`, 대소문자 무시, `OWNER.` 접두 뗌)를 두면 주요, 아니면
+  기타다(`src/table-class.mjs` `tablesOfSql`). `GET /api/docs` 의 db-schema 항목과
+  `GET /api/docs/db-schema/:id` 가 `major` · `usedBy[]{type, id, query}` 로 싣는다.
+- **확정 커버리지** — 슬롯(`purpose` · `columnDescs.*` · `queries[].note`) 가운데
+  confirmed 수 / (scaffold + inferred + confirmed) 수. deprecated 는 분모에서 뺀다.
+  같은 두 응답이 `coverage{confirmed, total, ratio}` 로 싣는다(`coverageOf`).
 
 ### 4.2 `msg-format/v1` — 설비 커맨드 메시지 문서
 
