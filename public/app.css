@@ -768,6 +768,29 @@ h1 .chip.owner-chip {
   flex: 1;
   min-width: 180px;
 }
+/* 열 표: 앞 칸은 글 폭만, 설명 칸이 남는 폭을 다 쓴다 */
+.cols-tbl th:not(:last-child),
+.cols-tbl td.nowrap {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+/* 편집 중인 설명은 그 행 아래 한 줄 전체에 */
+.cols-tbl tr.editing-src > td {
+  border-bottom: 0;
+}
+.cols-tbl tr.slot-edit-row > td {
+  padding: 0 4px 10px;
+}
+/* 표가 본문보다 넓어 옆으로 밀릴 때도 편집 블록은 보이는 폭 안에 */
+.tbl-wrap:has(> .cols-tbl) {
+  container-type: inline-size;
+}
+.cols-tbl tr.slot-edit-row .slot-edit {
+  position: sticky;
+  left: 4px;
+  max-width: calc(100cqw - 8px);
+}
 /* 문서 내 슬롯 — 본문 그 자리에서 배지+액션 */
 .ps {
   display: flex;
