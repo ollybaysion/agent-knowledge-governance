@@ -29,6 +29,7 @@ import { registerMiscRoutes } from "./routes/misc.mjs";
 import { MERMAID_FRAME, registerDashboardRoutes } from "./routes/dashboard.mjs";
 import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
 import { registerScoreRoutes } from "./routes/score.mjs";
+import { registerSchemaIndexRoutes } from "./routes/schema-index.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -182,6 +183,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
   registerScoreRoutes(app);
+  registerSchemaIndexRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

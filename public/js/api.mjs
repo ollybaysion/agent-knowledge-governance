@@ -51,6 +51,9 @@ export async function api(path, opts = {}) {
 // GET /api/docs once per change: the agent list, the browser columns, ⌘K and
 // the body chips all read the same rows. A write calls invalidateDocs().
 let docsPromise = null;
+// Counts the writes: a module that keeps its own read of the store (the SQL
+// schema index) reads again when this moves.
+export let docsVersion = 0;
 export function allDocs() {
   if (!docsPromise)
     docsPromise = api("/api/docs").then((r) => (r.ok ? r.data.docs.filter((d) => d.status !== "archived") : []));
@@ -58,6 +61,7 @@ export function allDocs() {
 }
 export function invalidateDocs() {
   docsPromise = null;
+  docsVersion++;
   scorePromises.clear();
 }
 

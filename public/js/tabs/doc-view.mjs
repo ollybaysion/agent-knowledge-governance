@@ -7,6 +7,7 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
+import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
   evidence,
@@ -917,7 +918,7 @@ function slotBody(ctx, host) {
           sec({
             key: "쓰는 법",
             title: "쓰는 법",
-            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), el("pre", { class: "md-code lang-sql" }, el("code", { text: q.sql }))]),
+            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), el("pre", { class: "md-code lang-sql" }, sqlCode(q.sql))]),
           }),
         );
     } else {

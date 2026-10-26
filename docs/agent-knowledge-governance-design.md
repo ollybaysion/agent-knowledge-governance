@@ -536,6 +536,7 @@ path는 `docs/<id>.md` 상대 경로) — 주입기 쪽 코드 수정 0. `precis
 | `GET /api/docs?type=&tier=&q=` | viewer | 목록 + 슬롯 티어 집계(검토 대기열의 데이터원) |
 | `GET /api/docs/:type/:id` | viewer | `{json, md, rev, tiers}`; `?format=md`는 md 원문 + ETag(문서 rev), `If-None-Match` → 304(B모드 캐시 재검증) |
 | `GET /api/index/:type` | viewer | 프로바이더 포맷 index.json(ETag = HEAD rev) — B모드 인덱스 갱신용 |
+| `GET /api/schema-index` | viewer | `{<db-schema id>: {table, columns: {<COL>: {text}}}}` — 비활성 · 아카이브 제외, `text` = columnDescs → catalog comment → null. 읽기 화면 SQL 의 표 · 열 바로가기와 열 설명 툴팁이 쓴다. db-schema/ 에 새 커밋이 생기면 다시 만든다 |
 | `GET /api/schemas/:type` | 공개 | 해당 타입의 현행 JSON Schema(§5.0) — 대시보드 폼·외부 도구가 소비 |
 | `POST /api/docs/:type` | editor | 생성(스키마 검증 + 키워드 충돌 검증) |
 | `PUT /api/docs/:type/:id` | editor | 수정. `If-Match: rev` 필수, 프로즈 변경은 inferred로 강등 저장 |
