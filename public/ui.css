@@ -1687,6 +1687,13 @@ a.sql-col:focus-visible {
 .path-panel .mlist {
   padding: 4px 8px;
 }
+/* 거르기에 걸린 지금 문서: 목록 맨 위에 흐리게 */
+.path-panel .mrow.dim {
+  opacity: 0.55;
+}
+.path-panel .tfilter {
+  padding: 4px 16px 2px;
+}
 .mrow {
   padding: 8px 10px;
   border-radius: 8px;

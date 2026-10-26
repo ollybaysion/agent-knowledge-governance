@@ -8,6 +8,7 @@ import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { moveName, orderColumns } from "/lib/column-order.mjs";
+import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -904,11 +905,11 @@ function slotBody(ctx, host) {
   let dragName = null;
   const orderedNames = () => orderColumns(b().catalog?.columns, b().columnOrder).map((c) => c.name);
   const focusGrip = (name) => host.querySelector(`tr[data-col="${CSS.escape(name)}"] .grip`)?.focus();
-  function staleOrderNotice() {
+  function staleOrderNotice(verb = "옮기세요") {
     notice()?.replaceChildren(
       el("div", { class: "notice" }, [
         el("strong", { text: "문서가 그 사이 바뀌었습니다 " }),
-        el("span", { text: "— 다시 읽은 뒤 옮기세요." }),
+        el("span", { text: `— 다시 읽은 뒤 ${verb}.` }),
         el("button", { type: "button", class: "btn ghost sm", onclick: () => reload(), text: "다시 읽기" }),
       ]),
     );
@@ -916,7 +917,7 @@ function slotBody(ctx, host) {
   async function moveColumn(name, to) {
     const names = orderedNames();
     const from = names.indexOf(name);
-    if (orderBusy || from < 0 || to === from || to < 0 || to >= names.length) return;
+    if (orderBusy || unusedBusy || from < 0 || to === from || to < 0 || to >= names.length) return;
     const next = moveName(names, from, to);
     const before = { doc: ctx.doc, rev: ctx.rev };
     const body = { ...before.doc.body, columnOrder: next };
@@ -950,6 +951,62 @@ function slotBody(ctx, host) {
     }
     const why = r.data?.message ?? r.data?.details?.join(" · ");
     toast(`열 순서를 저장하지 못했습니다 (${r.status})${why ? ` — ${why}` : ""}`, "error");
+  }
+  // 미사용 열 (db-schema, admin): body.unusedColumns are the columns BE leaves
+  // out of the prompt. Each check is one document PUT right away, like a move;
+  // a success reads the doc again (the head's 확정 커버리지 counts used
+  // columns only), a failure puts the old marks back.
+  let unusedBusy = false;
+  const focusUse = (name) => document.querySelector(`tr[data-col="${CSS.escape(name)}"] .use-box`)?.focus();
+  async function setUnused(name, on) {
+    if (unusedBusy || orderBusy) return;
+    const next = toggleUnused(b().unusedColumns, name, on);
+    const before = { doc: ctx.doc, rev: ctx.rev };
+    const body = { ...before.doc.body, unusedColumns: next };
+    ctx.setDocRev({ ...before.doc, body }, before.rev);
+    unusedBusy = true;
+    paint();
+    focusUse(name);
+    const r = await api(`/api/docs/db-schema/${enc(id)}`, {
+      method: "PUT",
+      headers: { "if-match": before.rev, "x-akg-note": encodeURIComponent(`${on ? "미사용" : "사용"}: ${name}`) },
+      body,
+    });
+    unusedBusy = false;
+    // A stale rev rebases at slot level and keeps the stored marks: that is a miss too.
+    const landed = r.ok && JSON.stringify(r.data?.json?.body?.unusedColumns ?? []) === JSON.stringify(next);
+    if (landed) {
+      toast(on ? `${name} 열을 미사용으로 바꿨습니다` : `${name} 열을 사용으로 바꿨습니다`, "ok");
+      await reload();
+      focusUse(name);
+      return;
+    }
+    ctx.setDocRev(before.doc, before.rev);
+    paint();
+    focusUse(name);
+    if (r.ok || r.status === 409) {
+      toast("다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요.", "error");
+      staleOrderNotice("바꾸세요");
+      return;
+    }
+    const why = r.data?.message ?? r.data?.details?.join(" · ");
+    toast(`미사용 표시를 저장하지 못했습니다 (${r.status})${why ? ` — ${why}` : ""}`, "error");
+  }
+  /** The 사용 cell: checked = BE puts the column in the prompt. */
+  function useCell(name, unused) {
+    const locked = unusedBusy || orderBusy || editingAddr !== null || reconcileFor !== null;
+    return el(
+      "td",
+      { class: "td-use nowrap" },
+      el("input", {
+        type: "checkbox",
+        class: "use-box",
+        checked: !unused,
+        disabled: locked,
+        "aria-label": `${name} 열 사용`,
+        onchange: (e) => setUnused(name, !e.target.checked),
+      }),
+    );
   }
   /** The handle cell: drag grip (Alt+↑ · Alt+↓ on focus) and 위 · 아래. */
   function orderCell(name, i, n, locked) {
@@ -1024,14 +1081,21 @@ function slotBody(ctx, host) {
       const ordered = orderColumns(b().catalog?.columns, b().columnOrder);
       const rows = ordered.flatMap((col, i) => {
         const slot = slotByAddr(`columnDescs.${col.name}`);
+        const unused = isUnused(b().unusedColumns, col.name);
         const trs = slotTableRows(
           [
+            canOrder ? useCell(col.name, unused) : null,
             canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
-            el("td", { class: "mono nowrap" }, [col.name, pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null]),
+            el("td", { class: "mono nowrap" }, [
+              col.name,
+              pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null,
+              unused ? el("span", { class: "unused-chip", text: "미사용" }) : null,
+            ]),
             el("td", { class: "mono dim nowrap", text: col.type }),
             el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
           ].filter(Boolean),
           slot,
+          unused ? "unused-row" : "",
         );
         trs[0].dataset.col = col.name;
         if (canOrder) wireDrop(trs[0], col.name);
@@ -1043,6 +1107,7 @@ function slotBody(ctx, host) {
           rows.push(
             ...slotTableRows(
               [
+                canOrder ? el("td", { class: "td-use nowrap" }) : null,
                 canOrder ? el("td", { class: "td-grip nowrap" }) : null,
                 el("td", { class: "mono strike nowrap", text: m[1] }),
                 el("td", { class: "dim nowrap", text: "—" }),
@@ -1059,8 +1124,10 @@ function slotBody(ctx, host) {
           key: "열",
           title: "열",
           children: [
+            el("p", { class: "dim small cols-sum", text: unusedSummary(b().catalog?.columns, b().unusedColumns) }),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               el("thead", {}, el("tr", {}, [
+                canOrder ? el("th", { scope: "col", class: "th-ord", text: "사용" }) : null,
                 canOrder ? el("th", { scope: "col", class: "th-ord", title: "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)", text: "순서" }) : null,
                 ...["열", "타입", "빈칸", "설명"].map((t) => el("th", { scope: "col", text: t })),
               ])),

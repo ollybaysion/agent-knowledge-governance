@@ -10,7 +10,7 @@ import { SUB_LABEL, docRows, inDocsTab, move, rowTier, typeRows } from "/lib/mil
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
-import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, readFilter, tableGroups } from "/lib/table-class.mjs";
+import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, pathGroups, readFilter, tableGroups } from "/lib/table-class.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, typeColor } from "../state.mjs";
 
@@ -119,6 +119,10 @@ function setFolded(v) {
 export function pathPanel(type, id, docs, draftId = null) {
   const rows = docRows(docs, type);
   const color = typeColor(type);
+  // db-schema: the browser's 중요도 · 성격 chips and 주요 → 기타 groups, the
+  // same filter (sessionStorage) as the browser.
+  const isTable = type === "db-schema";
+  let tableFilter = savedFilter();
   const node = el("aside", { class: "panel left path-panel", "aria-label": "같은 타입 문서" });
   let layout = null;
   const handle = el("button", { type: "button", class: "fold-handle", onclick: () => toggle() });
@@ -144,19 +148,35 @@ export function pathPanel(type, id, docs, draftId = null) {
       );
       return;
     }
-    const list = el("ul", { class: "mlist", role: "listbox", "aria-label": `${typeLabel(type)} 문서` }, rows.map((d) => {
+    const view = isTable ? pathGroups(rows, tableFilter, id) : null;
+    const shown = view ? view.order.length - (view.stray ? 1 : 0) : rows.length;
+    const items = [];
+    const row = (d, extra = "") => {
       const li = docRow(d, { on: d.id === id });
+      if (extra) li.classList.add(extra);
       li.tabIndex = 0;
       li.addEventListener("click", () => (location.hash = `#/doc/${d.type}/${enc(d.id)}`));
       li.addEventListener("keydown", (e) => {
         if (e.key === "Enter") location.hash = `#/doc/${d.type}/${enc(d.id)}`;
         else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
-          (e.key === "ArrowDown" ? li.nextElementSibling : li.previousElementSibling)?.focus();
+          // ↑ ↓ walk the document rows only, past the 주요 · 기타 heads.
+          const all = [...li.parentElement.querySelectorAll(":scope > li.mrow")];
+          all[all.indexOf(li) + (e.key === "ArrowDown" ? 1 : -1)]?.focus();
         }
       });
       return li;
-    }));
+    };
+    if (view) {
+      if (view.stray) items.push(row(view.stray, "dim"));
+      for (const g of view.groups) {
+        items.push(el("li", { class: "mgroup", role: "presentation" }, [g.label, el("span", { class: "count-pill", text: String(g.rows.length) })]));
+        for (const d of g.rows) items.push(row(d));
+      }
+    } else for (const d of rows) items.push(row(d));
+    const list = items.length
+      ? el("ul", { class: "mlist", role: "listbox", "aria-label": `${typeLabel(type)} 문서` }, items)
+      : el("p", { class: "dim pnone", text: rows.length ? "거르기에 맞는 표가 없습니다." : "문서가 없습니다." });
     node.replaceChildren(
       el("div", { class: "path-head" }, [
         el("div", { class: "path-crumb" }, [
@@ -168,9 +188,18 @@ export function pathPanel(type, id, docs, draftId = null) {
         el("a", { class: "btn ghost sm back-browse", href: `#/docs/${type}` }, [icon("left", 13), "탐색으로"]),
       ]),
       el("div", { class: "plabel path-list-h" }, [
-        el("span", {}, [el("span", { class: "tdot", style: { "--c": color } }), ` ${typeLabel(type)} `, el("span", { class: "count-pill", text: String(rows.length) })]),
-        el("span", { class: "dim", text: "최근 수정 순" }),
+        el("span", {}, [el("span", { class: "tdot", style: { "--c": color } }), ` ${typeLabel(type)} `, el("span", { class: "count-pill", text: String(shown) })]),
+        el("span", { class: "dim", text: isTable ? "주요 → 기타 · 최근 수정 순" : "최근 수정 순" }),
       ]),
+      isTable
+        ? filterChips(tableFilter, (f) => {
+            const axis = f.major !== tableFilter.major ? 1 : 2;
+            tableFilter = f;
+            saveFilter(f);
+            paint(false);
+            node.querySelector(`.tfilter-row:nth-child(${axis}) button.on`)?.focus();
+          })
+        : document.createTextNode(""),
       el("div", { class: "panel-scroll" }, [draftLinks(type, { role: draftRole(type), current: draftId }), list, el("p", { class: "dim path-hint", text: "같은 타입 문서 — ↑ ↓ 로 옮기고 ↩ 로 엽니다." })]),
       el("div", { class: "panel-foot" }, newDocButton()),
       handle,

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { coverageText, kindOf, majorCoverage, readFilter, tableGroups, userCount } from "../../public/lib/table-class.mjs";
+import { coverageText, kindOf, majorCoverage, pathGroups, readFilter, tableGroups, userCount } from "../../public/lib/table-class.mjs";
 
 const cov = (confirmed, total) => ({ confirmed, total, ratio: total ? confirmed / total : 0 });
 const ROWS = [
@@ -55,4 +55,26 @@ test("coverageText · userCount: 확정 n/m, and the distinct documents among us
   assert.equal(userCount(ROWS[1]), 1);
   assert.equal(userCount(ROWS[3]), 2);
   assert.equal(userCount(ROWS[0]), 0);
+});
+
+test("pathGroups: the open document's list is the browser's groups when the filter keeps the open row", () => {
+  const v = pathGroups(ROWS, { major: "major", kind: "all" }, "a");
+  assert.deepEqual(ids(v.groups), [["major", ["a", "b"]]]);
+  assert.equal(v.stray, null);
+  assert.deepEqual(v.order.map((r) => r.id), ["a", "b"]);
+});
+
+test("pathGroups: an open row the filter hides is the stray, first in the ↑ ↓ order", () => {
+  const v = pathGroups(ROWS, { major: "major", kind: "all" }, "c");
+  assert.deepEqual(ids(v.groups), [["major", ["a", "b"]]]);
+  assert.equal(v.stray.id, "c");
+  assert.deepEqual(v.order.map((r) => r.id), ["c", "a", "b"]);
+});
+
+test("pathGroups: a filter that hides every row leaves the open one only; no open row, no stray", () => {
+  const v = pathGroups(ROWS, { major: "major", kind: "none" }, "d");
+  assert.deepEqual(v.groups, []);
+  assert.deepEqual(v.order.map((r) => r.id), ["d"]);
+  assert.equal(pathGroups(ROWS, { major: "other", kind: "all" }, null).stray, null);
+  assert.deepEqual(pathGroups(ROWS).order.map((r) => r.id), ["a", "b", "c", "d"]);
 });

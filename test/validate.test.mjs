@@ -174,6 +174,33 @@ test("db-schema: columnOrder refuses a repeated name, a non-string, a blank and 
   }
 });
 
+test("db-schema: unusedColumns is an optional array of column names; a name the catalog lacks passes", () => {
+  const doc = minimalDbSchemaDoc();
+  doc.body.unusedColumns = ["A"];
+  assert.deepEqual(validateDocument(doc, refs), []);
+  doc.body.unusedColumns = [];
+  assert.deepEqual(validateDocument(doc, refs), []);
+  doc.body.unusedColumns = ["GONE", "A"];
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
+test("db-schema: unusedColumns refuses a repeated name, a non-string, a blank and a non-array", () => {
+  for (const [bad, needle] of [
+    [["A", "A"], "uniqueItems"],
+    [["A", 1], "expected type string"],
+    [[" "], "pattern"],
+    ["A", "expected type array"],
+  ]) {
+    const doc = minimalDbSchemaDoc();
+    doc.body.unusedColumns = bad;
+    const errors = validateDocument(doc, refs);
+    assert.ok(
+      errors.some((e) => e.includes("unusedColumns") && e.includes(needle)),
+      `${JSON.stringify(bad)}: ${JSON.stringify(errors)}`,
+    );
+  }
+});
+
 test("uniqueItems: equal items are refused, items that only look alike pass", () => {
   const schema = { type: "array", uniqueItems: true };
   assert.equal(validate(schema, [1, 1]).length, 1);

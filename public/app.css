@@ -884,6 +884,36 @@ h1 .chip.owner-chip {
 tr.dep-row td {
   color: var(--muted);
 }
+/* 미사용 열: 체크박스 칸 · 흐린 줄 · 회색 꼬리표 */
+.cols-sum {
+  margin: 0 0 6px;
+}
+.cols-tbl td.td-use {
+  padding-left: 6px;
+  padding-right: 2px;
+  text-align: center;
+}
+.cols-tbl .use-box {
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.cols-tbl .use-box:disabled {
+  cursor: default;
+}
+.cols-tbl tr.unused-row > td:not(.td-use):not(.td-grip) {
+  color: var(--muted);
+  opacity: 0.55;
+}
+.unused-chip {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  color: var(--muted);
+  font: 600 10px var(--sans);
+}
 .card {
   border: 1px solid var(--hairline);
   border-radius: 8px;
