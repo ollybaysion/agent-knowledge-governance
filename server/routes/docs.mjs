@@ -185,11 +185,13 @@ export function registerDocsRoutes(app) {
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
             // 성격 · 미사용 열 · 주요 (조회에 쓰이나) · 확정 커버리지: the db-schema list's groups and badges.
+            // columns: the catalog's column names, unused ones too — what ⌘K finds a table by.
             ...(t === "db-schema"
               ? {
                   ...(doc.body?.kind ? { kind: doc.body.kind } : {}),
                   ...(doc.body?.unusedColumns ? { unusedColumns: doc.body.unusedColumns } : {}),
                   ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))),
+                  columns: (doc.body?.catalog?.columns ?? []).map((c) => c.name),
                 }
               : {}),
             rev: revOfPath(storeDir, `${t}/${id}.json`),

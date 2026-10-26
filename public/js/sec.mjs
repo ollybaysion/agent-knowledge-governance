@@ -52,10 +52,10 @@ export function sec({ key, title, onEdit, editLabel = "편집", children, extra 
   );
 }
 
-/** Scroll the main column to a node, below the sticky head (its scroll-margin-top). */
-export function scrollToNode(node, { smooth = true } = {}) {
+/** Scroll the main column to a node, below the sticky head (its scroll-margin-top); block "center" for a table row. */
+export function scrollToNode(node, { smooth = true, block = "start" } = {}) {
   if (!node) return false;
-  node.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  node.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block });
   node.classList.add("flash");
   setTimeout(() => node.classList.remove("flash"), 1200);
   return true;

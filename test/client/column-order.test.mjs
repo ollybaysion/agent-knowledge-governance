@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { moveName, orderColumns } from "../../public/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns } from "../../public/lib/column-order.mjs";
 
 const cols = (...names) => names.map((name) => ({ name, type: "NUMBER", nullable: true }));
 const names = (list) => list.map((c) => c.name);
@@ -42,4 +42,12 @@ test("moveName: an index out of range gives the same order back", () => {
   assert.deepEqual(moveName(["A", "B"], 0, -1), ["A", "B"]);
   assert.deepEqual(moveName(["A", "B"], 1, 2), ["A", "B"]);
   assert.deepEqual(moveName(["A", "B"], 5, 0), ["A", "B"]);
+});
+
+test("findColumn: ?col= names the 열 row as the catalog spells it, null once the column is gone", () => {
+  assert.equal(findColumn(cols("EQP_ID", "MODEL_CD"), "MODEL_CD"), "MODEL_CD");
+  assert.equal(findColumn(cols("EQP_ID", "MODEL_CD"), "model_cd"), "MODEL_CD");
+  assert.equal(findColumn(cols("EQP_ID"), "MODEL_CD"), null);
+  assert.equal(findColumn(cols("EQP_ID"), null), null);
+  assert.equal(findColumn(undefined, "A"), null);
 });

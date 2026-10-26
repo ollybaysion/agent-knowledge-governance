@@ -393,6 +393,8 @@ curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d clien
 | 배치 | `POST /api/docs/:type/batch`(8절, 비활성으로 들어감) |
 | 점수 | `POST /api/score/:agent` |
 
+`GET /api/docs` 의 db-schema 항목에는 `columns`(catalog 의 열 이름 목록, 미사용 열 포함)가 있다.
+
 화면에서 등록한 md 타입도 같은 경로다. `:type` 에 그 타입 id 를 넣고, body 는 `{ name, markdown }` 이다.
 
 슬롯은 추정(`inferred`)까지만 들어간다. 본문에 `confirmed` 를 적어도 `inferred` 로 저장되고,
