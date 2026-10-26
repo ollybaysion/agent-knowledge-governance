@@ -47,6 +47,20 @@ export function tableGroups(rows, filter = DEFAULT_FILTER) {
   ].filter((g) => g.rows.length && (filter.major === "all" || filter.major === g.key));
 }
 
+/**
+ * The open document's path column: {@link tableGroups} of the rows, and
+ * `stray` = the open row when the filter hides it (it stays on top, dimmed).
+ * `order` is the walk of ↑ ↓: stray first, then the groups' rows.
+ * @returns {{groups: {key: string, label: string, rows: object[]}[], stray: object|null, order: object[]}}
+ */
+export function pathGroups(rows, filter = DEFAULT_FILTER, currentId = null) {
+  const groups = tableGroups(rows, filter);
+  const shown = groups.flatMap((g) => g.rows);
+  const cur = rows.find((d) => d.id === currentId);
+  const stray = cur && !shown.includes(cur) ? cur : null;
+  return { groups, stray, order: stray ? [stray, ...shown] : shown };
+}
+
 /** "확정 12/40" — the short text beside the bar. */
 export const coverageText = (c) => `확정 ${c?.confirmed ?? 0}/${c?.total ?? 0}`;
 /** The bar's fill, 0–100. */
