@@ -26,9 +26,10 @@ import { registerPromoteRoutes } from "./routes/promote.mjs";
 import { registerProposalsRoutes } from "./routes/proposals.mjs";
 import { registerAuditRoutes } from "./routes/audit.mjs";
 import { registerMiscRoutes } from "./routes/misc.mjs";
-import { registerDashboardRoutes } from "./routes/dashboard.mjs";
+import { MERMAID_FRAME, registerDashboardRoutes } from "./routes/dashboard.mjs";
 import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
 import { registerScoreRoutes } from "./routes/score.mjs";
+import { registerSchemaIndexRoutes } from "./routes/schema-index.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -87,8 +88,11 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   // frame-ancestors: the page opens inside FE's drawer (?embed=1), and
   // nowhere else.
   const csp = `default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors ${frameAncestors(auth.feUrl)}`;
+  // The mermaid frame alone takes inline style: mermaid draws with <style>
+  // and style="" in its own document. Its scripts stay 'self'.
+  const frameCsp = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors ${frameAncestors(auth.feUrl)}`;
   app.addHook("onSend", async (request, reply, payload) => {
-    reply.header("content-security-policy", csp);
+    reply.header("content-security-policy", request.routeOptions?.url === MERMAID_FRAME ? frameCsp : csp);
     reply.header("x-content-type-options", "nosniff");
     return payload;
   });
@@ -179,6 +183,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   registerProposalsRoutes(app);
   registerAuditRoutes(app);
   registerScoreRoutes(app);
+  registerSchemaIndexRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

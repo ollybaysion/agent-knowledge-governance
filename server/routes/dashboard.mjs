@@ -11,10 +11,17 @@ const SRC_DIR = join(__dirname, "..", "..", "src");
 
 const JS = "text/javascript; charset=utf-8";
 
+// The hidden frame that runs mermaid for ```mermaid fences; app.mjs gives it
+// its own CSP (inline style allowed) so the page keeps style-src 'self'.
+export const MERMAID_FRAME = "/mermaid-frame.html";
+
 const FILES = {
   "/": { path: "index.html", type: "text/html; charset=utf-8" },
   "/app.css": { path: "app.css", type: "text/css; charset=utf-8" },
   "/ui.css": { path: "ui.css", type: "text/css; charset=utf-8" },
+  [MERMAID_FRAME]: { path: "mermaid-frame.html", type: "text/html; charset=utf-8" },
+  // mermaid 11.17.2 (MIT, public/vendor/mermaid/LICENSE), copied from node_modules/mermaid/dist.
+  "/vendor/mermaid/mermaid.min.js": { path: "vendor/mermaid/mermaid.min.js", type: JS },
 };
 
 // The server's own modules the page runs as they are, so the page splits,

@@ -6,6 +6,7 @@ import { api, lastScore } from "../api.mjs";
 import { downloadTextFile, el, icon, toast } from "../dom.mjs";
 import { mdNodes } from "../md.mjs";
 import { isAnswerSection, markAnswerHeading, sec } from "../sec.mjs";
+import { sqlCode } from "../sql.mjs";
 import {
   VERIFY_KEY,
   VERIFY_KIND_LABEL,
@@ -295,7 +296,7 @@ function verifySection({ ctx, block, vlib, blib, parsed, last, verifyQueries, an
         ]);
       });
       body.replaceChildren(
-        el("pre", { class: "verify-sql", text: query.sql }),
+        el("pre", { class: "verify-sql" }, sqlCode(query.sql)),
         fields.length ? el("div", { class: "verify-fields" }, fields) : el("div", { class: "dim", text: "이 조회는 입력이 없습니다" }),
         status,
       );
