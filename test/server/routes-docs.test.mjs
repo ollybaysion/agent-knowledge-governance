@@ -775,6 +775,44 @@ test("[[ ]]: a manual's step texts are read too", async () => {
   }
 });
 
+test("[[ ]]: a db-schema's column desc, purpose and query note are read; the collector's comment is not", async () => {
+  const { app, cleanup } = await setup([{ id: "renoir", group: "admin", token: "edtok" }]);
+  const h = auth("edtok");
+  try {
+    for (const id of ["spc-chart-config", "eqp-main", "from-comment"])
+      await app.inject({ method: "POST", url: "/api/docs/screen-map", headers: h, payload: screenMapDoc(id) });
+    const doc = newDbSchemaDoc();
+    doc.body.catalog.columns[0].comment = "[[from-comment]]";
+    doc.body.queries = [{ sql: "SELECT A FROM X", note: { text: null, tier: "scaffold" } }];
+    const created = await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: h, payload: doc });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(created.json().json.links, undefined);
+
+    const body = structuredClone(created.json().json.body);
+    body.columnDescs.A = { text: "설비 키\n화면은 [[spc-chart-config]], 없는 [[nope]]", tier: "inferred", evidence: ["a:1"] };
+    body.queries[0].note = { text: "[[screen-map/eqp-main]] 에서 쓴다", tier: "inferred", evidence: ["q:1"] };
+    const edit = await app.inject({
+      method: "PUT",
+      url: "/api/docs/db-schema/x",
+      headers: { ...h, "if-match": created.json().rev },
+      payload: body,
+    });
+    assert.equal(edit.statusCode, 200, edit.body);
+    assert.deepEqual(edit.json().json.links, [link("screen-map", "spc-chart-config"), link("screen-map", "eqp-main")]);
+
+    const got = (await app.inject({ headers: h, method: "GET", url: "/api/docs/db-schema/x" })).json();
+    assert.deepEqual(got.wikilinks, [
+      { text: "spc-chart-config", type: "screen-map", id: "spc-chart-config", found: true },
+      { text: "nope", type: null, id: "nope", found: false },
+      { text: "screen-map/eqp-main", type: "screen-map", id: "eqp-main", found: true },
+    ]);
+    const back = (await app.inject({ headers: h, method: "GET", url: "/api/docs/screen-map/spc-chart-config" })).json();
+    assert.deepEqual(back.backlinks, [{ type: "db-schema", id: "x", rel: "related", status: "active" }]);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("role: the domain-skill list carries role (absent = main); PUT role changes it under If-Match, skills only", async () => {
   const { app, cleanup } = await setup([
     { id: "renoir", group: "admin", token: "edtok" },

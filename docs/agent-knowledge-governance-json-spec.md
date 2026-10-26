@@ -368,6 +368,12 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 — 검토 대기열에서 사람이 제거 확정(approver)하거나 복원(편집 → inferred)한다
 (자동 삭제 금지). 새 컬럼은 scaffold 슬롯 자동 생성.
 
+문서 링크: db-schema 는 `columnDescs.*.text` · `purpose.text` · `queries[].note.text`
+에서 `[[문서id]]` · `[[타입/id]]` 를 읽는다(`src/wikilinks.mjs` 의 `wikiTexts`).
+쓰기 때 서버가 이 링크를 `links[]`(rel `related`)로 굳히고, 읽기 화면은 칩으로 그린다.
+읽는 자리는 사람이 쓰는 티어드 값 세 자리다. 수집기 값 `catalog.columns[].comment` ·
+`tableComment` 는 글 그대로 둔다.
+
 ### 4.2 `msg-format/v1` — 설비 커맨드 메시지 문서
 
 ```jsonc

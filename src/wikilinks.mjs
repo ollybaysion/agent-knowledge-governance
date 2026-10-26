@@ -61,9 +61,16 @@ export function parseWikilinks(texts) {
 export function wikiTexts(type, body) {
   // A malformed body yields no text; the schema reports it. A skill and every
   // md type keep their text in `markdown`.
+  const strings = (xs) => xs.filter((t) => typeof t === "string");
   if (type === "manual")
-    return Array.isArray(body?.steps)
-      ? body.steps.map((s) => s?.text).filter((t) => typeof t === "string")
-      : [];
+    return Array.isArray(body?.steps) ? strings(body.steps.map((s) => s?.text)) : [];
+  // db-schema: the texts people write (tiered values). The catalog's comment
+  // and tableComment come from the collector and are not read.
+  if (type === "db-schema")
+    return strings([
+      body?.purpose?.text,
+      ...Object.values(body?.columnDescs ?? {}).map((d) => d?.text),
+      ...(Array.isArray(body?.queries) ? body.queries.map((q) => q?.note?.text) : []),
+    ]);
   return typeof body?.markdown === "string" ? [body.markdown] : [];
 }

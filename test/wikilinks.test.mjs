@@ -36,6 +36,22 @@ test("the texts read: a skill's and an md type's markdown, a manual's step texts
   assert.deepEqual(wikiTexts("db-schema", { table: "X" }), []);
 });
 
+test("db-schema: purpose, every column desc and query notes are read; null and the collector's comments are not", () => {
+  const body = {
+    table: "X",
+    catalog: {
+      columns: [{ name: "A", type: "NUMBER", nullable: false, comment: "[[from-comment]]" }],
+      tableComment: "[[from-table-comment]]",
+    },
+    purpose: { text: "p [[a]]", tier: "inferred" },
+    columnDescs: { A: { text: "c1\n[[b]]", tier: "inferred" }, B: { text: null, tier: "scaffold" }, C: { text: "c3", tier: "confirmed" } },
+    queries: [{ sql: "SELECT 1", note: { text: "q [[c]]", tier: "inferred" } }, { sql: "SELECT 2", note: { text: null, tier: "scaffold" } }],
+  };
+  assert.deepEqual(wikiTexts("db-schema", body), ["p [[a]]", "c1\n[[b]]", "c3", "q [[c]]"]);
+  assert.deepEqual(parseWikilinks(wikiTexts("db-schema", body)).map((l) => l.text), ["a", "b", "c"]);
+  assert.deepEqual(wikiTexts("db-schema", { purpose: { text: null }, columnDescs: { A: null }, queries: "x" }), []);
+});
+
 test("a type id may carry digits: [[notes2/a]]", () => {
   assert.deepEqual(parseWikilinks("[[notes2/a]]"), [{ text: "notes2/a", type: "notes2", id: "a" }]);
 });

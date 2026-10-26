@@ -4,7 +4,7 @@
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
-import { mdNodes, wikiResolver } from "../md.mjs";
+import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import {
   evidence,
@@ -546,9 +546,18 @@ function slotBody(ctx, host) {
   }
   function slotReadText(slot) {
     const editable = canEdit && slot.tier !== "deprecated";
-    const common = editable ? { title: "눌러서 편집", onclick: () => startEdit(slot.address), tabindex: "0", role: "button", onkeydown: (e) => { if (e.key === "Enter") startEdit(slot.address); } } : {};
+    // A [[ ]] chip inside the text is a link: its click and Enter move, not edit.
+    const onChip = (e) => !!e.target.closest?.("a");
+    const common = editable ? { title: "눌러서 편집", onclick: (e) => { if (!onChip(e)) startEdit(slot.address); }, tabindex: "0", role: "button", onkeydown: (e) => { if (e.key === "Enter" && !onChip(e)) startEdit(slot.address); } } : {};
     if (slot.tier === "scaffold") return el("span", { class: editable ? "t-sc editable" : "t-sc", text: "{{설명}}", ...common });
-    return el("span", { class: `${tierTextClass[slot.tier]}${slot.tier === "deprecated" ? " strike" : ""}${editable ? " editable" : ""}`, text: slot.text || "", ...common });
+    // db-schema reads [[ ]] from these texts (src/wikilinks.mjs), so they draw
+    // as md inline with chips. The \n stay lines (.slot-text, white-space).
+    const text = slot.text || "";
+    return el(
+      "span",
+      { class: `slot-text ${tierTextClass[slot.tier]}${slot.tier === "deprecated" ? " strike" : ""}${editable ? " editable" : ""}`, ...common },
+      type === "db-schema" ? inline(text, { wiki: ctx.wiki }) : text,
+    );
   }
   function nextTier(slot, text, textChanged) {
     if (!text.trim()) return "scaffold";
@@ -756,6 +765,12 @@ function slotBody(ctx, host) {
       ctx.setDocRev(r.data.json, r.data.rev);
       const entry = slots.find((s) => s.address === address);
       const saved = getSlot(ctx.doc.body, address) || {};
+      // A [[ ]] added or dropped changed links[] and the chips: read the doc again.
+      if (type === "db-schema" && /\[\[/.test(`${entry?.text ?? ""}${saved.text ?? ""}`)) {
+        await reload();
+        toast(saved.tier === "confirmed" ? "저장했습니다" : "저장했습니다 · 추정으로 들어감");
+        return;
+      }
       if (entry) Object.assign(entry, { text: saved.text ?? null, tier: saved.tier, evidence: saved.evidence || [] });
       notice()?.replaceChildren();
       paint();
@@ -787,7 +802,7 @@ function slotBody(ctx, host) {
       toast(r.data.message || "저장을 거절했습니다 (근거가 있어야 합니다).", "error");
       return;
     }
-    toast(`저장 실패 (${r.status})`, "error");
+    toast(`저장 실패 (${r.status})${r.data?.message ? ` — ${r.data.message}` : ""}`, "error");
   }
 
   const b = () => ctx.doc.body;
