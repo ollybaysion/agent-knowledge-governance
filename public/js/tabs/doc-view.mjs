@@ -110,7 +110,9 @@ export async function renderDocScreen(type, id, opts = {}) {
     tab: opts.tab,
     onEditLinks: canEdit ? () => openLinksDialog({ type, id, data, getRev: () => rev, reload: () => reload("links") }) : null,
   });
-  const layout = cols({ left: left.node ?? left, main, right: panel.node, className: left.collapsed ? "collapsed" : "" });
+  // db-schema · msg-format draw a column table: the body takes the full middle width.
+  const wide = type === "db-schema" || type === "msg-format";
+  const layout = cols({ left: left.node ?? left, main, right: panel.node, className: [left.collapsed ? "collapsed" : "", wide ? "wide" : ""].join(" ").trim() });
   left.bind?.(layout);
   screen().appendChild(layout);
   hoverSync(layout);
@@ -710,7 +712,7 @@ function slotBody(ctx, host) {
   }
   function editBlock(slot) {
     if (!editBuf) editBuf = { text: slot.text || "", evidence: (slot.evidence || []).slice() };
-    const textArea = el("textarea", { spellcheck: "false", "aria-label": "슬롯 글" });
+    const textArea = el("textarea", { spellcheck: "false", "aria-label": "슬롯 글", rows: 3 });
     textArea.value = editBuf.text;
     const chipInput = el("input", { type: "text", placeholder: "근거 file:line — 넣고 ; 또는 Enter", "aria-label": "근거" });
     Object.assign(live, {
@@ -723,7 +725,8 @@ function slotBody(ctx, host) {
     });
     const grow = () => {
       textArea.style.height = "auto";
-      textArea.style.height = `${textArea.scrollHeight}px`;
+      // scrollHeight leaves out the border; border-box height takes it in.
+      textArea.style.height = `${textArea.scrollHeight + textArea.offsetHeight - textArea.clientHeight}px`;
     };
     textArea.addEventListener("input", () => {
       editBuf.text = textArea.value;
@@ -818,6 +821,17 @@ function slotBody(ctx, host) {
       el("span", { class: "acts" }, slotReadActions(slot)),
     ]);
   }
+  // A table slot that is open (edit · reconcile) moves into its own row under
+  // its row, one cell across every column; its own cell keeps the tier badge.
+  const slotOpen = (slot) => !!slot && (editingAddr === slot.address || reconcileFor?.address === slot.address);
+  function slotTableRows(cells, slot, cls = "") {
+    if (!slotOpen(slot)) return [el("tr", { class: cls || null }, [...cells, el("td", {}, slotRow(slot, "cslot"))])];
+    const mark = el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]);
+    return [
+      el("tr", { class: `${cls} editing-src`.trim() }, [...cells, el("td", {}, mark)]),
+      el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(cells.length + 1) }, slotRow(slot, "cslot"))),
+    ];
+  }
   async function commitSlot(address, text, ev, baseBody, ifMatch) {
     const clientBody = structuredClone(baseBody);
     const existing = getSlot(clientBody, address) || {};
@@ -886,18 +900,20 @@ function slotBody(ctx, host) {
       parts.push(sec({ key: "설명", title: "설명", children: [slotRow(slotByAddr("purpose"), "ps")] }));
       const pk = new Set(b().catalog?.primaryKey ?? []);
       const known = new Set((b().catalog?.columns || []).map((c) => c.name));
-      const rows = (b().catalog?.columns || []).map((col) =>
-        el("tr", {}, [
-          el("td", { class: "mono nowrap" }, [col.name, pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null]),
-          el("td", { class: "mono dim nowrap", text: col.type }),
-          el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
-          el("td", {}, slotRow(slotByAddr(`columnDescs.${col.name}`), "cslot")),
-        ]),
+      const rows = (b().catalog?.columns || []).flatMap((col) =>
+        slotTableRows(
+          [
+            el("td", { class: "mono nowrap" }, [col.name, pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null]),
+            el("td", { class: "mono dim nowrap", text: col.type }),
+            el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
+          ],
+          slotByAddr(`columnDescs.${col.name}`),
+        ),
       );
       for (const s of slots) {
         const m = s.address.match(/^columnDescs\.(.+)$/);
         if (m && !known.has(m[1]))
-          rows.push(el("tr", { class: "dep-row" }, [el("td", { class: "mono strike", text: m[1] }), el("td", { class: "dim", text: "—" }), el("td", { class: "dim", text: "열 사라짐" }), el("td", {}, slotRow(s, "cslot"))]));
+          rows.push(...slotTableRows([el("td", { class: "mono strike nowrap", text: m[1] }), el("td", { class: "dim nowrap", text: "—" }), el("td", { class: "dim nowrap", text: "열 사라짐" })], s, "dep-row"));
       }
       const fk = (b().catalog?.foreignKeys || []).map((f) => `${f.column} → ${f.refTable}.${f.refColumn}`).join(" · ");
       parts.push(
@@ -930,14 +946,16 @@ function slotBody(ctx, host) {
           children: [
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               el("thead", {}, el("tr", {}, ["#", "필드", "타입", "필수", "설명"].map((t) => el("th", { scope: "col", text: t })))),
-              el("tbody", {}, (b().fields || []).map((f, i) =>
-                el("tr", {}, [
-                  el("td", { class: "dim", text: String(f.seq) }),
-                  el("td", { class: "mono", text: f.name }),
-                  el("td", { class: "mono dim", text: f.type }),
-                  el("td", { text: f.required ? "✓" : "—" }),
-                  el("td", {}, slotRow(slotByAddr(`fields[${i}].desc`), "cslot")),
-                ]),
+              el("tbody", {}, (b().fields || []).flatMap((f, i) =>
+                slotTableRows(
+                  [
+                    el("td", { class: "dim nowrap", text: String(f.seq) }),
+                    el("td", { class: "mono nowrap", text: f.name }),
+                    el("td", { class: "mono dim nowrap", text: f.type }),
+                    el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
+                  ],
+                  slotByAddr(`fields[${i}].desc`),
+                ),
               )),
             ])),
           ],
