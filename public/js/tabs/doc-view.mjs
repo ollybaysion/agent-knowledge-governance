@@ -6,11 +6,14 @@ import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
+import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import {
+  coverageBar,
   evidence,
   getSlot,
   inactiveBar,
   keywordChips,
+  majorChip,
   roleChip,
   setSlot,
   shortRev,
@@ -225,6 +228,9 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       el("span", { class: "dim", text: ` · ${isAgent ? "에이전트" : typeLabel(type)}${role ? ` · ${role}` : ""}` }),
     ]),
     el("h1", { class: `doc-title${type === "db-schema" || type === "msg-format" ? " mono" : ""}`, text: title }),
+    type === "db-schema"
+      ? el("div", { class: "doc-class" }, [majorChip(ctx.data.major, ctx.data.usedBy), kindChip(ctx), coverageBar(ctx.data.coverage)])
+      : null,
     sub ? el("p", { class: "doc-sub", text: sub }) : null,
     el("div", { class: "doc-bar" }, [
       el("span", { class: "doc-bar-title", text: title, "aria-hidden": "true" }),
@@ -311,6 +317,73 @@ function retypeMenu(ctx) {
       el("li", { role: "none" }, el("button", { type: "button", role: "menuitem", onclick: () => pick(t.id) }, [
         el("span", { class: "tdot", style: { "--c": t.color }, "aria-hidden": "true" }),
         t.label,
+      ])),
+    ));
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll("button")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") items[(i + 1) % items.length].focus();
+      else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length].focus();
+      else if (e.key === "Escape") {
+        close();
+        btn.focus();
+      } else return;
+      e.preventDefault();
+    });
+    wrap.appendChild(menu);
+    btn.setAttribute("aria-expanded", "true");
+    menu.querySelector("button")?.focus();
+    setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
+  });
+  return wrap;
+}
+
+// A db-schema's 성격: the body's kind, written with the document PUT (the
+// rest of the body as it is, so no slot moves).
+async function saveKind(ctx, kind) {
+  const { id, doc } = ctx;
+  const { kind: _old, ...rest } = doc.body;
+  const body = kind === "none" ? rest : { ...rest, kind };
+  const r = await api(`/api/docs/db-schema/${enc(id)}`, {
+    method: "PUT",
+    headers: { "if-match": ctx.rev, "x-akg-note": encodeURIComponent(`성격: ${KIND_LABEL[kind]}`) },
+    body,
+  });
+  // A stale rev rebases at slot level and keeps the stored kind: say so.
+  const landed = r.ok && kindOf(r.data?.json?.body) === kind;
+  if (!landed) {
+    toast(
+      r.ok || r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요." : `성격을 바꾸지 못했습니다 (${r.status})${r.data?.details ? ` — ${r.data.details.join(" · ")}` : ""}`,
+      "error",
+    );
+    if (r.ok) ctx.reload();
+    return;
+  }
+  toast(`성격을 ${KIND_LABEL[kind]} 로 바꿨습니다`, "ok");
+  ctx.reload();
+}
+
+/** 성격 badge: an editor's click opens info · data · 미정. */
+function kindChip(ctx) {
+  const kind = kindOf(ctx.doc.body);
+  const cls = `chip kindchip k-${kind}`;
+  if (!ctx.canEdit) return el("span", { class: cls, text: KIND_LABEL[kind], title: kind === "none" ? "성격 미정" : `성격 ${kind}` });
+  const btn = el("button", { type: "button", class: `${cls} st-toggle`, "aria-haspopup": "menu", "aria-expanded": "false", title: "성격을 고릅니다" }, [KIND_LABEL[kind], icon("down", 12)]);
+  const wrap = el("span", { class: "menu-wrap" }, btn);
+  const close = () => {
+    wrap.querySelector(".menu")?.remove();
+    btn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", outside, true);
+  };
+  const outside = (e) => {
+    if (!wrap.contains(e.target)) close();
+  };
+  btn.addEventListener("click", () => {
+    if (wrap.querySelector(".menu")) return close();
+    const menu = el("ul", { class: "menu", role: "menu", "aria-label": "성격" }, ["info", "data", "none"].map((k) =>
+      el("li", { role: "none" }, el("button", { type: "button", role: "menuitemradio", "aria-checked": String(k === kind), onclick: () => { close(); if (k !== kind) saveKind(ctx, k); } }, [
+        el("span", { class: `b b-kind k-${k}`, text: KIND_LABEL[k] }),
+        k === kind ? el("span", { class: "dim", text: "지금" }) : null,
       ])),
     ));
     menu.addEventListener("keydown", (e) => {

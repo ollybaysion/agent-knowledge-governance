@@ -98,13 +98,13 @@ export function rememberAnswer() {
 }
 
 // ---------- rail ----------
-function railItem({ label, iconName, href, current, disabled, hidden }) {
+function railItem({ label, iconName, href, current, disabled, hidden, title = "FE 주소가 설정되지 않았습니다" }) {
   if (hidden) return null;
   const attrs = { class: `rail-i${current ? " on" : ""}${disabled ? " off" : ""}` };
   if (current) attrs["aria-current"] = "page";
   if (disabled) {
     attrs["aria-disabled"] = "true";
-    attrs.title = "FE 주소가 설정되지 않았습니다";
+    attrs.title = title;
   }
   return el(disabled ? "span" : "a", { ...attrs, ...(disabled ? {} : { href }) }, [
     icon(iconName, 18),
@@ -116,7 +116,7 @@ function rail() {
     el("div", { class: "rail-top" }, [
       railItem({ label: "채팅", iconName: "chat", href: feUrl ?? "#", disabled: !feUrl }),
       railItem({ label: "지식", iconName: "book", href: "#/overview", current: true }),
-      railItem({ label: "관리", iconName: "admin", href: feUrl ? `${feUrl}/admin` : "#", disabled: !feUrl, hidden: !isAdmin() }),
+      railItem({ label: "관리", iconName: "admin", disabled: true, hidden: !isAdmin(), title: "관리 화면은 채팅(FE) 쪽에서 엽니다" }),
     ]),
     el("div", { class: "rail-bottom" }, [
       el("button", { type: "button", class: "rail-i", id: "theme-toggle", onclick: toggleTheme }),

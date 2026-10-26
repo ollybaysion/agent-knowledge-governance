@@ -2,9 +2,29 @@
 // 통계 · 타입 칩 · 문서 표. 소개 띠의 문서 종류 표는 GET /api/types 로 그린다.
 import { allDocs } from "../api.mjs";
 import { $, el } from "../dom.mjs";
-import { keywordChips, shortRev, stat, statusBadge, tierMeter } from "../shared.mjs";
+import { coverageBar, keywordChips, shortRev, stat, statusBadge, tierMeter, usedByText } from "../shared.mjs";
+import { coveragePercent, majorCoverage, userCount } from "/lib/table-class.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { DOC_TYPES, TYPES, TYPE_LABEL } from "../state.mjs";
+
+// 주요 테이블 확정 커버리지: the sum, then the 주요 tables, the lowest first.
+function coverageBlock(all) {
+  const cov = majorCoverage(all);
+  const open = (d) => (location.hash = `#/doc/db-schema/${encodeURIComponent(d.id)}`);
+  return [
+    el("h3", { class: "ov-cov-h", text: "주요 테이블 확정 커버리지" }),
+    el("div", { class: "stats" }, stat(`${coveragePercent(cov)}%`, `확정 슬롯 ${cov.confirmed} / 슬롯 ${cov.total} · 주요 표 ${cov.rows.length}`)),
+    cov.rows.length
+      ? el("ul", { class: "ov-cov-list" }, cov.rows.map((d) =>
+          el("li", { class: "nav-doc", tabindex: "0", title: usedByText(d.usedBy), onclick: () => open(d), onkeydown: (e) => e.key === "Enter" && open(d) }, [
+            el("span", { class: "mono ov-cov-name", text: d.title ?? d.id }),
+            coverageBar(d.coverage),
+            el("span", { class: "dim", text: `쓰는 스킬 ${userCount(d)}` }),
+          ]),
+        ))
+      : el("p", { class: "dim ov-cov-none", text: "조회에 쓰이는 표가 없습니다" }),
+  ];
+}
 
 export async function renderOverviewScreen() {
   setActiveTab("overview");
@@ -34,6 +54,8 @@ export async function renderOverviewScreen() {
     stat(String(totals.confirmed), "확정 슬롯"),
     stat(String(totals.deprecated), "폐기 슬롯", "dep"),
   );
+
+  page.querySelector("#ov-coverage").replaceChildren(...coverageBlock(all));
 
   const counts = new Map();
   for (const d of all) counts.set(d.type, (counts.get(d.type) || 0) + 1);

@@ -1,6 +1,7 @@
 import { api } from "./api.mjs";
 import { $, el, toast } from "./dom.mjs";
 import { TIER_ABBR, TIER_LABEL } from "./state.mjs";
+import { KIND_LABEL, coveragePercent, coverageText } from "/lib/table-class.mjs";
 
 // ---------- slot address helpers (mirror server/slots.mjs) ----------
 export function getSlot(body, address) {
@@ -219,6 +220,27 @@ export function roleChip(doc, rev, canEdit, reload) {
       );
     },
   });
+}
+
+// ---------- db-schema 분류 · 확정 커버리지 ----------
+/** 성격 in a list row: the tier badge's pill. */
+export function kindBadge(kind) {
+  return el("span", { class: `b b-kind k-${kind}`, text: KIND_LABEL[kind], title: kind === "none" ? "성격 미정" : `성격 ${kind}` });
+}
+/** "어느 스킬의 어느 조회" — the 주요 badge's title. */
+export const usedByText = (usedBy) =>
+  usedBy?.length ? `조회에 쓰입니다 — ${usedBy.map((u) => `${u.id} · ${u.query}`).join(", ")}` : "어느 활성 스킬 · 도메인 문서의 조회에도 쓰이지 않습니다";
+/** 주요 · 기타: read-only, from the server's major · usedBy. */
+export function majorChip(major, usedBy) {
+  return el("span", { class: `chip imp ${major ? "imp-major" : "imp-other"}`, text: major ? "주요" : "기타", title: usedByText(usedBy) });
+}
+/** "확정 12/40" and a 48px bar; read-only. */
+export function coverageBar(c) {
+  const pct = coveragePercent(c);
+  return el("span", { class: "cov", title: `확정 슬롯 ${c?.confirmed ?? 0} / 슬롯 ${c?.total ?? 0} (${pct}%) — 폐기 슬롯은 빼고 셉니다` }, [
+    el("span", { class: "cov-t", text: coverageText(c) }),
+    el("span", { class: "cov-bar", "aria-hidden": "true" }, pct ? el("i", { style: { width: `${pct}%` } }) : null),
+  ]);
 }
 
 // 409 data_id_conflict: the data ids another skill already has.
