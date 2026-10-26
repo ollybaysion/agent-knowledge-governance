@@ -1,11 +1,11 @@
 // The 문서 탭's column browser as plain data: which rows each column holds
 // and where the arrow keys go. No DOM here; node tests it.
 
-/** domain-skill shows in this tab only as its sub skills: the ones still to move to domain. */
+/** domain-skill shows in this tab only as the documents whose role is sub. */
 export const inDocsTab = (d) => d.type !== "domain-skill" || d.role === "sub";
 
-/** The 문서 탭 name of the domain-skill row. */
-export const SUB_LABEL = "옮길 sub 스킬";
+/** The 문서 탭 name of the domain-skill row: it holds the role sub domain-skill documents. */
+export const SUB_LABEL = "도메인 스킬";
 
 /**
  * Column 1's type rows, in the type list's order: label · colour · count
