@@ -60,18 +60,18 @@ const DOCS = [
   { type: "voc", id: "v" },
 ];
 
-test("column 1: types in order, 옮길 sub 스킬 counts subs only, closed empty types out, tags", () => {
+test("column 1: types in order, 도메인 스킬 counts subs only, closed empty types out, tags", () => {
   const rows = typeRows(TYPES, DOCS);
   assert.deepEqual(rows.map((r) => [r.id, r.label, r.count, r.tag]), [
     ["db-schema", "DB 스키마", 3, null],
-    ["domain-skill", "옮길 sub 스킬", 1, null],
+    ["domain-skill", "도메인 스킬", 1, null],
     ["domain", "도메인", 1, null],
     ["voc", "VOC", 1, "등록"],
     ["unclassified", "미분류", 0, "내장"],
   ]);
 });
 
-test("column 1: with no sub left, the 옮길 sub 스킬 row is gone; an empty domain still stands", () => {
+test("column 1: with no sub left, the 도메인 스킬 row is gone; an empty domain still stands", () => {
   const rows = typeRows(TYPES, DOCS.filter((d) => d.id !== "sub1" && d.type !== "domain"));
   assert.deepEqual(rows.map((r) => r.id), ["db-schema", "domain", "voc", "unclassified"]);
 });
