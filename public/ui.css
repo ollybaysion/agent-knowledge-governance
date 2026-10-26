@@ -3209,6 +3209,11 @@ a.sql-col:focus-visible {
   padding: 4px 10px 8px;
   font-size: 12.5px;
 }
+.ck-hint {
+  margin: 0;
+  padding: 8px 8px 0;
+  font-size: 12px;
+}
 .ck-foot {
   display: flex;
   gap: 16px;

@@ -7,7 +7,7 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
-import { moveName, orderColumns } from "/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -60,7 +60,8 @@ export function docTitle(type, doc) {
 
 /**
  * Open a document. `opts.tab` = the right panel's first tab; `opts.keepScroll`
- * keeps the page where it was (a reload after a save).
+ * keeps the page where it was (a reload after a save); `opts.col` = a db-schema
+ * column to scroll to and flash.
  */
 export async function renderDocScreen(type, id, opts = {}) {
   const ticket = ++docTicket;
@@ -160,7 +161,11 @@ export async function renderDocScreen(type, id, opts = {}) {
   if (ticket !== docTicket) return;
   panel.setSummary(built);
   stickyHead(head);
+  // ⌘K 의 열 이름 결과(?col=…): that 열 row, when the catalog still has it.
+  const colName = type === "db-schema" ? findColumn(doc.body?.catalog?.columns, opts.col) : null;
+  const colRow = colName ? bodyHost.querySelector(`tr[data-col="${CSS.escape(colName)}"]`) : null;
   if (scrollY) window.scrollTo(0, scrollY);
+  else if (colRow) requestAnimationFrame(() => scrollToNode(colRow, { smooth: false, block: "center" }));
   else if (answerSection) {
     const key = built.sections.find((s) => isAnswerSection(s.title))?.key;
     if (key) requestAnimationFrame(() => scrollToSec(key, { smooth: false }));

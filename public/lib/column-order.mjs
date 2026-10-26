@@ -28,3 +28,15 @@ export function moveName(names, from, to) {
   out.splice(to, 0, name);
   return out;
 }
+
+/**
+ * The catalog column a ?col=… names, as the catalog spells it (case ignored),
+ * or null when the catalog no longer has it: the 열 row to scroll to.
+ */
+export function findColumn(columns = [], col) {
+  if (!col) return null;
+  const names = (columns ?? []).map((c) => c.name);
+  if (names.includes(col)) return col;
+  const want = String(col).toLowerCase();
+  return names.find((n) => n.toLowerCase() === want) ?? null;
+}

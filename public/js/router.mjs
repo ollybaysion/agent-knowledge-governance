@@ -3,6 +3,7 @@
 import { el } from "./dom.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "./shell.mjs";
 import { currentUser, isAdmin, lastDoc } from "./state.mjs";
+import { splitHash } from "/lib/cmdk.mjs";
 
 // A screen with unsaved work sets a guard: the message to confirm before
 // leaving, or null when there is nothing to lose.
@@ -28,10 +29,10 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
-/** The hash parts, each decoded: #/doc/db-schema/fdc_x → ["doc", "db-schema", "fdc_x"]. */
+/** The hash parts, each decoded: #/doc/db-schema/fdc_x → ["doc", "db-schema", "fdc_x"]. A ?col=… after them is not a part. */
 export function hashParts(hash = location.hash) {
-  return hash
-    .replace(/^#\/?/, "")
+  return splitHash(hash)
+    .path.replace(/^#\/?/, "")
     .split("/")
     .filter(Boolean)
     .map((p) => {
@@ -83,7 +84,8 @@ export async function route() {
   };
   let m;
   if (head === "doc" && parts[1] && parts[2]) {
-    if ((m = await load("doc"))) m.renderDocScreen(parts[1], parts[2]);
+    const { col } = splitHash(location.hash);
+    if ((m = await load("doc"))) m.renderDocScreen(parts[1], parts[2], col ? { col } : {});
   } else if (head === "edit" && parts[1] && parts[2]) {
     if ((m = await load("edit"))) m.renderEditor(parts[1], parts[2], parts[3] ?? null);
   } else if (head === "draft" && parts[1] && parts[2]) {

@@ -825,6 +825,15 @@ h1 .chip.owner-chip {
 .cols-tbl tr.drop-after > td {
   box-shadow: inset 0 -2px 0 var(--primary);
 }
+/* ⌘K 에서 열 이름으로 고른 줄: 1.2초 옅게 */
+.cols-tbl tr.flash > td {
+  animation: secflash 1.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cols-tbl tr.flash > td {
+    animation: none;
+  }
+}
 /* 편집 중인 설명은 그 행 아래 한 줄 전체에 */
 .cols-tbl tr.editing-src > td {
   border-bottom: 0;
