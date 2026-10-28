@@ -14,6 +14,7 @@ import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
+import { slotFailText, togglePick } from "/lib/column-bulk.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -676,6 +677,23 @@ function factsBody(ctx, host, doc) {
   return { sections: [{ key: "설명", title: "설명" }] };
 }
 
+// promote · deprecate 에 슬롯 주소 배열을 보낸다. 되면 문서를 다시 읽고,
+// 안 되면 토스트에 서버가 준 까닭을 적는다. → 됐는지.
+let slotsSending = false;
+async function sendSlots(ctx, { verb, endpoint, addresses, noun }) {
+  if (slotsSending) return false;
+  slotsSending = true;
+  const r = await api(`/api/docs/${ctx.type}/${enc(ctx.id)}/${endpoint}`, { method: "POST", headers: { "if-match": ctx.rev }, body: { slots: addresses } });
+  slotsSending = false;
+  if (!r.ok) {
+    toast(r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요." : slotFailText(verb, r.status, r.data), "error");
+    return false;
+  }
+  if (addresses.length > 1) toast(`${addresses.length} ${noun} ${verb}했습니다`, "ok");
+  await ctx.reload();
+  return true;
+}
+
 // ---------- db-schema · msg-format: 슬롯 단위 클릭-투-편집 ----------
 // A slot's text is clicked to edit in place (evidence chips, tier preview,
 // word diff); saves are one PUT of the body with If-Match, and a 409 on the
@@ -690,14 +708,48 @@ function slotBody(ctx, host) {
   const live = {};
   const slotByAddr = (addr) => slots.find((s) => s.address === addr);
   const notice = () => $("doc-notice");
+  const noun = type === "db-schema" ? "열" : "필드";
 
-  async function slotAction(verb, address, endpoint) {
-    const r = await api(`/api/docs/${type}/${enc(id)}/${endpoint}`, { method: "POST", headers: { "if-match": ctx.rev }, body: { slots: [address] } });
-    if (!r.ok) {
-      toast(`${verb} 실패 (${r.status})`, "error");
-      return;
-    }
-    reload();
+  const slotAction = (verb, address, endpoint) => sendSlots(ctx, { verb, endpoint, addresses: [address], noun });
+
+  // 여러 줄 고르기 (admin): 추정 줄의 이름 칸을 누르면 골라지고, 고른 줄이
+  // 있으면 표 위에 띠가 선다. 띠의 확정 · 폐기는 고른 주소를 한 번에 보낸다.
+  const canPick = canApprove;
+  let picked = [];
+  const pickable = (slot) => canPick && slot?.tier === "inferred" && !slotOpen(slot);
+  function togglePicked(address) {
+    picked = togglePick(picked, address);
+    paint();
+    host.querySelector(`[data-pick="${CSS.escape(address)}"]`)?.focus();
+  }
+  /** The name cell of a pickable row: a checkbox by click, Space and Enter. */
+  function pickCell(td, address) {
+    td.classList.add("pick");
+    td.dataset.pick = address;
+    td.tabIndex = 0;
+    td.setAttribute("role", "checkbox");
+    td.setAttribute("aria-checked", String(picked.includes(address)));
+    td.addEventListener("click", (e) => {
+      if (!e.target.closest?.("a, button, input")) togglePicked(address);
+    });
+    td.addEventListener("keydown", (e) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      e.preventDefault();
+      togglePicked(address);
+    });
+    return td;
+  }
+  /** The band over the table while rows are picked: n 골라짐 · 확정 · 폐기 · 풀기. */
+  function pickBar() {
+    if (!picked.length) return null;
+    const send = (verb, endpoint) => sendSlots(ctx, { verb, endpoint, addresses: picked, noun });
+    return el("div", { class: "selbar" }, [
+      el("span", {}, [el("b", { text: String(picked.length) }), ` ${noun} 골라짐`]),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "btn promote sm", onclick: () => send("확정", "promote") }, ["확정", el("span", { class: "role", text: "admin" })]),
+      canEdit ? el("button", { type: "button", class: "btn danger sm", text: "폐기", onclick: () => send("폐기", "deprecate") }) : null,
+      el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => { picked = []; paint(); } }),
+    ]);
   }
   function slotReadActions(slot) {
     const acts = [];
@@ -729,6 +781,8 @@ function slotBody(ctx, host) {
     const slot = slotByAddr(address);
     editingAddr = address;
     reconcileFor = null;
+    // A row open to edit leaves the picked rows.
+    picked = picked.filter((a) => a !== address);
     editBuf = { text: (slot && slot.text) || "", evidence: ((slot && slot.evidence) || []).slice() };
     paint();
   }
@@ -961,14 +1015,17 @@ function slotBody(ctx, host) {
   function slotTableRows(columns, cells, slot, cls = "") {
     const plan = slotRowPlan(columns, { open: slotOpen(slot) });
     const acts = slot ? slotReadActions(slot) : [];
+    const pick = pickable(slot) && !!cells.name;
+    const on = pick && picked.includes(slot.address);
     const td = (key) => {
+      if (key === "name" && pick) return pickCell(cells.name, slot.address);
       if (key === "acts") return el("td", { class: "td-act nowrap" }, acts.length ? el("span", { class: "td-acts" }, acts) : null);
       if (key === "empty") return el("td", { class: "td-act nowrap" });
       if (key === "desc") return el("td", {}, slotRow(slot, "cslot"));
       if (key === "mark") return el("td", {}, el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]));
       return cells[key] ?? el("td", {});
     };
-    const row = el("tr", { class: (plan.editColspan ? `${cls} editing-src` : cls).trim() || null }, plan.cells.map(td));
+    const row = el("tr", { class: [cls, plan.editColspan ? "editing-src" : "", on ? "picked" : ""].filter(Boolean).join(" ") || null }, plan.cells.map(td));
     if (!plan.editColspan) return [row];
     return [row, el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(plan.editColspan) }, slotRow(slot, "cslot")))];
   }
@@ -1268,6 +1325,7 @@ function slotBody(ctx, host) {
           key: "열",
           title: "열",
           children: [
+            pickBar(),
             el("p", { class: "dim small cols-sum", text: unusedSummary(b().catalog?.columns, b().unusedColumns) }),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               slotTableHead(columns),
@@ -1293,6 +1351,7 @@ function slotBody(ctx, host) {
           key: "필드",
           title: "필드",
           children: [
+            pickBar(),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               slotTableHead(fieldColumns),
               el("tbody", {}, (b().fields || []).flatMap((f, i) =>
