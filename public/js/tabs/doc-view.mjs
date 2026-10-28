@@ -1,6 +1,6 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
 // id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집;
-// a db-schema: 맨 위 · 맨 아래), then the body as
+// a db-schema: 맨 위 · 맨 아래), the tag row (# chips · 태그 더하기), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
@@ -31,7 +31,8 @@ import { agentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
-import { pathPanel, typeLabel } from "./docs.mjs";
+import { pathPanel, showTag, typeLabel } from "./docs.mjs";
+import { addTag } from "/lib/tags.mjs";
 import { deleteDraftsOf } from "../drafts.mjs";
 import { refreshReviewCount } from "../review-count.mjs";
 import { deleteConfirmText } from "/lib/miller.mjs";
@@ -261,8 +262,60 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       fullEdit,
       jumpBar,
     ]),
+    tagRow(ctx),
     metaRow,
   ]);
+}
+
+/**
+ * The head's tag row: a chip per tag opens the browser with that tag picked.
+ * An editor removes a tag with its × and adds one in 태그 더하기 (Enter or ,),
+ * each a PUT …/tags with If-Match. No tags and no editor: no row.
+ */
+function tagRow(ctx) {
+  const { type, doc, canEdit } = ctx;
+  const tags = doc.tags ?? [];
+  if (!tags.length && !canEdit) return null;
+  async function save(next) {
+    const r = await api(`/api/docs/${type}/${enc(doc.id)}/tags`, { method: "PUT", headers: { "if-match": ctx.rev }, body: { tags: next } });
+    if (!r.ok) {
+      toast(
+        r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요." : `태그를 저장하지 못했습니다 (${r.status})${r.data?.details ? ` — ${r.data.details.join(" · ")}` : ""}`,
+        "error",
+      );
+      return false;
+    }
+    await ctx.reload();
+    document.querySelector(".tag-in input")?.focus();
+    return true;
+  }
+  const name = (t) => [el("span", { class: "tg-h", text: "#" }), t];
+  const chip = (t) =>
+    canEdit
+      ? el("span", { class: "chip tg" }, [
+          el("button", { type: "button", class: "tg-go", "aria-label": `#${t} 태그 문서 보기`, onclick: () => showTag(t) }, name(t)),
+          el("button", { type: "button", class: "tg-x", "aria-label": `태그 ${t} 빼기`, onclick: () => save(tags.filter((x) => x !== t)) }, icon("x", 11)),
+        ])
+      : el("button", { type: "button", class: "chip tg", "aria-label": `#${t} 태그 문서 보기`, onclick: () => showTag(t) }, name(t));
+  let field = null;
+  if (canEdit) {
+    const input = el("input", { type: "text", placeholder: "태그 더하기", "aria-label": "태그 더하기", maxlength: 32, spellcheck: "false", autocomplete: "off" });
+    input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter" && e.key !== ",") return;
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      const r = addTag(tags, input.value);
+      if (r.error) return toast(r.error, "error");
+      if (r.tags === tags) {
+        input.value = "";
+        return;
+      }
+      input.disabled = true;
+      if (!(await save(r.tags))) input.disabled = false;
+    });
+    field = el("label", { class: "chipfield tag-in" }, [icon("plus", 12), input]);
+  }
+  return el("div", { class: "doc-tags" }, [el("span", { class: "dt-k", text: "태그" }), ...tags.map(chip), field]);
 }
 
 /** Scroll the page to its top or its bottom; smooth unless the reader asks for less motion. */

@@ -27,15 +27,17 @@ const USAGE = `usage:
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
   akg push <type>/<id> <file.json|file.md> [--create] [--note <글>] [--rev <rev>] [--dry-run] [--server <url>] [--mirror <dir>]
   akg absorb-mark <type>/<id> [--rev <rev>] [--server <url>] [--mirror <dir>]
-  akg list [<type>] [--stale-absorbed] [--server <url>] [--mirror <dir>]
+  akg list [<type>] [--stale-absorbed] [--tag <tag>] [--server <url>] [--mirror <dir>]
 
 push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
   .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain)의 본문 글.
+  .json 의 links · tags 는 서버와 다를 때만 올린다.
   서버의 현재 rev 로 고친다(--rev 를 주면 그 rev). 없는 문서는 --create 일 때만 만든다(.md 는 비활성으로).
   슬롯은 추정까지만 들어간다 — 승격 · 삭제 · 활성화는 admin 화면에서.
 absorb-mark: 문서의 지식을 1급 문서에 녹였다고 표시한다(absorbed). --rev = 녹일 때 읽은 rev,
   없으면 서버의 현재 rev. 문서 rev 는 그대로다.
 list: 문서 한 줄씩 "<type>/<id> <rev> <녹임 rev|->". --stale-absorbed = 녹임 rev 가 없거나 rev 와 다른 문서만.
+  --tag = 그 태그를 단 문서만(a,b = 둘 다 단 문서).
 `;
 
 // The types a proposal can name: the server's list as of the last sync, or
@@ -64,6 +66,7 @@ function parseArgs(argv) {
     note: null,
     rev: null,
     staleAbsorbed: false,
+    tag: null,
   };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
@@ -74,6 +77,7 @@ function parseArgs(argv) {
     else if (a === "--stale-absorbed") flags.staleAbsorbed = true;
     else if (a === "--note") flags.note = rest[++i];
     else if (a === "--rev") flags.rev = rest[++i];
+    else if (a === "--tag") flags.tag = rest[++i];
     else if (a === "--skills-dir") flags.skillsDir = rest[++i];
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
@@ -440,7 +444,7 @@ async function runAbsorbMark(positional, flags, token, serverUrl) {
 async function runList(positional, flags, token, serverUrl) {
   const [type] = positional;
   try {
-    const docs = await listDocs({ serverUrl, token, type, staleAbsorbed: flags.staleAbsorbed });
+    const docs = await listDocs({ serverUrl, token, type, staleAbsorbed: flags.staleAbsorbed, tag: flags.tag });
     for (const d of docs) process.stdout.write(`${d.type}/${d.id} ${d.rev ?? "-"} ${d.absorbed?.rev ?? "-"}\n`);
   } catch (err) {
     process.stderr.write(`akg list failed: ${err.message}\n`);

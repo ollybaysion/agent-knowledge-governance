@@ -32,7 +32,27 @@ export function typeRows(types, docs) {
 export function docRows(docs, type) {
   return docs
     .filter((d) => d.type === type && inDocsTab(d))
-    .sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")) || a.id.localeCompare(b.id));
+    .sort(byChange);
+}
+
+const byChange = (a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")) || a.id.localeCompare(b.id);
+
+/**
+ * Column 2 with a tag picked and no type: the documents that carry the tag,
+ * across the types, in the type list's order — one group per type, the last
+ * changed first. A domain-skill main (an agent) gets a group of its own.
+ */
+export function tagGroups(types, docs, tag) {
+  const tagged = docs.filter((d) => (d.tags ?? []).includes(tag));
+  const groups = [];
+  for (const t of types) {
+    const of = tagged.filter((d) => d.type === t.id);
+    const docsTab = of.filter(inDocsTab).sort(byChange);
+    const agents = of.filter((d) => !inDocsTab(d)).sort(byChange);
+    if (docsTab.length) groups.push({ type: t.id, label: t.id === "domain-skill" ? SUB_LABEL : t.label, color: t.color, rows: docsTab });
+    if (agents.length) groups.push({ type: t.id, label: "에이전트", color: t.color, rows: agents });
+  }
+  return groups;
 }
 
 /** The confirm text of 삭제: the title, the type and how many documents point here. */

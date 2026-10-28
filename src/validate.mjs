@@ -8,7 +8,7 @@
 // server per design §5.0) can read them unmodified later.
 //
 // Supported keywords: type (incl. integer), enum, const, pattern, minLength,
-// minItems, uniqueItems, items, properties, required, additionalProperties (bool|schema),
+// minItems, maxItems, uniqueItems, items, properties, required, additionalProperties (bool|schema),
 // minimum, maximum, dependentRequired, if/then/else, $ref (resolved against a
 // caller-supplied map of schema-id -> schema, not fetched over a network).
 
@@ -82,6 +82,11 @@ function checkArrayConstraints(schema, data, path, refs, errors) {
   if (schema.minItems !== undefined && data.length < schema.minItems) {
     errors.push(
       `${path}: has ${data.length} items < minItems ${schema.minItems}`,
+    );
+  }
+  if (schema.maxItems !== undefined && data.length > schema.maxItems) {
+    errors.push(
+      `${path}: has ${data.length} items > maxItems ${schema.maxItems}`,
     );
   }
   if (schema.uniqueItems === true) {

@@ -374,3 +374,28 @@ test("cli absorb-mark + list --stale-absorbed: the mark takes the doc out of the
     await cleanup();
   }
 });
+
+test("cli list --tag: the documents that carry the tag; a,b wants both", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  try {
+    const post = (name, tags) =>
+      app.inject({
+        method: "POST",
+        url: "/api/docs/voc",
+        headers: as("ed-tok"),
+        payload: { schema: "voc/v1", id: name, status: "active", tags, body: { name, markdown: `# ${name}\n\n글\n` } },
+      });
+    assert.equal((await post("a", ["sensor", "spc"])).statusCode, 201);
+    assert.equal((await post("b", ["sensor"])).statusCode, 201);
+    assert.equal((await post("c", [])).statusCode, 201);
+    const ids = (out) => out.stdout.trim().split("\n").filter(Boolean).map((l) => l.split(" ")[0]).sort();
+    const one = await runCli(["list", "--tag", "sensor"], { serverUrl });
+    assert.equal(one.status, 0, one.stderr);
+    assert.deepEqual(ids(one), ["voc/a", "voc/b"]);
+    assert.deepEqual(ids(await runCli(["list", "voc", "--tag", "sensor,spc"], { serverUrl })), ["voc/a"]);
+    const bad = await runCli(["list", "--tag", "Sensor"], { serverUrl });
+    assert.equal(bad.status, 1);
+  } finally {
+    await cleanup();
+  }
+});

@@ -77,6 +77,21 @@ const KEYWORD_SCHEMA = {
 };
 
 /**
+ * A document's tags: what the screen groups documents by across types
+ * (GET /api/docs?tag= · GET /api/tags). Kept apart from keywords, which
+ * trigger injection: tags reach no index, mirror or prompt. Each tag is
+ * lower-case latin, digits and "-", 1 to 32 long; 20 at most, each once.
+ */
+export const TAG_PATTERN = "^[a-z0-9-]{1,32}$";
+export const TAGS_MAX = 20;
+export const TAGS_SCHEMA = {
+  type: "array",
+  maxItems: TAGS_MAX,
+  uniqueItems: true,
+  items: { type: "string", pattern: TAG_PATTERN },
+};
+
+/**
  * Where this document's knowledge went into a first-class document
  * (domain-skill · db-schema). Kept in the sidecar store/<type>/<id>.meta.json,
  * so marking it leaves the document's rev as it is; the read routes put it
@@ -95,8 +110,9 @@ export const ABSORBED_SCHEMA = {
   },
 };
 
-// json-spec §2 — the keys fixed for every type. `keywords`, `links`, `role`,
-// `origin` and `absorbed` are the optional keys; absent keywords read as [].
+// json-spec §2 — the keys fixed for every type. `keywords`, `tags`, `links`,
+// `role`, `origin` and `absorbed` are the optional keys; absent keywords and
+// tags read as [].
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -105,6 +121,7 @@ const ENVELOPE_SCHEMA = {
     schema: { type: "string", pattern: "^[a-z][a-z0-9-]*/v[0-9]+$" },
     id: { type: "string", pattern: "^[a-z0-9._-]+$" },
     keywords: { type: "array", items: KEYWORD_SCHEMA },
+    tags: TAGS_SCHEMA,
     // "inactive": exists and is readable through the API, but is kept out of
     // every derivative — no rendered md, no index entry, so it never reaches a
     // mirror or an injection slot. Bulk imports land here (issue #7).

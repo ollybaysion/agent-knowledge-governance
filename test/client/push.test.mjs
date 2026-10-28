@@ -134,6 +134,32 @@ test("push .json: changed links go through PUT …/links; other envelope keys ar
   }
 });
 
+test("push .json: tags go up as the file has them through PUT …/tags; the same tags as the server's write nothing", async () => {
+  const t = await setup();
+  try {
+    await t.admin("POST", "/api/docs/voc", vocDoc("n", "# n\n"));
+    const file = vocDoc("n", "# n\n\n글\n", { tags: ["sensor", "spc"] });
+    const r = await push({ ...t.base, type: "voc", id: "n", file: { kind: "json", doc: file } });
+    assert.deepEqual(r.kept, []);
+    assert.equal(t.calls.filter((c) => c.method === "PUT" && c.path === "/api/docs/voc/n/tags").length, 1);
+    const got = await t.admin("GET", "/api/docs/voc/n");
+    assert.deepEqual(got.json().json.tags, ["sensor", "spc"]);
+    assert.equal(got.json().rev, r.rev);
+
+    const again = await push({ ...t.base, type: "voc", id: "n", file: { kind: "json", doc: { ...file, body: { name: "n", markdown: "# n\n\n새 글\n" } } } });
+    assert.equal(t.calls.filter((c) => c.method === "PUT" && c.path === "/api/docs/voc/n/tags").length, 1, "the tags are checked, not written");
+    assert.deepEqual((await t.admin("GET", "/api/docs/voc/n")).json().json.tags, ["sensor", "spc"]);
+    assert.ok(again.rev);
+
+    const created = await push({ ...t.base, type: "voc", id: "m", create: true, file: { kind: "json", doc: vocDoc("m", "# m\n", { tags: ["new"] }) } });
+    assert.equal(created.action, "created");
+    assert.deepEqual((await t.admin("GET", "/api/docs/voc/m")).json().json.tags, ["new"]);
+    assert.deepEqual(checkPushFile({ type: "voc", id: "n", file: { kind: "json", doc: { ...file, tags: "sensor" } } }), ["tags 는 배열이어야 합니다"]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 test("push: a stale --rev is 409 'sync 뒤 다시' and nothing is written", async () => {
   const t = await setup();
   try {

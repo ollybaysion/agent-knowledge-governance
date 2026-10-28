@@ -1,6 +1,6 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
-// (S4/S5/S6), PUT facts (#12), PUT catalog.
-import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
+// (S4/S5/S6), PUT facts (#12), PUT catalog, PUT tags, GET /api/tags.
+import { dataIdConflicts, TAG_PATTERN, validateForStore } from "../../src/envelope.mjs";
 import { errorReport } from "../../src/flow/flow-error.mjs";
 import { saveCheck } from "../../src/flow/agent-md.mjs";
 import {
@@ -90,6 +90,18 @@ export function commitNote(raw) {
   text = text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   if (!text) return null;
   return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+/**
+ * ?tag=a,b → the tags a row must all carry. → {tags} (empty for no query) or
+ * {error} for a tag the envelope would refuse.
+ */
+export function tagQuery(raw) {
+  if (raw === undefined || raw === "") return { tags: [] };
+  const tags = String(raw).split(",").map((t) => t.trim()).filter(Boolean);
+  const re = new RegExp(TAG_PATTERN);
+  const bad = tags.filter((t) => !re.test(t));
+  return bad.length ? { error: bad } : { tags };
 }
 
 function priorityOf(user) {
@@ -186,10 +198,13 @@ export function registerDocsRoutes(app) {
     "/api/docs",
     { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
-      const { type, tier, q, absorbed } = request.query ?? {};
+      const { type, tier, q, absorbed, tag } = request.query ?? {};
       // absorbed=stale: the documents whose absorbed.rev is missing or behind their rev.
       if (absorbed !== undefined && absorbed !== "stale")
         return reply.code(400).send({ error: "invalid_query", param: "absorbed", allowed: ["stale"] });
+      // tag=a,b: the documents that carry every one of them.
+      const wanted = tagQuery(tag);
+      if (wanted.error) return reply.code(400).send({ error: "invalid_query", param: "tag", invalid: wanted.error });
       const docs = [];
       const typeIds = types.ids();
       let uses = null; // read once, at the first db-schema
@@ -200,6 +215,7 @@ export function registerDocsRoutes(app) {
           const doc = readJson(storeDir, `${t}/${id}.json`);
           if (!doc) continue;
           if (q && !id.includes(q)) continue;
+          if (!wanted.tags.every((t) => (doc.tags ?? []).includes(t))) continue;
           const tiers = tierSummary(bodySchema, doc.body);
           if (tier && !tiers[tier]) continue;
           const rev = revOfPath(storeDir, `${t}/${id}.json`);
@@ -211,6 +227,7 @@ export function registerDocsRoutes(app) {
             status: doc.status,
             tiers,
             keywords: doc.keywords ?? [],
+            tags: doc.tags ?? [],
             links: doc.links ?? [],
             title: titleOf(doc),
             ...originOf(doc),
@@ -238,6 +255,21 @@ export function registerDocsRoutes(app) {
       return { docs };
     },
   );
+
+  // Every tag with the number of documents that carry it — the 문서 탭's tag
+  // panel. Archived documents are left out, as the screen leaves them out.
+  app.get("/api/tags", { config: { roles: ["user", "agent"] } }, async () => {
+    const tags = {};
+    for (const t of types.ids()) {
+      if (!types.bodySchema(t)) continue;
+      for (const id of listIds(storeDir, t)) {
+        const doc = readJson(storeDir, `${t}/${id}.json`);
+        if (!doc || doc.status === "archived") continue;
+        for (const tag of doc.tags ?? []) tags[tag] = (tags[tag] ?? 0) + 1;
+      }
+    }
+    return { tags };
+  });
 
   app.get(
     "/api/docs/:type/:id",
@@ -892,6 +924,51 @@ export function registerDocsRoutes(app) {
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `links ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // The envelope's tags as a whole. PUT /api/docs/:type/:id carries a body
+  // only, so the tags get their own write — the same people as that PUT, the
+  // same If-Match rule as links. `tags: []` drops the key.
+  app.put(
+    "/api/docs/:type/:id/tags",
+    { config: { roles: ["admin", "agent"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const tags = request.body?.tags;
+      if (!Array.isArray(tags)) return reply.code(400).send({ error: "tags_required" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
+          // Idempotent: committing an identical tree would fail in git.
+          if (JSON.stringify(tags) === JSON.stringify(doc.tags ?? []))
+            return { status: 200, body: { rev: currentRev, json: doc, unchanged: true } };
+
+          // tags sit after keywords.
+          const { schema, id: did, keywords, tags: _old, ...rest } = doc;
+          const newDoc = { schema, id: did, ...(keywords !== undefined ? { keywords } : {}), ...(tags.length ? { tags } : {}), ...rest };
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `tags ${type}/${id}`,
           });
           return { status: 200, body: { rev, json: newDoc } };
         },
