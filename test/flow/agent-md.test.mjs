@@ -3,7 +3,7 @@
 // src/test/resources), and the claude-hooks fdc-flowchart skill's samples.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -290,4 +290,116 @@ test("저장 검사: 자기 오류를 내고, 저장으로 깨지는 다른 md �
   const lone = saveCheck([scope], { ...spec, active: true });
   assert.deepEqual(lone.errors.map((e) => e.code), ["UNKNOWN_ID", "UNSOURCED_VAR"]);
   assert.deepEqual(lone.broken, []);
+});
+
+// ---- the map node (flow-map-node-spec.md): BE's map-node samples and their codes
+const MAP_EXPECTED = {
+  "ok-rename.md": [],
+  "ok-cross-eqp.md": [],
+  "ok-input-map.md": [],
+  "ok-map-map.md": [],
+  "ok-flow-map.md": [],
+  "ok-nested-ternary.md": [],
+  "ok-concat.md": [],
+  "ok-eqp-size.md": [],
+  "bad-map-item.md": ["MAP_ITEM"],
+  "bad-map-fence.md": ["MAP_FENCE"],
+  "bad-map-shape.md": ["MAP_SHAPE"],
+  "bad-map-line.md": ["MAP_LINE"],
+  "bad-map-expr.md": ["MAP_EXPR"],
+  "bad-map-dup.md": ["MAP_DUP"],
+  "bad-map-source.md": ["MAP_SOURCE"],
+  "bad-map-scope.md": ["MAP_SCOPE"],
+  "bad-map-no-source.md": ["MAP_NO_SOURCE"],
+  "bad-map-alone.md": ["MAP_ALONE"],
+  "bad-optional-edge.md": ["OPTIONAL_EDGE"],
+  "bad-edge-kind.md": ["EDGE_KIND"],
+  "bad-shape-conflict.md": ["SHAPE_CONFLICT"],
+  "bad-eqp-left.md": ["MAP_LINE"],
+};
+const codesOf = (r) => r.lines.filter((l) => !l.startsWith("OK ")).map((l) => l.split(" ")[1]);
+
+test("변환 노드 표본은 BE 와 같은 코드를 낸다", () => {
+  const names = readdirSync(join(FIXTURES, "map-node")).filter((n) => n.endsWith(".md")).sort();
+  assert.deepEqual(names, Object.keys(MAP_EXPECTED).sort());
+  for (const [name, codes] of Object.entries(MAP_EXPECTED)) {
+    const r = checkFiles([file(`map-node/${name}`)]);
+    assert.deepEqual(codesOf(r), codes, `${name}: ${r.lines.join("\n")}`);
+    assert.equal(r.ok, codes.length === 0, name);
+  }
+});
+
+test("변환 노드 오류는 노드 줄 · 항목 제목 줄 · map 줄을 md 줄로 낸다", () => {
+  const line = (name) => checkFiles([file(`map-node/${name}`)]).lines[0];
+  assert.equal(line("bad-map-item.md"), "bad-map-item.md:11 MAP_ITEM 변환 노드 m 를 가리키는 '### m' 항목이 없다");
+  assert.equal(line("bad-map-fence.md"), "bad-map-fence.md:21 MAP_FENCE 항목 m 에는 map 펜스가 하나 있어야 한다");
+  assert.equal(line("bad-map-line.md"), "bad-map-line.md:19 MAP_LINE map 줄은 '이름 = 식' 꼴이다: eqp_id == 1");
+  assert.equal(line("bad-map-expr.md"), "bad-map-expr.md:18 MAP_EXPR 식을 읽을 수 없다(메서드 호출은 받지 않는다): ch = substr(eqp_id)");
+  assert.equal(line("bad-map-scope.md"), "bad-map-scope.md:26 MAP_SCOPE $eqp[0].go 은 앞 노드가 낸 이름이어야 한다");
+  assert.equal(line("bad-map-alone.md"), "bad-map-alone.md:11 MAP_ALONE 변환 노드 m 에서 나가는 간선이 없다");
+});
+
+const mapMd = (fence, items) => `# 변환\n\n## 데이터\n\n\`\`\`mermaid\nflowchart TD\n${fence}\n\`\`\`\n\n${items}`;
+const MAP_M = "### m — 변환\n\n```map\nch = eqp_id\n```\n";
+const CH_DETAIL = "### ch_detail — 챔버 상세\n\n```sql\nselect ch, detail from T where ch = :ch\n```\n";
+const mapCodes = (text) => codesOf(checkFiles([{ path: "x.md", text }]));
+
+test("map 항목: 펜스 없음 · map 둘 · sql 과 함께는 MAP_FENCE, sql 항목을 {{ }} 로 적으면 MAP_SHAPE", () => {
+  const fence = "  eqp-scope[[설비 범위]] --> m{{변환}}\n  m --> ch_detail";
+  assert.deepEqual(mapCodes(mapMd(fence, `### m — 변환\n\n설명만 있다.\n\n${CH_DETAIL}`)), ["MAP_FENCE"]);
+  assert.deepEqual(mapCodes(mapMd(fence, `### m — 변환\n\n\`\`\`map\nch = eqp_id\n\`\`\`\n\n\`\`\`map\nch = line\n\`\`\`\n\n${CH_DETAIL}`)), ["MAP_FENCE"]);
+  assert.deepEqual(mapCodes(mapMd(fence, `### m — 변환\n\n\`\`\`sql\nselect ch from T where eqp_id = :eqp_id\n\`\`\`\n\n${CH_DETAIL}`)), ["MAP_SHAPE"]);
+  assert.match(checkFiles([{ path: "x.md", text: mapMd(fence, `### m — 변환\n\n\`\`\`sql\nselect ch from T where eqp_id = :eqp_id\n\`\`\`\n\n${CH_DETAIL}`) }]).lines[0], /m 는 sql 항목이다\. 노드는 \[글\] 로 적는다$/);
+  assert.deepEqual(mapCodes(mapMd("  eqp-scope[[설비 범위]] --> m\n  m --> ch_detail", `${MAP_M}\n${CH_DETAIL}`)), ["MAP_SHAPE"]);
+});
+
+test("map 항목은 조회가 아니다: queries 에 없고 maps 에 줄과 함께 있다", () => {
+  const r = readAgentMd("x", mapMd("  eqp-scope[[설비 범위]] --> m{{변환}}\n  m --> ch_detail", `${MAP_M}\n${CH_DETAIL}`));
+  assert.equal(r.rejection, null);
+  assert.deepEqual(r.queries.map((q) => q.id), ["ch_detail"]);
+  assert.deepEqual(r.maps, [{ id: "m", title: "변환", line: 11, rows: [{ line: 14, text: "ch = eqp_id" }] }]);
+});
+
+test("변환 뒤 조건 라벨의 컬럼은 변환이 내는 이름이고, 변환에 붙은 조건은 CONDITION_PLACE 가 아니다", () => {
+  const fence = (cond) => `  eqp-scope[[설비 범위]] --> m{{변환}}\n  m -->|"${cond}"| ch_detail`;
+  assert.deepEqual(mapCodes(mapMd(fence("ch = 'C1'"), `${MAP_M}\n${CH_DETAIL}`)), []);
+  assert.deepEqual(mapCodes(mapMd(fence("eqp_id = 'E1'"), `${MAP_M}\n${CH_DETAIL}`)), []);
+  assert.deepEqual(mapCodes(mapMd(fence("nope = 'C1'"), `${MAP_M}\n${CH_DETAIL}`)), ["CONDITION_COLUMN"]);
+  assert.match(checkFiles([{ path: "x.md", text: mapMd(fence("nope = 'C1'"), `${MAP_M}\n${CH_DETAIL}`) }]).lines[0], /컬럼 nope 이 caller 변환 m 가 내는 이름 \[line, eqp_id, duration, ch\] 에 없다$/);
+});
+
+test("변환이 놓은 eqp_id 는 UNSUPPORTED_EQP_FLOW 가 아니고, 조회 열을 그대로 넘기면 그대로 막는다", () => {
+  const EQPS = "### eqps — 설비 목록\n\n```sql\nselect eqp_id, sub_eqp from EQP where line = :line\n```\n";
+  const ALARM = "### alarm — 알람\n\n```sql\nselect alarm_id from ALARM where eqp_id = :eqp_id\n```\n";
+  const fence = "  eqp-scope[[설비 범위]] --> eqps\n  eqps --> m{{설비 바꾸기}}\n  m --> alarm";
+  assert.deepEqual(mapCodes(mapMd(fence, `${EQPS}\n### m — 설비 바꾸기\n\n\`\`\`map\neqp_id = sub_eqp\n\`\`\`\n\n${ALARM}`)), []);
+  assert.deepEqual(mapCodes(mapMd(fence, `${EQPS}\n### m — 설비 바꾸기\n\n\`\`\`map\ntag = sub_eqp\n\`\`\`\n\n${ALARM}`)), ["UNSUPPORTED_EQP_FLOW"]);
+});
+
+test("변환이 낸 이름이 뒤 조회의 :var 를 채우고, 못 채우면 UNSOURCED_VAR 다", () => {
+  assert.deepEqual(mapCodes(mapMd("  eqp-scope[[설비 범위]] --> m{{변환}}\n  m --> ch_detail", `### m — 변환\n\n\`\`\`map\nchx = eqp_id\n\`\`\`\n\n${CH_DETAIL}`)), ["UNSOURCED_VAR"]);
+});
+
+test("열을 못 읽는 caller 조회 뒤의 변환은 이름 검사를 통과한다", () => {
+  const ODD = "### odd — 열 모름\n\n```sql\nselect * from T where eqp_id = :eqp_id\n```\n";
+  const fence = "  eqp-scope[[설비 범위]] --> odd\n  odd --> m{{변환}}\n  m --> ch_detail";
+  assert.deepEqual(mapCodes(mapMd(fence, `${ODD}\n### m — 변환\n\n\`\`\`map\nch = anything_at_all\nx = $eqp[0].whatever\n\`\`\`\n\n${CH_DETAIL}`)), []);
+});
+
+test("순환 · md 순환에 변환 노드가 든다", () => {
+  const LOOP = "### q — 조회\n\n```sql\nselect ch from T where eqp_id = :eqp_id\n```\n";
+  const fence = "  eqp-scope[[설비 범위]] --> q\n  q --> m{{변환}}\n  m --> q";
+  assert.ok(mapCodes(mapMd(fence, `${LOOP}\n### m — 변환\n\n\`\`\`map\neqp_id = ch\n\`\`\`\n`)).includes("CYCLE"));
+});
+
+test("변환 노드에 붙은 입력도 플로우의 입력이다", () => {
+  const r = readAgentMd("x", file("map-node/ok-input-map.md").text);
+  assert.deepEqual(r.flow.inputs().map((n) => n.id), ["snsr_id"]);
+});
+
+test("저장 검사는 변환 규칙 오류를 줄과 함께 낸다", () => {
+  const scope = doc("eqp-scope", file("skills/eqp-scope.md").text);
+  const text = file("map-node/bad-map-source.md").text;
+  const r = saveCheck([scope], { ...doc("bad-map-source", text), active: true });
+  assert.deepEqual(r.errors.map((e) => [e.code, e.line]), [["MAP_SOURCE", 18]]);
 });

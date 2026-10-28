@@ -31,6 +31,15 @@ test("sql: the item's first ```sql fence (any case, ~~~ too), text: the prose, e
   ]);
 });
 
+test("kind: a ```map item is 변환 (map), a ```sql item 조회 (sql); both share the id pool", () => {
+  const md = "## 데이터\n\n### q — 조회\n\n```sql\nSELECT 1\n```\n\n### m — 변환\n\n```map\nch_id = chamber_id\n\ngrade = v > 1 ? \"HIGH\" : \"OK\"\n```\n\n### none — 설명\n\n글.\n";
+  assert.deepEqual(skillDataIds(md).map(({ id, kind, sql, map }) => ({ id, kind, sql, map })), [
+    { id: "q", kind: "sql", sql: "SELECT 1", map: null },
+    { id: "m", kind: "map", sql: null, map: 'ch_id = chamber_id\n\ngrade = v > 1 ? "HIGH" : "OK"' },
+    { id: "none", kind: null, sql: null, map: null },
+  ]);
+});
+
 test("the flow fence before the first ### is no item, and a ### inside it is code", () => {
   const md = "## 데이터\n\n```mermaid\nflowchart TD\n  snsr_id([센서])\n### not — an item\n  snsr_id --> row\n```\n\n입력 설명.\n\n### row — 행\n\n```sql\nSELECT a FROM t WHERE id = :snsr_id\n```\n";
   assert.deepEqual(skillDataIds(md).map(({ id, line, sql, text }) => ({ id, line, sql, text })), [

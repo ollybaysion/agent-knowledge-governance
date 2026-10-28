@@ -43,6 +43,11 @@ test("tableUses: table → the 조회 (skill · query id) that read it; a questi
   assert.equal(uses.size, 2);
 });
 
+test("tableUses: a map item (변환) reads no table, even when its line names one", () => {
+  const md = "## 데이터\n\n### q — 조회\n\n```sql\nselect a from FDC_A\n```\n\n### m — 변환\n\n```map\nfrom_x = a\n```\n";
+  assert.deepEqual([...tableUses([{ type: "domain-skill", id: "s", markdown: md }])], [["FDC_A", [{ type: "domain-skill", id: "s", query: "q" }]]]);
+});
+
 test("coverageOf: confirmed over scaffold + inferred + confirmed of purpose, columnDescs and query notes; deprecated is out", () => {
   const body = {
     purpose: { text: "p", tier: "confirmed" },

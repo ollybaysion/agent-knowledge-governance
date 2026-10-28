@@ -100,9 +100,11 @@ export async function renderEditor(type, id, focusKey) {
     const md = joinBlocks({ ...saved, head: editedHead }, blocksNow(), opts);
     const mine = flow.readAgentMd(id, md);
     if (!mine.fence) return null;
-    if (mine.flowErrors.length) return mine.flowErrors.map((e) => `${mine.fence.line + e.line} 줄 ${e.code} ${e.message}`);
+    if (mine.flowErrors.length) return mine.flowErrors.map((e) => `${flow.mdLine(e, mine.fence.line)} 줄 ${e.code} ${e.message}`);
     if (mine.rejection) return [mine.rejection];
-    return flow.saveCheck(registry, { type, id, markdown: md, active: true }).errors.map((e) => `${e.code} ${e.message}`);
+    return flow
+      .saveCheck(registry, { type, id, markdown: md, active: true })
+      .errors.map((e) => `${e.line > 0 ? `${flow.mdLine(e, mine.fence.line)} 줄 ` : ""}${e.code} ${e.message}`);
   }
   // The other agent mds the last save broke (the server's flowWarnings), for the save toast.
   let flowWarn = null;

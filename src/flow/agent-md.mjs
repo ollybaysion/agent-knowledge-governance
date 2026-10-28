@@ -3,10 +3,14 @@
 // SkillValidateTool.java — and a set of them checked the way BE loads them
 // (QueryFlowTool.rejections, CheckFlow.check). No node imports: the
 // dashboard runs this file as it is.
-import { errorReport } from "./flow-error.mjs";
+import { errorReport, mdLine } from "./flow-error.mjs";
 import { QueryFlow, compile } from "./flow-compiler.mjs";
+import { Kind } from "./flow-grammar.mjs";
+import { mapErrors } from "./flow-maps.mjs";
 import { check, facts, md, subgraphsOf } from "./flow-rules.mjs";
 import { columnsOf } from "../sql-bind.mjs";
+
+export { mdLine };
 
 /** BE's closing words of an input rejection — where an input is written. */
 export const INPUT_HINT = "입력은 흐름 펜스의 `id([글])` 노드로 적는다";
@@ -101,42 +105,58 @@ function idAndTitle(name, heading) {
   throw new Reject(`${name}: 데이터 항목에 id 가 없습니다 — \`### id — ${heading}\` 처럼 ascii id 를 제목 앞에 적으세요`);
 }
 
-// One SQL item. An old ASK item (```ask or no fence) and the group mark @이름 are refused.
-function need(name, heading, body) {
+// The fences of an item's body ({text, line} rows): each one's language and
+// inner rows, and whether the last is left open.
+function itemFences(rows) {
+  const fences = [];
+  let open = null;
+  for (const row of rows) {
+    const f = FENCE.exec(row.text);
+    if (open === null && f) {
+      open = f[1];
+      fences.push({ lang: f[2].toLowerCase(), rows: [] });
+    } else if (open !== null && row.text.trim().startsWith(open)) open = null;
+    else if (open !== null) fences[fences.length - 1].rows.push(row);
+  }
+  return { fences, unclosed: open !== null };
+}
+
+// One data item: a map item when a fence of it is ```map, or when a map node
+// points at it and it has no fence; else an SQL item. An old ASK item
+// (```ask or no fence) and the group mark @이름 are refused.
+function need(name, heading, at, rows, mapNodes) {
   const g = GROUP.exec(heading);
   if (g) throw new Reject(`${name}: 항목 \`${heading}\` 의 묶음 표시 @${g[2]} 는 쓰지 않는다 — ${INPUT_HINT}`);
   const [id, title] = idAndTitle(name, heading);
-  let lang = null;
-  let fenced = null;
-  let open = null;
-  for (const line of body) {
-    const f = FENCE.exec(line);
-    if (open === null && f) {
-      if (fenced !== null) throw new Reject(`${name} needs[${id}]: 펜스가 둘입니다 — 항목 하나에 문장 하나다`);
-      open = f[1];
-      lang = f[2].toLowerCase();
-      fenced = [];
-    } else if (open !== null && line.trim().startsWith(open)) open = null;
-    else if (open !== null) fenced.push(line);
+  const { fences, unclosed } = itemFences(rows);
+  if (unclosed) throw new Reject(`${name} needs[${id}]: 펜스가 닫히지 않았습니다`);
+  if (fences.some((f) => f.lang === "map") || (!fences.length && mapNodes.has(id))) {
+    const ok = fences.length === 1;
+    return { kind: Kind.MAP, id, title, line: at, ok, rows: ok ? fences[0].rows : [] };
   }
-  if (open !== null) throw new Reject(`${name} needs[${id}]: 펜스가 닫히지 않았습니다`);
-  if (fenced === null || lang === "ask")
-    throw new Reject(`${name} needs[${id}]: ${fenced === null ? "sql 펜스가 없다" : "ask 펜스는 쓰지 않는다"} — ${INPUT_HINT}`);
+  if (fences.length > 1) throw new Reject(`${name} needs[${id}]: 펜스가 둘입니다 — 항목 하나에 문장 하나다`);
+  const lang = fences[0]?.lang ?? null;
+  if (!fences.length || lang === "ask")
+    throw new Reject(`${name} needs[${id}]: ${!fences.length ? "sql 펜스가 없다" : "ask 펜스는 쓰지 않는다"} — ${INPUT_HINT}`);
   if (lang !== "sql") throw new Reject(`${name} needs[${id}]: 펜스 언어는 sql 입니다 — \`\`\`${lang}`);
-  const sql = trimBlank(fenced);
-  return { id, title, sql, vars: varsOf(sql) };
+  const sql = trimBlank(fences[0].rows.map((r) => r.text));
+  return { kind: Kind.QUERY, id, title, sql, vars: varsOf(sql) };
 }
 
-function needs(name, head, under) {
+// A section's body as {text, line} rows, line 1-based in the md.
+const rowsOf = (s) => s.body.map((text, j) => ({ text, line: s.from + 1 + j }));
+
+function needs(name, head, under, mapNodes) {
   const out = [];
   under.forEach((s, i) => {
     if (s.level !== 3) {
       if (!out.length) throw new Reject(`${name}: ## ${head.title} 아래 항목은 ### 로 적습니다 — ${"#".repeat(s.level)} ${s.title}`);
       return; // a #### inside an item is that item's body already
     }
-    const body = [...s.body];
-    for (const deeper of under.slice(i + 1, nextAtOrAbove(under, i + 1, 3))) body.push(`${"#".repeat(deeper.level)} ${deeper.title}`, ...deeper.body);
-    out.push(need(name, s.title, body));
+    const rows = rowsOf(s);
+    for (const deeper of under.slice(i + 1, nextAtOrAbove(under, i + 1, 3)))
+      rows.push({ text: `${"#".repeat(deeper.level)} ${deeper.title}`, line: deeper.from }, ...rowsOf(deeper));
+    out.push(need(name, s.title, s.from, rows, mapNodes));
   });
   return out;
 }
@@ -144,9 +164,12 @@ function needs(name, head, under) {
 /**
  * An agent md as BE reads it to register it.
  * - queries: the SQL items, written order ({id, title, sql, vars}).
+ * - maps: the map items, written order ({id, title, line, rows: {line, text}[]}):
+ *   line is the `###` line, rows the map fence's lines, md lines.
  * - fence: the flow fence — the first ```mermaid fence under `## 데이터` before
  *   its first `###` — with `line`, the md line (1-based) it opens on; null without one.
- * - flowErrors: the fence's grammar errors (flow-compiler), line = fence line.
+ * - flowErrors: the fence's grammar errors (flow-compiler), line = fence line,
+ *   and the map checks of this md alone (flow-maps), line = md line; md line order.
  * - flow: the compiled flow, read as far as it reads.
  * - rejection: BE's reason for not registering the md (its first one), null when it registers.
  *   A second `## 데이터` section is the first reason checked.
@@ -161,19 +184,28 @@ export function readAgentMd(name, markdown) {
     if (fences.length) fence = { line: s.from + fences[0].at + 1, text: fences[0].lines.join("\n") };
   }
   const compiled = fence ? compile(fence.text) : { flow: QueryFlow.EMPTY, errors: [] };
-  const out = { name, queries: [], fence, flowErrors: compiled.errors, flow: compiled.flow, rejection: null };
+  const out = { name, queries: [], maps: [], fence, flowErrors: compiled.errors, flow: compiled.flow, rejection: null };
+  const mapNodes = new Set(compiled.flow.nodes.filter((n) => n.kind === Kind.MAP).map((n) => n.id));
   try {
     const data = secs.filter((s) => s.level === 2 && normalize(s.title) === DATA);
     if (data.length > 1)
       throw new Reject(`${name}: ## ${DATA} 절은 하나다, ${data.length} 개다 — ${data.map((s) => s.from).join(" · ")} 번째 줄`);
     secs.forEach((s, i) => {
       if (s.level !== 2 || normalize(s.title) !== DATA) return;
-      out.queries.push(...needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2))));
+      for (const item of needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2)), mapNodes)) {
+        const { kind, ...rest } = item;
+        if (kind === Kind.QUERY) out.queries.push(rest);
+        else out.maps.push(rest);
+      }
+      const base = fence?.line ?? 0;
+      const maps = mapErrors(compiled.flow, base, out.maps, new Set(out.queries.map((q) => q.id)));
+      out.flowErrors = [...out.flowErrors, ...maps].sort((a, b) => mdLine(a, base) - mdLine(b, base));
+      for (const m of out.maps) delete m.ok;
       const { fences, unclosed } = mermaidFences(s.body);
       if (unclosed) throw new Reject(`${name}: 조회 흐름 오류로 거부 — mermaid 펜스가 닫히지 않았다`);
       if (fences.length > 1) throw new Reject(`${name}: 조회 흐름 오류로 거부 — mermaid 펜스는 하나다, ${fences.length} 개다`);
-      if (fences.length && compiled.errors.length)
-        throw new Reject(`${name}: 조회 흐름 오류로 거부 — ${compiled.errors.map(errorReport).join("; ")}`);
+      if ((fences.length && compiled.errors.length) || maps.length)
+        throw new Reject(`${name}: 조회 흐름 오류로 거부 — ${out.flowErrors.map(errorReport).join("; ")}`);
       if (fences.length) return;
       const q = out.queries.find((x) => x.vars.length);
       if (q) throw new Reject(`${name} needs[${q.id}]: :${q.vars[0]} 를 채울 입력을 적은 펜스가 없다 — ${INPUT_HINT}`);
@@ -200,7 +232,7 @@ export function flowErrors(specs) {
   for (const s of specs)
     for (const q of s.queries) if (!pool.has(q.id)) pool.set(q.id, { id: q.id, vars: q.vars, columns: columnsOf(q.sql) });
   const mds = new Map();
-  for (const s of specs) if (!mds.has(s.name)) mds.set(s.name, md(s.name, s.flow, s.queries.map((q) => q.id)));
+  for (const s of specs) if (!mds.has(s.name)) mds.set(s.name, md(s.name, s.flow, s.queries.map((q) => q.id), s.maps));
   const subgraphs = subgraphsOf(mds.values());
   const out = new Map();
   for (const s of specs) {
@@ -257,8 +289,8 @@ export function saveCheck(registry, self) {
 
 /**
  * BE's check-flow over md files (CheckFlow.check): grammar errors at their md
- * line, a reading rejection as `파일:1 MD 사유`, the load's errors at the fence's
- * opening line, a subgraph id another md has as a warning. The common md
+ * line, a reading rejection as `파일:1 MD 사유`, the load's errors at their md
+ * line (the fence's opening line when they have none), a subgraph id another md has as a warning. The common md
  * eqp-scope is always in. The md name is the file name without `.md`.
  * @param {{path: string, text: string}[]} files
  * @returns {{lines: string[], ok: boolean}}
@@ -273,7 +305,7 @@ export function checkFiles(files) {
     const open = r.fence?.line ?? 0;
     const mine = { path: f.path, fenceAt: Math.max(open, 1), lines: [] };
     out.set(name, mine);
-    for (const e of r.flowErrors) mine.lines.push(`${f.path}:${e.line > 0 ? open + e.line : open} ${e.code} ${e.message}`);
+    for (const e of r.flowErrors) mine.lines.push(`${f.path}:${mdLine(e, open)} ${e.code} ${e.message}`);
     if (!mine.lines.length && r.rejection) mine.lines.push(`${f.path}:1 MD ${r.rejection}`);
     if (mine.lines.length) ok = false;
     else specs.push(r);
@@ -282,7 +314,7 @@ export function checkFiles(files) {
   for (const [name, errors] of flowRejections(specs)) {
     const mine = out.get(name);
     if (!mine) continue;
-    for (const e of errors) mine.lines.push(`${mine.path}:${mine.fenceAt} ${e.code} ${e.message}`);
+    for (const e of errors) mine.lines.push(`${mine.path}:${mdLine(e, mine.fenceAt)} ${e.code} ${e.message}`);
     ok = false;
   }
   const owner = new Map();

@@ -1,16 +1,17 @@
 // The flow's meaning checked — BE FlowRules.java. One check per function; the
-// input is the flow and the facts of the registered mds alone. Every error's
-// line is 0 (a flow has no lines). No node imports: the dashboard runs this
-// file as it is.
+// input is the flow and the facts of the registered mds alone. An error's
+// line is 0, but MAP_SOURCE · MAP_SCOPE's: the map line's md line. No node
+// imports: the dashboard runs this file as it is.
 import { Code, flowError } from "./flow-error.mjs";
 import { Kind } from "./flow-grammar.mjs";
 import { QueryFlow, edgeText } from "./flow-compiler.mjs";
+import { parseExpr, splitMapLine } from "./map-expr.mjs";
 import { EQP_BINDS, isEqpBind, isTimeBind } from "../sql-bind.mjs";
 
 /** The input that fills :start_time and :end_time at once — the one exception. */
 export const DURATION = "duration";
 
-const error = (code, message) => flowError(0, code, message);
+const error = (code, message, line = 0) => flowError(line, code, message);
 const kind = (flow, id) => flow.kindOf(id) ?? Kind.QUERY;
 const lower = (s) => s.toLowerCase();
 
@@ -19,9 +20,11 @@ const lower = (s) => s.toLowerCase();
  * @param {string} name
  * @param {QueryFlow} [flow]
  * @param {string[]} [queryIds] its SQL item ids, written order
- * @returns {{name: string, flow: QueryFlow, queryIds: string[]}}
+ * @param {{id: string, line: number, rows: {line: number, text: string}[]}[]} [maps]
+ *   its map items, written order, md lines (agent-md readAgentMd's maps)
+ * @returns {{name: string, flow: QueryFlow, queryIds: string[], maps: object[]}}
  */
-export const md = (name, flow, queryIds) => ({ name, flow: flow ?? QueryFlow.EMPTY, queryIds: queryIds ?? [] });
+export const md = (name, flow, queryIds, maps) => ({ name, flow: flow ?? QueryFlow.EMPTY, queryIds: queryIds ?? [], maps: maps ?? [] });
 
 /** A subgraph as an md: its id, its flow, the md's SQL items inside it. */
 export function subgraphMd(m, id) {
@@ -58,9 +61,18 @@ export function facts(self, ownQueries, queries, mds, subgraphs = subgraphsOf(md
   };
 }
 
-/** Every check, in order: nodes · edge kinds · else · condition columns · bind sources · cycle · md cycle. */
+/** Every check, in order: nodes · edge kinds · else · condition columns · bind sources · map sources · cycle · md cycle. */
 export function check(flow, f) {
-  return [...nodes(flow, f), ...edgeKinds(flow), ...elses(flow), ...conditionColumns(flow, f), ...sources(flow, f), ...cycle(flow), ...mdCycle(flow, f)];
+  return [
+    ...nodes(flow, f),
+    ...edgeKinds(flow),
+    ...elses(flow),
+    ...conditionColumns(flow, f),
+    ...sources(flow, f),
+    ...mapSources(flow, f),
+    ...cycle(flow),
+    ...mdCycle(flow, f),
+  ];
 }
 
 /**
@@ -83,6 +95,8 @@ export function nodes(flow, f) {
         out.push(error(Code.UNKNOWN_ID, `노드 ${id}${isMd || sub
           ? `: 조회가 아니다 — ${isMd ? "md" : "다른 md 의 subgraph"} 를 흐름 노드로 쓰려면 \`${id}[[글]]\` 로 적는다`
           : ": 이 md 의 SQL 항목도, 등재된 조회도 아니다"}`));
+    } else if (n.kind === Kind.MAP) {
+      // its map item is agent-md's to pair (MAP_ITEM · MAP_SHAPE)
     } else if (flow.isSubgraph(id)) {
       if (query) out.push(error(Code.SUBGRAPH_ID_CLASH, `subgraph ${id}: 등재된 조회 id 와 겹친다`));
       else if (isMd) out.push(error(Code.SUBGRAPH_ID_CLASH, `subgraph ${id}: 등재된 md 이름과 겹친다`));
@@ -94,9 +108,10 @@ export function nodes(flow, f) {
 }
 
 /**
- * Edge kinds: input → query · flow → query · query → query · query → flow.
- * `-.->` is input → query only, a condition a query caller's only. A flow node
- * is on an edge — a subgraph of this md may stand alone (another md may point at it).
+ * Edge kinds: input → query · flow → query · query → query · query → flow,
+ * a map at a query's place. `-.->` is input → query only, a condition a query
+ * or map caller's only. A flow node is on an edge — a subgraph of this md may
+ * stand alone (another md may point at it). A map's own edges are flow-maps'.
  */
 export function edgeKinds(flow) {
   const out = [];
@@ -109,7 +124,8 @@ export function edgeKinds(flow) {
     else if (caller === Kind.FLOW && callee === Kind.FLOW) out.push(error(Code.EDGE_KIND, `간선 ${edgeText(e)}: 흐름 → 흐름 간선은 쓸 수 없다`));
     if (e.optional && !(caller === Kind.INPUT && callee === Kind.QUERY))
       out.push(error(Code.OPTIONAL_EDGE, `간선 ${edgeText(e)}: -.-> 는 입력 → 조회에만 쓴다`));
-    if (e.condition && caller !== Kind.QUERY) out.push(error(Code.CONDITION_PLACE, `간선 ${edgeText(e)}: 조건은 조회 caller 의 간선에만 쓴다`));
+    if (e.condition && caller !== Kind.QUERY && caller !== Kind.MAP)
+      out.push(error(Code.CONDITION_PLACE, `간선 ${edgeText(e)}: 조건은 조회 · 변환 caller 의 간선에만 쓴다`));
   }
   for (const n of flow.nodes)
     if (n.kind === Kind.FLOW && !flow.isSubgraph(n.id) && flow.edgesFrom(n.id).length === 0 && !flow.hasCaller(n.id))
@@ -129,11 +145,20 @@ export function elses(flow) {
   return out;
 }
 
-/** A condition's column is among the caller query's output columns; a caller whose SQL did not read is skipped. */
+/**
+ * A condition's column is among the caller query's output columns, or among
+ * the names a caller map gives; a caller whose SQL did not read is skipped.
+ */
 export function conditionColumns(flow, f) {
   const out = [];
   for (const e of flow.edges) {
     const column = e.condition?.column ?? null;
+    if (column !== null && kind(flow, e.caller) === Kind.MAP) {
+      const g = gives(flow, f, e.caller, new Set());
+      if (!g.anything && !g.names.has(lower(column)))
+        out.push(error(Code.CONDITION_COLUMN, `간선 ${edgeText(e)}: 컬럼 ${column} 이 caller 변환 ${e.caller} 가 내는 이름 [${[...g.names].join(", ")}] 에 없다`));
+      continue;
+    }
     const caller = f.queries.get(e.caller);
     const columns = column !== null && caller ? caller.columns : null;
     if (columns && !columns.some((c) => lower(c) === lower(column)))
@@ -176,31 +201,93 @@ function provided(id, f, seen) {
   return out;
 }
 
-function sourced(flow, f, q, v) {
-  for (const e of flow.edgesInto(q)) {
-    const k = kind(flow, e.caller);
-    if (k === Kind.INPUT) {
-      if (names(v).has(lower(e.caller))) return true;
-    } else if (k === Kind.QUERY) {
-      if (!isEqpBind(v) && columnOf(f.queries.get(e.caller), v)) return true;
-    } else {
-      const p = provided(e.caller, f, new Set());
-      if (p.anything || [...names(v)].some((n) => p.names.has(n))) return true;
-    }
+// The edges a node takes values by: its own, and its subgraph's when it is a
+// start of that subgraph (a query or map caller pointing at the subgraph).
+function callersOf(flow, id) {
+  const own = flow.edgesInto(id);
+  const sub = flow.node(id)?.subgraph ?? null;
+  if (sub === null || !flow.subgraph(sub).starts([]).includes(id)) return own;
+  return [...own, ...flow.edgesInto(sub).filter((e) => [Kind.QUERY, Kind.MAP].includes(kind(flow, e.caller)))];
+}
+
+// A map's left names, lower case: this md's map item of that id.
+function leftNames(f, id) {
+  const item = f.mds.get(f.self)?.maps.find((m) => m.id === id);
+  const out = new Set();
+  for (const r of item?.rows ?? []) {
+    const split = splitMapLine(r.text);
+    if (split) out.add(lower(split.name));
   }
-  // A query caller pointing at this md's subgraph fills that subgraph's start queries.
-  const sub = flow.node(q)?.subgraph ?? null;
-  if (sub !== null && !isEqpBind(v) && flow.subgraph(sub).starts([]).includes(q))
-    return flow.edgesInto(sub).some((e) => kind(flow, e.caller) === Kind.QUERY && columnOf(f.queries.get(e.caller), v));
-  return false;
+  return out;
+}
+
+// The names a node gives the node it points at, lower case: an input its id,
+// a query its columns, a flow what it provides, a map what flows into it and
+// its left names. `anything` when a query's columns did not read.
+function gives(flow, f, id, seen) {
+  const k = kind(flow, id);
+  if (k === Kind.INPUT) return { names: new Set([lower(id)]), anything: false };
+  if (k === Kind.FLOW) return provided(id, f, new Set());
+  if (k === Kind.QUERY) {
+    const fact = f.queries.get(id);
+    return { names: new Set((fact?.columns ?? []).map(lower)), anything: !!fact && fact.columns === null };
+  }
+  const out = inflow(flow, f, id, seen);
+  for (const n of leftNames(f, id)) out.names.add(n);
+  return out;
+}
+
+// What flows into a node: the names its callers give.
+function inflow(flow, f, id, seen) {
+  const out = { names: new Set(), anything: false };
+  if (seen.has(id)) return out;
+  seen.add(id);
+  for (const e of callersOf(flow, id)) {
+    const g = gives(flow, f, e.caller, seen);
+    for (const n of g.names) out.names.add(n);
+    out.anything ||= g.anything;
+  }
+  return out;
+}
+
+// The caller fills :v of the node it points at. A map fills it by a left
+// name, else passes on what fills it.
+function fills(flow, f, caller, v, seen) {
+  const k = kind(flow, caller);
+  if (k === Kind.INPUT) return names(v).has(lower(caller));
+  if (k === Kind.QUERY) return !isEqpBind(v) && columnOf(f.queries.get(caller), v);
+  if (k === Kind.MAP) {
+    const left = leftNames(f, caller);
+    return [...names(v)].some((n) => left.has(n)) || sourced(flow, f, caller, v, seen);
+  }
+  const p = provided(caller, f, new Set());
+  return p.anything || [...names(v)].some((n) => p.names.has(n));
+}
+
+function sourced(flow, f, q, v, seen = new Set()) {
+  if (seen.has(q)) return false;
+  seen.add(q);
+  return callersOf(flow, q).some((e) => fills(flow, f, e.caller, v, seen));
+}
+
+// :v (an eqp bind) is filled by a caller query's output — straight, or passed on by maps.
+function byQuery(flow, f, q, v, seen = new Set()) {
+  if (seen.has(q)) return false;
+  seen.add(q);
+  return flow.edgesInto(q).some((e) => {
+    const k = kind(flow, e.caller);
+    if (k === Kind.QUERY) return columnOf(f.queries.get(e.caller), v);
+    return k === Kind.MAP && !leftNames(f, e.caller).has(lower(v)) && byQuery(flow, f, e.caller, v, seen);
+  });
 }
 
 /**
  * Each query's :var has a source: an input node coming in, a caller query's
- * output column, a caller flow's inputs or end-query output. Names are any
- * case; :start_time · :end_time take the input duration. The queries looked
- * at are this md's SQL items and the fence's query nodes. An eqp bind filled
- * by a caller query's output alone is a flow between eqps, not taken yet.
+ * output column, a caller flow's inputs or end-query output, a caller map's
+ * left name or what flows into that map. Names are any case; :start_time ·
+ * :end_time take the input duration. The queries looked at are this md's SQL
+ * items and the fence's query nodes. An eqp bind filled by a caller query's
+ * output alone is a flow between eqps, not taken yet — a map's left name may fill it.
  */
 export function sources(flow, f) {
   const targets = new Set(f.ownQueries);
@@ -214,13 +301,36 @@ export function sources(flow, f) {
       if (seen.has(lower(v))) continue;
       seen.add(lower(v));
       if (sourced(flow, f, q, v)) continue;
-      const byQuery =
-        isEqpBind(v) && flow.edgesInto(q).some((e) => kind(flow, e.caller) === Kind.QUERY && columnOf(f.queries.get(e.caller), v));
       out.push(
-        byQuery
+        isEqpBind(v) && byQuery(flow, f, q, v)
           ? error(Code.UNSUPPORTED_EQP_FLOW, `${q} 의 :${v} 를 caller 조회의 출력으로 채운다 — 설비 간 흐름은 아직 받지 않는다. 입력 ${v}([글]) 을 잇는다`)
           : error(Code.UNSOURCED_VAR, `${q} 의 :${v} 를 채울 입력이 없다`),
       );
+    }
+  }
+  return out;
+}
+
+/**
+ * On each map node of this md, its 식's names flow into it (MAP_SOURCE) and
+ * each `$eqp[n].이름` is a name a node before it gives (MAP_SCOPE). A caller
+ * whose columns did not read passes both. A line that does not read is
+ * flow-maps' (the md is not registered).
+ */
+export function mapSources(flow, f) {
+  const out = [];
+  for (const item of f.mds.get(f.self)?.maps ?? []) {
+    if (flow.kindOf(item.id) !== Kind.MAP) continue;
+    const flowing = inflow(flow, f, item.id, new Set());
+    const known = (name) => flowing.anything || flowing.names.has(lower(name));
+    for (const r of item.rows) {
+      const split = splitMapLine(r.text.trim());
+      const expr = split ? parseExpr(split.expr) : null;
+      if (!expr || expr.error) continue;
+      for (const name of expr.names)
+        if (!known(name)) out.push(error(Code.MAP_SOURCE, `식의 이름 ${name} 이 변환 노드 ${item.id} 로 흘러들지 않는다`, r.line));
+      for (const { n, name } of expr.eqp)
+        if (!known(name)) out.push(error(Code.MAP_SCOPE, `$eqp[${n}].${name} 은 앞 노드가 낸 이름이어야 한다`, r.line));
     }
   }
   return out;

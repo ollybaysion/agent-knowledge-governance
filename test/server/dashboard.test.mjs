@@ -55,7 +55,7 @@ test("GET /js/main.mjs, /app.css and /lib/search.mjs are served publicly with th
   await cleanup();
 });
 
-for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", "sql-bind", "flow/agent-md", "flow/flow-compiler", "flow/flow-error", "flow/flow-grammar", "flow/flow-rules"]) {
+for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", "sql-bind", "flow/agent-md", "flow/flow-compiler", "flow/flow-error", "flow/flow-grammar", "flow/flow-maps", "flow/flow-rules", "flow/map-expr"]) {
   test(`GET /lib/shared/${name}.mjs serves src/${name}.mjs, byte for byte, publicly`, async () => {
     const { app, cleanup } = await setup();
     const res = await app.inject({ method: "GET", url: `/lib/shared/${name}.mjs` });
