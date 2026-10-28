@@ -1315,6 +1315,13 @@ a.chip:hover {
 .doc-body {
   padding-bottom: 80px;
 }
+/* 그림 절이 본문 아래에 서면 아래 여백은 그림 절이 가진다 */
+.doc-body:has(+ .doc-assets:not(:empty)) {
+  padding-bottom: 0;
+}
+.doc-assets:not(:empty) {
+  padding-bottom: 80px;
+}
 .doc-intro {
   margin: 18px 0 0;
   font-size: 14.5px;

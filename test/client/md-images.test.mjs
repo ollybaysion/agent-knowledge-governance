@@ -1,11 +1,11 @@
 // ![글](asset:<sha256>): the reading view's parse (block · inline), the
-// figure data, and the md scan the save check reads.
+// figure data, the 그림 section, and the md scan the save check reads.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { inlineRuns, parseBlocks } from "../../public/lib/md-parse.mjs";
-import { assetSrc, figureOf } from "../../public/lib/doc-assets.mjs";
+import { assetSrc, assetsSection, figureOf } from "../../public/lib/doc-assets.mjs";
 import { assetRef, mdImages } from "../../src/md-images.mjs";
 
 const A = createHash("sha256").update("a").digest("hex");
@@ -57,4 +57,19 @@ test("mdImages: every picture with its md line, fenced code and inline code left
     { line: 7, alt: "f", src: "", sha256: null },
   ]);
   assert.equal(assetRef(`asset:${A.toUpperCase()}`), null);
+});
+
+test("assetsSection: the 그림 section — every attached picture once, in order, with its size and alt; none without assets", () => {
+  assert.equal(assetsSection(undefined), null);
+  assert.equal(assetsSection([]), null);
+  const s = assetsSection([
+    { sha256: A, alt: "관리도", width: 640, height: 320 },
+    { sha256: B, width: 10, height: 20 },
+  ]);
+  assert.equal(s.title, "그림 2");
+  assert.equal(s.key, "첨부 그림");
+  assert.deepEqual(s.figures, [
+    { sha256: A, src: `/api/assets/${A}`, alt: "관리도", width: 640, height: 320 },
+    { sha256: B, src: `/api/assets/${B}`, alt: "", width: 10, height: 20 },
+  ]);
 });

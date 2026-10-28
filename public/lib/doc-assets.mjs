@@ -21,3 +21,16 @@ export function figureOf(sha256, { alt = "", entry = null } = {}) {
 
 /** sha256 → its assets[] entry. */
 export const assetIndex = (assets) => new Map((assets ?? []).map((a) => [a.sha256, a]));
+
+/**
+ * The reading view's 그림 section under the body: every attached picture once,
+ * in assets[] order, the ones the md shows too. Null without any.
+ */
+export function assetsSection(assets) {
+  if (!assets?.length) return null;
+  return {
+    key: "첨부 그림",
+    title: `그림 ${assets.length}`,
+    figures: assets.map((a) => figureOf(a.sha256, { entry: a })),
+  };
+}

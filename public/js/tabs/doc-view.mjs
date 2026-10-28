@@ -1,11 +1,13 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
 // id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집),
 // the tag row (# chips · 태그 더하기), then the body as
-// boxless sections, in one 720 column. Left: the agent list (a main skill)
+// boxless sections and, when the doc has assets[], the 그림 section under it,
+// in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
-import { inline, mdNodes, wikiResolver } from "../md.mjs";
+import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
+import { assetsSection } from "/lib/doc-assets.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
@@ -157,10 +159,17 @@ export async function renderDocScreen(type, id, opts = {}) {
     head.querySelector(".json-view")?.setAttribute("aria-pressed", String(jsonOpen));
   }
   const bodyHost = el("div", { class: "doc-body" });
-  main.append(head, inactiveBar(doc) ?? document.createTextNode(""), jsonHost, el("div", { id: "doc-notice" }), bodyHost);
+  // Its own host: a body that repaints itself leaves the 그림 section be.
+  const assetsHost = el("div", { class: "doc-assets" });
+  main.append(head, inactiveBar(doc) ?? document.createTextNode(""), jsonHost, el("div", { id: "doc-notice" }), bodyHost, assetsHost);
 
   const built = await buildBody(ctx, bodyHost);
   if (ticket !== docTicket) return;
+  const pictures = assetsSection(doc.assets);
+  if (pictures) {
+    assetsHost.replaceChildren(sec({ key: pictures.key, title: pictures.title, children: pictures.figures.map(pictureFig) }));
+    built.sections = [...(built.sections ?? []), { key: pictures.key, title: pictures.title }];
+  }
   panel.setSummary(built);
   stickyHead(head);
   // ⌘K 의 열 이름 결과(?col=…): that 열 row, when the catalog still has it.

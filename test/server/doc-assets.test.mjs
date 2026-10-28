@@ -240,3 +240,16 @@ test("a save names the md line in validation_failed; the rendered md keeps ![글
     await cleanup();
   }
 });
+
+test("the reading view draws the 그림 section from the doc's assets[] (the module the page loads)", async () => {
+  const { req, cleanup } = await setup();
+  try {
+    const lib = await req("u", "GET", "/lib/doc-assets.mjs");
+    assert.equal(lib.statusCode, 200);
+    assert.match(lib.body, /export function assetsSection/);
+    const view = await req("u", "GET", "/js/tabs/doc-view.mjs");
+    assert.match(view.body, /assetsSection\(doc\.assets\)/);
+  } finally {
+    await cleanup();
+  }
+});
