@@ -81,6 +81,8 @@ export function mdNodes(markdown, ctx = {}) {
         key: mm.key == null ? null : `${mm.key}#${n}`,
         delay: mm.delay ?? 0,
         notes: n === 0 && !heading ? mm.flowNotes ?? null : null,
+        // The reading view (no editor ctx): a click opens the mermaid text.
+        code: !ctx.mermaid,
       });
     }
     if (b.type === "h") heading = true;

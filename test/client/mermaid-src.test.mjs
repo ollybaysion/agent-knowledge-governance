@@ -5,7 +5,9 @@ import { parseBlocks } from "../../public/lib/md-parse.mjs";
 import {
   INERT_ATTR,
   INERT_STYLE,
+  codeLines,
   debounce,
+  foldNext,
   errorLine,
   inertSvg,
   isMermaid,
@@ -89,4 +91,25 @@ test("debounce runs once, 300ms after the last call, with the last arguments", (
   run.cancel();
   t.mock.timers.tick(1000);
   assert.deepEqual(calls, [2]);
+});
+
+test("the code box under a figure: a click, Enter or Space opens it and the same again closes it; other keys leave it", () => {
+  let open = false;
+  open = foldNext(open, { type: "click" });
+  assert.equal(open, true);
+  open = foldNext(open, { type: "click" });
+  assert.equal(open, false);
+  open = foldNext(open, { type: "keydown", key: "Enter" });
+  assert.equal(open, true);
+  open = foldNext(open, { type: "keydown", key: " " });
+  assert.equal(open, false);
+  assert.equal(foldNext(false, { type: "keydown", key: "Tab" }), null);
+  assert.equal(foldNext(true, { type: "keydown", key: "Escape" }), null);
+  assert.equal(foldNext(true, { type: "mouseover" }), null);
+});
+
+test("the code box lines are the fence text, its last newline dropped", () => {
+  assert.deepEqual(codeLines("flowchart TD\n  A --> B"), ["flowchart TD", "  A --> B"]);
+  assert.deepEqual(codeLines("graph LR\n"), ["graph LR"]);
+  assert.deepEqual(codeLines(mermaidFences(MD)[0].text).length, 2);
 });
