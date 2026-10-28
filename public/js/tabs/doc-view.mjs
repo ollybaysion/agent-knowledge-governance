@@ -1,5 +1,5 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집), then the body as
+// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
@@ -209,6 +209,12 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     role ? roleChip(doc, rev, canEdit, () => reload()) : null,
     el("span", { class: "chip idc", text: doc.id }),
     el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
+    doc.absorbed
+      ? el("span", {
+          class: "chip rev",
+          text: `녹임 ${shortRev(doc.absorbed.rev)}${doc.absorbed.rev === rev ? "" : " · 뒤에 바뀜"}`,
+        })
+      : null,
     admin
       ? el("button", { type: "button", class: "chip json-view", "aria-pressed": "false", title: "원본 store JSON", onclick: toggleJson, text: "JSON" })
       : null,
