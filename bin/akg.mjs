@@ -6,7 +6,7 @@
 // failure) — the caller needs to know the write did not happen.
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   syncMirror,
@@ -19,6 +19,7 @@ import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
 import { push, checkPushFile } from "../src/client/push.mjs";
 import { absorbMark, listDocs } from "../src/client/absorb.mjs";
+import { assetPush } from "../src/client/asset-push.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
@@ -28,16 +29,23 @@ const USAGE = `usage:
   akg push <type>/<id> <file.json|file.md> [--create] [--note <글>] [--rev <rev>] [--dry-run] [--server <url>] [--mirror <dir>]
   akg absorb-mark <type>/<id> [--rev <rev>] [--server <url>] [--mirror <dir>]
   akg list [<type>] [--stale-absorbed] [--tag <tag>] [--server <url>] [--mirror <dir>]
+  akg asset-push <file.png|.jpg|.webp> [--alt <글>] [--server <url>] [--mirror <dir>]
 
 push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
   .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain)의 본문 글.
-  .json 의 links · tags 는 서버와 다를 때만 올린다.
+  .json 의 links · tags · assets 는 서버와 다를 때만 올린다.
+  .md 의 ![글](./경로.png) 는 그 파일을 올리고 ![글](asset:<sha256>) 로 바꿔 쓴다.
+  md 가 보이는 asset: 그림은 문서 assets[] 에 더한다(alt = ![글] 의 글).
+  그림 파일을 못 읽으면 아무것도 쓰지 않고 멈춘다.
   서버의 현재 rev 로 고친다(--rev 를 주면 그 rev). 없는 문서는 --create 일 때만 만든다(.md 는 비활성으로).
   슬롯은 추정까지만 들어간다 — 승격 · 삭제 · 활성화는 admin 화면에서.
 absorb-mark: 문서의 지식을 1급 문서에 녹였다고 표시한다(absorbed). --rev = 녹일 때 읽은 rev,
   없으면 서버의 현재 rev. 문서 rev 는 그대로다.
-list: 문서 한 줄씩 "<type>/<id> <rev> <녹임 rev|->". --stale-absorbed = 녹임 rev 가 없거나 rev 와 다른 문서만.
+list: 문서 한 줄씩 "<type>/<id> <rev> <녹임 rev|->", 그림이 있으면 뒤에 "그림 <n>".
+  --stale-absorbed = 녹임 rev 가 없거나 rev 와 다른 문서만.
   --tag = 그 태그를 단 문서만(a,b = 둘 다 단 문서).
+asset-push: 그림 하나를 저장소에 올린다(PNG · JPEG · WebP, 2MB 까지). 출력 "<sha256> <width> <height>".
+  --alt 를 주면 다음 줄에 md 에 붙일 "![<글>](asset:<sha256>)".
 `;
 
 // The types a proposal can name: the server's list as of the last sync, or
@@ -67,6 +75,7 @@ function parseArgs(argv) {
     rev: null,
     staleAbsorbed: false,
     tag: null,
+    alt: null,
   };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
@@ -78,6 +87,7 @@ function parseArgs(argv) {
     else if (a === "--note") flags.note = rest[++i];
     else if (a === "--rev") flags.rev = rest[++i];
     else if (a === "--tag") flags.tag = rest[++i];
+    else if (a === "--alt") flags.alt = rest[++i];
     else if (a === "--skills-dir") flags.skillsDir = rest[++i];
     else if (a === "--server") flags.server = rest[++i];
     else if (a === "--mirror") flags.mirror = rest[++i];
@@ -358,7 +368,7 @@ function parsePushArgs(positional) {
       process.stderr.write(`akg: cannot read md file "${filePath}": ${err.message}\n`);
       process.exit(1);
     }
-    file = { kind: "md", markdown };
+    file = { kind: "md", markdown, baseDir: dirname(filePath) };
   } else if (filePath.endsWith(".json")) {
     file = { kind: "json", doc: readJsonFile(filePath, "document file") };
   } else {
@@ -405,6 +415,7 @@ async function runPush(positional, flags, token, serverUrl) {
       note: flags.note,
       rev: flags.rev,
     });
+    for (const { src, sha256 } of result.uploaded ?? []) process.stdout.write(`uploaded ${src} → asset:${sha256}\n`);
     process.stdout.write(
       `pushed ${type}/${id} (rev ${result.rev})${result.action === "created" ? " — 새 문서" : ""}\n`,
     );
@@ -445,7 +456,8 @@ async function runList(positional, flags, token, serverUrl) {
   const [type] = positional;
   try {
     const docs = await listDocs({ serverUrl, token, type, staleAbsorbed: flags.staleAbsorbed, tag: flags.tag });
-    for (const d of docs) process.stdout.write(`${d.type}/${d.id} ${d.rev ?? "-"} ${d.absorbed?.rev ?? "-"}\n`);
+    for (const d of docs)
+      process.stdout.write(`${d.type}/${d.id} ${d.rev ?? "-"} ${d.absorbed?.rev ?? "-"}${d.assetCount ? ` 그림 ${d.assetCount}` : ""}\n`);
   } catch (err) {
     process.stderr.write(`akg list failed: ${err.message}\n`);
     if (err instanceof AkgApiError) writeServerError("akg list", err.body);
@@ -453,9 +465,27 @@ async function runList(positional, flags, token, serverUrl) {
   }
 }
 
+async function runAssetPush(positional, flags, token, serverUrl) {
+  const [path] = positional;
+  if (!path) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  try {
+    const { sha256, width, height } = await assetPush({ serverUrl, token, path });
+    process.stdout.write(`${sha256} ${width} ${height}\n`);
+    if (flags.alt != null) process.stdout.write(`![${flags.alt}](asset:${sha256})\n`);
+  } catch (err) {
+    process.stderr.write(`akg asset-push failed: ${err.message}\n`);
+    if (err instanceof AkgApiError) writeServerError("akg asset-push", err.body);
+    // Fail CLOSED, same reasoning as propose.
+    process.exit(1);
+  }
+}
+
 async function main() {
   const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
-  if (!["sync", "propose", "catalog-push", "push", "absorb-mark", "list"].includes(cmd)) {
+  if (!["sync", "propose", "catalog-push", "push", "absorb-mark", "list", "asset-push"].includes(cmd)) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
@@ -489,6 +519,7 @@ async function main() {
   else if (cmd === "catalog-push") await runCatalogPush(positional, token, serverUrl);
   else if (cmd === "absorb-mark") await runAbsorbMark(positional, flags, token, serverUrl);
   else if (cmd === "list") await runList(positional, flags, token, serverUrl);
+  else if (cmd === "asset-push") await runAssetPush(positional, flags, token, serverUrl);
   else await runPush(positional, flags, token, serverUrl);
 }
 
