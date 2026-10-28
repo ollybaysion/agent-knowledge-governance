@@ -4,7 +4,7 @@
 // imports: the dashboard runs this file as it is.
 import { Code, flowError } from "./flow-error.mjs";
 import { Kind } from "./flow-grammar.mjs";
-import { QueryFlow, edgeText } from "./flow-compiler.mjs";
+import { OPTION_HEAD, QueryFlow, edgeText } from "./flow-compiler.mjs";
 import { parseExpr, splitMapLine } from "./map-expr.mjs";
 import { EQP_BINDS, isEqpBind, isTimeBind } from "../sql-bind.mjs";
 
@@ -61,13 +61,14 @@ export function facts(self, ownQueries, queries, mds, subgraphs = subgraphsOf(md
   };
 }
 
-/** Every check, in order: nodes · edge kinds · else · condition columns · bind sources · map sources · cycle · md cycle. */
+/** Every check, in order: nodes · edge kinds · else · condition columns · condition options · bind sources · map sources · cycle · md cycle. */
 export function check(flow, f) {
   return [
     ...nodes(flow, f),
     ...edgeKinds(flow),
     ...elses(flow),
     ...conditionColumns(flow, f),
+    ...conditionOptions(flow),
     ...sources(flow, f),
     ...mapSources(flow, f),
     ...cycle(flow),
@@ -110,7 +111,8 @@ export function nodes(flow, f) {
 /**
  * Edge kinds: input → query · flow → query · query → query · query → flow,
  * a map at a query's place. `-.->` is input → query only, a condition a query
- * or map caller's only. A flow node is on an edge — a subgraph of this md may
+ * or map caller's or an input caller's with options (QueryFlow.choiceInput)
+ * only. A flow node is on an edge — a subgraph of this md may
  * stand alone (another md may point at it). A map's own edges are flow-maps'.
  */
 export function edgeKinds(flow) {
@@ -124,8 +126,9 @@ export function edgeKinds(flow) {
     else if (caller === Kind.FLOW && callee === Kind.FLOW) out.push(error(Code.EDGE_KIND, `간선 ${edgeText(e)}: 흐름 → 흐름 간선은 쓸 수 없다`));
     if (e.optional && !(caller === Kind.INPUT && callee === Kind.QUERY))
       out.push(error(Code.OPTIONAL_EDGE, `간선 ${edgeText(e)}: -.-> 는 입력 → 조회에만 쓴다`));
-    if (e.condition && caller !== Kind.QUERY && caller !== Kind.MAP)
-      out.push(error(Code.CONDITION_PLACE, `간선 ${edgeText(e)}: 조건은 조회 · 변환 caller 의 간선에만 쓴다`));
+    if (e.condition && caller !== Kind.QUERY && caller !== Kind.MAP && !flow.choiceInput(e.caller))
+      out.push(error(Code.CONDITION_PLACE, `간선 ${edgeText(e)}: 조건은 조회 · 변환 caller 와 선택지 있는 입력 caller 의 간선에만 쓴다${
+        caller === Kind.INPUT ? ` — 입력 ${e.caller} 에 \`${OPTION_HEAD}\` 토막이 없다` : ""}`));
   }
   for (const n of flow.nodes)
     if (n.kind === Kind.FLOW && !flow.isSubgraph(n.id) && flow.edgesFrom(n.id).length === 0 && !flow.hasCaller(n.id))
@@ -147,12 +150,18 @@ export function elses(flow) {
 
 /**
  * A condition's column is among the caller query's output columns, or among
- * the names a caller map gives; a caller whose SQL did not read is skipped.
+ * the names a caller map gives, or the input id itself for an input caller
+ * (any case); a caller whose SQL did not read is skipped.
  */
 export function conditionColumns(flow, f) {
   const out = [];
   for (const e of flow.edges) {
     const column = e.condition?.column ?? null;
+    if (column !== null && kind(flow, e.caller) === Kind.INPUT) {
+      if (lower(column) !== lower(e.caller))
+        out.push(error(Code.CONDITION_COLUMN, `간선 ${edgeText(e)}: 컬럼 ${column} 는 입력 노드 id ${e.caller} 여야 한다`));
+      continue;
+    }
     if (column !== null && kind(flow, e.caller) === Kind.MAP) {
       const g = gives(flow, f, e.caller, new Set());
       if (!g.anything && !g.names.has(lower(column)))
@@ -163,6 +172,21 @@ export function conditionColumns(flow, f) {
     const columns = column !== null && caller ? caller.columns : null;
     if (columns && !columns.some((c) => lower(c) === lower(column)))
       out.push(error(Code.CONDITION_COLUMN, `간선 ${edgeText(e)}: 컬럼 ${column} 이 caller 조회 ${e.caller} 의 출력 컬럼 [${columns.join(", ")}] 에 없다`));
+  }
+  return out;
+}
+
+/** An input caller with options: its condition's values (`=` · `!=` · `in`) are among its options. */
+export function conditionOptions(flow) {
+  const out = [];
+  for (const e of flow.edges) {
+    if (!e.condition || !flow.choiceInput(e.caller)) continue;
+    const options = flow.optionsOf(e.caller);
+    const c = e.condition;
+    const values = c.op === "in" ? c.values : c.op === "else" ? [] : [c.value];
+    for (const v of values)
+      if (!options.includes(v.trim()))
+        out.push(error(Code.CONDITION_OPTION, `간선 ${edgeText(e)}: 값 ${v} 가 입력 ${e.caller} 의 선택지 [${options.join(", ")}] 에 없다`));
   }
   return out;
 }
