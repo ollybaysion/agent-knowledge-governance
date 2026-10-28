@@ -3539,6 +3539,17 @@ a.mrow.draft {
 .selbar b {
   color: var(--body-strong);
 }
+/* 추정 n 확정 확인 창: 설명 한 줄 · 열 이름 칩 */
+.dlg-p {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.dlg-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+}
 .tfilter {
   flex-direction: column;
   gap: 4px;

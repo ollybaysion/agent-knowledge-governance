@@ -14,7 +14,7 @@ import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
-import { slotFailText, togglePick } from "/lib/column-bulk.mjs";
+import { inferredColumns, slotFailText, togglePick, withObject } from "/lib/column-bulk.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -260,7 +260,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     ]),
     el("h1", { class: `doc-title${type === "db-schema" || type === "msg-format" ? " mono" : ""}`, text: title }),
     type === "db-schema"
-      ? el("div", { class: "doc-class" }, [majorChip(ctx.data.major, ctx.data.usedBy), kindChip(ctx), coverageBar(ctx.data.coverage)])
+      ? el("div", { class: "doc-class" }, [majorChip(ctx.data.major, ctx.data.usedBy), kindChip(ctx), coverageBar(ctx.data.coverage), admin ? headPromote(ctx) : null])
       : null,
     sub ? el("p", { class: "doc-sub", text: sub }) : null,
     el("div", { class: "doc-bar" }, [
@@ -675,6 +675,58 @@ function factsBody(ctx, host, doc) {
     }),
   );
   return { sections: [{ key: "설명", title: "설명" }] };
+}
+
+/** 머리의 추정 n 확정 (db-schema, admin): 추정인 열이 없으면 단추도 없다. */
+function headPromote(ctx) {
+  const b = ctx.doc.body ?? {};
+  const order = orderColumns(b.catalog?.columns, b.columnOrder).map((c) => c.name);
+  const items = inferredColumns(ctx.data.slots, order);
+  if (!items.length) return null;
+  const btn = el("button", { type: "button", class: "btn promote sm head-promote", onclick: () => promoteDialog(ctx, items, "열", btn) }, [
+    `추정 ${items.length} 확정`,
+    el("span", { class: "role", text: "admin" }),
+  ]);
+  return btn;
+}
+
+/**
+ * The 확정 확인 창: the names of `items` ({name, address}) as chips, then
+ * 취소 · n 열 확정. 확정 sends the items' addresses only. Esc and a press
+ * on the backdrop close it; focus goes back to `opener`.
+ */
+function promoteDialog(ctx, items, noun, opener) {
+  const n = items.length;
+  const go = el("button", { type: "button", class: "btn promote" }, [`${n} ${noun} 확정`, el("span", { class: "role", text: "admin" })]);
+  const dlg = el("dialog", { class: "dlg promote-dlg", "aria-labelledby": "promote-dlg-t" }, [
+    el("div", { class: "dlg-h" }, el("h3", { id: "promote-dlg-t", text: `추정 ${n} ${withObject(noun)} 확정합니다` })),
+    el("p", { class: "dlg-p", text: "글과 근거는 그대로입니다. 등급만 추정에서 확정으로 바뀝니다. 확정은 admin 의 승인으로 남습니다." }),
+    el("div", { class: "dlg-list" }, items.map((it) => el("span", { class: "chip", text: it.name }))),
+    el("div", { class: "dlg-foot" }, [
+      el("span", { class: "dim", text: `${ctx.id} · rev ${shortRev(ctx.rev)}` }),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "btn ghost", text: "취소", onclick: () => dlg.close() }),
+      go,
+    ]),
+  ]);
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    const ok = await sendSlots(ctx, { verb: "확정", endpoint: "promote", addresses: items.map((it) => it.address), noun });
+    if (ok) dlg.close();
+    else go.disabled = false;
+  });
+  // A press outside the box lands on the dialog itself (its ::backdrop).
+  dlg.addEventListener("click", (e) => {
+    if (e.target !== dlg) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+  dlg.addEventListener("close", () => {
+    dlg.remove();
+    if (opener?.isConnected) opener.focus();
+  });
+  document.body.appendChild(dlg);
+  dlg.showModal();
 }
 
 // promote · deprecate 에 슬롯 주소 배열을 보낸다. 되면 문서를 다시 읽고,
