@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { bindSql, literal, timeOf, varsOf } from "../src/sql-bind.mjs";
+import { bindSql, columnsOf, literal, timeOf, varsOf } from "../src/sql-bind.mjs";
 
 const SECOND = (s) => `TO_DATE('${s}', 'YYYY-MM-DD HH24:MI:SS')`;
 
@@ -66,4 +66,18 @@ test("a bind without a value stays as written and is listed; names match exactly
     missing: ["B"],
   });
   assert.deepEqual(bindSql("SELECT * FROM t WHERE a = :a", {}).missing, ["a"]);
+});
+
+test("columnsOf: an alias or a column name per item, upper case — the flow check's output columns", () => {
+  assert.deepEqual(columnsOf("SELECT COUNT(*) AS CNT, ROUND(AVG(v), 2) AS MEAN, eqp_id\n  FROM t WHERE a = :a"), ["CNT", "MEAN", "EQP_ID"]);
+  assert.deepEqual(columnsOf("-- 설명\nSELECT a, -- 첫째\n b /* 둘째 */ FROM t"), ["A", "B"]);
+  assert.deepEqual(columnsOf("select t.param_index, CAST(x AS NUMBER) AS n from T t"), ["PARAM_INDEX", "N"]);
+});
+
+test("columnsOf: a name it cannot read gives nothing rather than half a list", () => {
+  assert.equal(columnsOf("SELECT * FROM t"), null);
+  assert.equal(columnsOf("SELECT a, b + c FROM t"), null);
+  assert.equal(columnsOf("WITH w AS (SELECT a FROM t) SELECT a FROM w"), null);
+  assert.equal(columnsOf("SELECT 1"), null);
+  assert.equal(columnsOf(""), null);
 });
