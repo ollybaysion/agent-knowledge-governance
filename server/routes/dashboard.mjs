@@ -36,7 +36,9 @@ export const SHARED_MODULES = new Set([
   "flow/flow-compiler.mjs",
   "flow/flow-error.mjs",
   "flow/flow-grammar.mjs",
+  "flow/flow-maps.mjs",
   "flow/flow-rules.mjs",
+  "flow/map-expr.mjs",
 ]);
 
 // A module path below /js/ or /lib/: lower-case words, one level of folder.

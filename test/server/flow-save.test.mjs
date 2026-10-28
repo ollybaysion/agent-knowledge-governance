@@ -182,3 +182,43 @@ test("GET /api/flow-facts: the active agent mds, for the editor's check", async 
     await t.cleanup();
   }
 });
+
+test("map 노드: 규칙 오류는 400 flow_rejected 에 코드 · 줄, 항목 짝 오류는 400 validation_failed, 맞는 md 는 저장된다", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.admin("POST", "/api/docs/domain-skill", skill("eqp-scope", fixture("skills/eqp-scope.md")))).statusCode, 201);
+    const r = await t.admin("POST", "/api/docs/domain-skill", skill("bad-map-source", fixture("map-node/bad-map-source.md")));
+    assert.equal(r.statusCode, 400, r.body);
+    const body = r.json();
+    assert.equal(body.error, "flow_rejected");
+    assert.deepEqual(body.errors.map((e) => [e.code, e.line]), [["MAP_SOURCE", 18]]);
+    assert.deepEqual(body.details, ["$.body.markdown: 플로우 오류 18 번째 줄 MAP_SOURCE 식의 이름 chamber_id 이 변환 노드 m 로 흘러들지 않는다"]);
+
+    const item = await t.admin("POST", "/api/docs/domain-skill", skill("bad-map-item", fixture("map-node/bad-map-item.md")));
+    assert.equal(item.statusCode, 400, item.body);
+    assert.equal(item.json().error, "validation_failed");
+    assert.match(item.json().details[0], /MAP_ITEM 변환 노드 m 를 가리키는 '### m' 항목이 없다/);
+
+    for (const name of ["ok-rename", "ok-cross-eqp"]) {
+      const ok = await t.admin("POST", "/api/docs/domain-skill", skill(name, fixture(`map-node/${name}.md`)));
+      assert.equal(ok.statusCode, 201, ok.body);
+    }
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("map 항목 id 는 조회 id 와 같은 풀이다: 다른 md 의 조회 id 와 겹치면 data_id_conflict", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.admin("POST", "/api/docs/domain-skill", skill("eqp-scope", fixture("skills/eqp-scope.md")))).statusCode, 201);
+    assert.equal((await t.admin("POST", "/api/docs/domain-skill", skill("ok-rename", fixture("map-node/ok-rename.md")))).statusCode, 201);
+    const clash = fixture("map-node/ok-flow-map.md").replaceAll("m{{", "to_recipe{{").replace("  m -->", "  to_recipe -->").replace("### m —", "### to_recipe —");
+    const r = await t.admin("POST", "/api/docs/domain-skill", skill("ok-flow-map", clash));
+    assert.equal(r.statusCode, 409, r.body);
+    assert.equal(r.json().error, "data_id_conflict");
+    assert.deepEqual(r.json().conflicts, [{ id: "to_recipe", doc: "ok-rename", kind: "data" }]);
+  } finally {
+    await t.cleanup();
+  }
+});

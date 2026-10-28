@@ -148,6 +148,15 @@ test("모르는 조건은 오류다", () => {
   assert.equal(condition("x > 1"), null);
 });
 
+test("변환 노드 id{{글}} 를 노드 줄과 간선 끝에 적고 그 줄을 안다", () => {
+  const flow = parse("flowchart TD\n  m{{이름 맞추기}}\n  chamber[챔버] --> to_recipe{{레시피 변수}}\n  to_recipe --> recipe\n  m --> recipe");
+  assert.deepEqual(flow.nodes, [node("m", "map", "이름 맞추기"), node("chamber", "query", "챔버"), node("to_recipe", "map", "레시피 변수"), node("recipe", "query")]);
+  assert.deepEqual([flow.lineOf("m"), flow.lineOf("to_recipe"), flow.lineOf("recipe")], [2, 3, 4]);
+  assert.deepEqual(codes("flowchart TD\nm{{변환}} --> q\nm[조회] --> r"), ["SHAPE_CONFLICT"]);
+  assert.match(compile("flowchart TD\nm{{변환}}\nm[조회]").errors[0].message, /2 번째 줄은 변환 id\{\{글\}\}, 이 줄은 조회 id\[글\]/);
+  assert.deepEqual(codes("flowchart TD\nm{{a{b}}"), ["NODE_SYNTAX"]);
+});
+
 test("오류 코드는 이름이 계약이다", () => {
   assert.deepEqual(CODES, [
     "HEADER", "DIRECTIVE", "RESERVED_WORD", "AMPERSAND", "CHAIN", "ARROW", "EDGE_SYNTAX",
@@ -155,5 +164,6 @@ test("오류 코드는 이름이 계약이다", () => {
     "SELF_FLOW", "FLOW_ALONE", "EDGE_KIND", "OPTIONAL_EDGE", "CONDITION_PLACE", "ELSE_DUPLICATE", "CONDITION_COLUMN",
     "UNSOURCED_VAR", "UNSUPPORTED_EQP_FLOW", "CYCLE", "MD_CYCLE", "SUBGRAPH_ID", "SUBGRAPH_TITLE", "SUBGRAPH_UNCLOSED",
     "SUBGRAPH_END", "SUBGRAPH_NESTED", "SUBGRAPH_MEMBER", "SUBGRAPH_EMPTY", "SUBGRAPH_ID_CLASH",
+    "MAP_ITEM", "MAP_FENCE", "MAP_SHAPE", "MAP_LINE", "MAP_EXPR", "MAP_DUP", "MAP_SOURCE", "MAP_SCOPE", "MAP_NO_SOURCE", "MAP_ALONE",
   ]);
 });

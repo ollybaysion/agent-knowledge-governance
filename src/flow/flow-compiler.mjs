@@ -9,13 +9,17 @@ import { Kind, conditionText, lex } from "./flow-grammar.mjs";
 export const edgeText = (e) =>
   `${e.caller}${e.optional ? " -.->" : " -->"}${e.condition ? `|${conditionText(e.condition)}|` : ""} ${e.callee}`;
 
+// A query and a map stand at the same place on an edge: a query's place.
+const atQueryPlace = (kind) => kind === Kind.QUERY || kind === Kind.MAP;
+
 /**
  * The graph a fence writes. Edges belong to their caller (the side that gives the value).
  * nodes: first-seen order, one per id ({id, kind, title, subgraph}); edges:
- * written order ({caller, callee, condition, optional}).
+ * written order ({caller, callee, condition, optional}); lines: id → the fence
+ * line its shape was written on (the line it was first named on without one).
  */
 export class QueryFlow {
-  constructor(nodes = [], edges = []) {
+  constructor(nodes = [], edges = [], lines = new Map()) {
     const byId = new Map();
     for (const n of nodes) {
       if (byId.has(n.id)) continue;
@@ -24,6 +28,12 @@ export class QueryFlow {
     }
     this.nodes = [...byId.values()];
     this.edges = [...edges];
+    this.lines = lines;
+  }
+
+  /** The fence line the node is written on, 0 when not known. */
+  lineOf(id) {
+    return this.lines.get(id) ?? 0;
   }
 
   isEmpty() {
@@ -56,11 +66,11 @@ export class QueryFlow {
     return this.edges.some((e) => e.callee === id);
   }
 
-  /** A query caller points at the id, or at the subgraph it sits in. */
+  /** A query or map caller points at the id, or at the subgraph it sits in. */
   hasQueryCaller(id) {
-    if (this.edgesInto(id).some((e) => this.kindOf(e.caller) === Kind.QUERY)) return true;
+    if (this.edgesInto(id).some((e) => atQueryPlace(this.kindOf(e.caller)))) return true;
     const sub = this.node(id)?.subgraph ?? null;
-    return sub !== null && this.edgesInto(sub).some((e) => this.kindOf(e.caller) === Kind.QUERY);
+    return sub !== null && this.edgesInto(sub).some((e) => atQueryPlace(this.kindOf(e.caller)));
   }
 
   /** The subgraph ids nodes sit in, first-seen order. */
@@ -76,7 +86,7 @@ export class QueryFlow {
   subgraph(id) {
     const inside = this.nodes.filter((n) => id != null && n.subgraph === id);
     const ids = new Set(inside.map((n) => n.id));
-    return new QueryFlow(inside, this.edges.filter((e) => ids.has(e.caller) && ids.has(e.callee)));
+    return new QueryFlow(inside, this.edges.filter((e) => ids.has(e.caller) && ids.has(e.callee)), this.lines);
   }
 
   edgesFrom(caller) {
@@ -87,24 +97,24 @@ export class QueryFlow {
     return this.edges.filter((e) => e.callee === callee);
   }
 
-  /** An md's start queries: its query ids and query nodes without a query caller. */
+  /** An md's start queries: its query ids and query · map nodes without a query · map caller. */
   starts(queryIds) {
     const out = new Set(queryIds);
-    for (const n of this.nodes) if (n.kind === Kind.QUERY) out.add(n.id);
+    for (const n of this.nodes) if (atQueryPlace(n.kind)) out.add(n.id);
     return [...out].filter((id) => !this.hasQueryCaller(id));
   }
 
-  /** An md's end queries: its query ids and query nodes without an edge out. */
+  /** An md's end queries: its query ids and query · map nodes without an edge out. */
   ends(queryIds) {
     const out = new Set(queryIds);
-    for (const n of this.nodes) if (n.kind === Kind.QUERY) out.add(n.id);
+    for (const n of this.nodes) if (atQueryPlace(n.kind)) out.add(n.id);
     return [...out].filter((id) => this.edgesFrom(id).length === 0);
   }
 }
 
 QueryFlow.EMPTY = new QueryFlow();
 
-const NAME = { [Kind.INPUT]: "입력 id([글])", [Kind.QUERY]: "조회 id[글]", [Kind.FLOW]: "흐름 md[[글]]" };
+const NAME = { [Kind.INPUT]: "입력 id([글])", [Kind.QUERY]: "조회 id[글]", [Kind.FLOW]: "흐름 md[[글]]", [Kind.MAP]: "변환 id{{글}}" };
 
 /**
  * Tokens woven into a flow. Nodes in first-seen order, an edge's ends
@@ -117,6 +127,7 @@ export function compileTokens(tokens) {
   const kinds = new Map(); // id -> first shape, null when only named
   const titles = new Map();
   const shapedAt = new Map();
+  const seenAt = new Map(); // id -> the line it was first named on
   const member = new Map(); // node id -> the subgraph it was first seen in
   const subgraphAt = new Map(); // subgraph id -> its line
   let open = null;
@@ -154,6 +165,7 @@ export function compileTokens(tokens) {
       else if (unread > 0) unread--;
       else errors.push(flowError(t.line, Code.SUBGRAPH_END, "end: 닫을 subgraph 가 없다"));
     } else if (t.kind === "node") {
+      if (!seenAt.has(t.id)) seenAt.set(t.id, t.line);
       if (open !== null) {
         if (t.id === open) {
           errors.push(flowError(t.line, Code.SELF_FLOW, `subgraph ${open} 안에서 ${open} 를 노드로 적었다(순환)`));
@@ -181,6 +193,7 @@ export function compileTokens(tokens) {
     } else {
       if (open !== null)
         for (const end of [t.caller, t.callee]) if (!kinds.has(end) && end !== open) member.set(end, open);
+      for (const end of [t.caller, t.callee]) if (!seenAt.has(end)) seenAt.set(end, t.line);
       if (!kinds.has(t.caller)) kinds.set(t.caller, null);
       if (!kinds.has(t.callee)) kinds.set(t.callee, null);
       edges.push({ caller: t.caller, callee: t.callee, condition: t.condition, optional: t.optional });
@@ -192,7 +205,8 @@ export function compileTokens(tokens) {
   const used = new Set(member.values());
   for (const [id, line] of subgraphAt) if (!used.has(id)) errors.push(flowError(line, Code.SUBGRAPH_EMPTY, `subgraph ${id}: 든 노드가 없다`));
   const nodes = [...kinds].map(([id, kind]) => ({ id, kind: kind ?? Kind.QUERY, title: titles.get(id) ?? null, subgraph: member.get(id) ?? null }));
-  return { flow: new QueryFlow(nodes, edges), errors };
+  const lines = new Map([...kinds.keys()].map((id) => [id, shapedAt.get(id) ?? seenAt.get(id) ?? 0]));
+  return { flow: new QueryFlow(nodes, edges, lines), errors };
 }
 
 /**

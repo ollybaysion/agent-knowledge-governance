@@ -1,6 +1,6 @@
 // The item ids of a skill md's `## 데이터` section — the keys the consumer
-// looks its queries up by, so they must be unique across every skill. The
-// flow fence before the first `###` is no item (src/flow/agent-md.mjs reads it).
+// looks its queries and maps up by, so they must be unique across every
+// skill. The flow fence before the first `###` is no item (src/flow/agent-md.mjs reads it).
 import { normalizeHeading, scan } from "./skill-sections.mjs";
 
 const DATA_SECTION = "데이터";
@@ -18,9 +18,11 @@ const trimBlankLines = (lines) => {
  * Each `### id — title` line of the `## 데이터` section(s), skipping fenced
  * code. The dash is —, – or -, with a space on both sides; without one the
  * first token is the id and title is null. `sql` is the item's first ```sql
- * fence and `text` the prose outside fences, each trimmed of blank lines the
- * way the consumer reads them (null when there is none).
- * @returns {{id: string, title: string|null, line: number, sql: string|null, text: string|null}[]} line is 1-based
+ * fence, `map` its first ```map fence and `text` the prose outside fences,
+ * each trimmed of blank lines the way the consumer reads them (null when
+ * there is none). `kind` is "map" (변환) for an item with a ```map fence,
+ * "sql" (조회) for one with a ```sql fence, null for neither.
+ * @returns {{id: string, title: string|null, line: number, kind: "sql"|"map"|null, sql: string|null, map: string|null, text: string|null}[]} line is 1-based
  */
 export function skillDataIds(markdown) {
   const out = [];
@@ -56,6 +58,13 @@ export function skillDataIds(markdown) {
   return out.map((item, i) => {
     const { prose, fences } = bodies[i];
     const sql = fences.find((x) => x.lang === "sql");
-    return { ...item, sql: sql ? trimBlankLines(sql.lines) : null, text: trimBlankLines(prose) };
+    const map = fences.find((x) => x.lang === "map");
+    return {
+      ...item,
+      kind: map ? "map" : sql ? "sql" : null,
+      sql: sql ? trimBlankLines(sql.lines) : null,
+      map: map ? trimBlankLines(map.lines) : null,
+      text: trimBlankLines(prose),
+    };
   });
 }

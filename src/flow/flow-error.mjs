@@ -37,6 +37,16 @@ export const CODES = [
   "SUBGRAPH_MEMBER",
   "SUBGRAPH_EMPTY",
   "SUBGRAPH_ID_CLASH",
+  "MAP_ITEM",
+  "MAP_FENCE",
+  "MAP_SHAPE",
+  "MAP_LINE",
+  "MAP_EXPR",
+  "MAP_DUP",
+  "MAP_SOURCE",
+  "MAP_SCOPE",
+  "MAP_NO_SOURCE",
+  "MAP_ALONE",
 ];
 
 /** code name → itself, so a typo is an undefined, not a silent string. */
@@ -44,12 +54,19 @@ export const Code = Object.freeze(Object.fromEntries(CODES.map((c) => [c, c])));
 
 /**
  * @param {number} line fence line (1-based, `flowchart TD` is 1); 0 when the
- *   error points at no line — every flow-rules error is 0
+ *   error points at no line. A MAP_* error's line is the md's (1-based) —
+ *   BE FlowError's line. {@link mdLine} gives every error's md line.
  * @param {string} code a {@link Code}
  * @param {string} message the reason for a person
  * @returns {{line: number, code: string, message: string}}
  */
 export const flowError = (line, code, message) => ({ line, code, message });
+
+/**
+ * The md line an error points at: a MAP_* error's line as it is, another's
+ * fence line counted from the fence's opening md line, that line itself for line 0.
+ */
+export const mdLine = (e, fenceLine) => (e.code.startsWith("MAP_") ? e.line : e.line > 0 ? fenceLine + e.line : fenceLine);
 
 /** BE FlowError.text(): `N 번째 줄 사유`, or the reason alone without a line. */
 export const errorText = (e) => (e.line > 0 ? `${e.line} 번째 줄 ${e.message}` : e.message);

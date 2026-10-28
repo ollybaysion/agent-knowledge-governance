@@ -4,8 +4,8 @@
 // No node imports: the dashboard runs this file as it is.
 import { Code, flowError } from "./flow-error.mjs";
 
-/** Node kinds by shape: input `id([글])` · query `id[글]` or `id` · flow `md[[글]]`. */
-export const Kind = Object.freeze({ INPUT: "input", QUERY: "query", FLOW: "flow" });
+/** Node kinds by shape: input `id([글])` · query `id[글]` or `id` · flow `md[[글]]` · map `id{{글}}`. */
+export const Kind = Object.freeze({ INPUT: "input", QUERY: "query", FLOW: "flow", MAP: "map" });
 
 /**
  * A query id or md name (`-` for md names). A `-` sits between characters, one
@@ -19,9 +19,10 @@ const HEADER = /^flowchart\s+(TD|LR)$/;
 const VAR_ONLY = new RegExp(`^${VAR}$`);
 const INPUT_NODE = new RegExp(`^(${ID})\\(\\[([^\\[\\]()]*)\\]\\)$`);
 const FLOW_NODE = new RegExp(`^(${ID})\\[\\[([^\\[\\]]*)\\]\\]$`);
+const MAP_NODE = new RegExp(`^(${ID})\\{\\{([^{}]*)\\}\\}$`);
 const QUERY_NODE = new RegExp(`^(${ID})(?:\\[([^\\[\\]]*)\\])?$`);
-// The shape written at an edge end — input · flow · query.
-const SHAPE = "\\(\\[[^\\[\\]()]*\\]\\)|\\[\\[[^\\[\\]]*\\]\\]|\\[[^\\[\\]]*\\]";
+// The shape written at an edge end — input · flow · query · map.
+const SHAPE = "\\(\\[[^\\[\\]()]*\\]\\)|\\[\\[[^\\[\\]]*\\]\\]|\\[[^\\[\\]]*\\]|\\{\\{[^{}]*\\}\\}";
 // 1 · 2 caller id · shape, 3 arrow, 4 condition, 5 · 6 callee id · shape.
 const EDGE = new RegExp(`^(${ID})(${SHAPE})?\\s*(-->|-\\.->)\\s*(?:\\|([^|]*)\\|\\s*)?(${ID})(${SHAPE})?$`);
 const ARROWS = /-\.->|-->/g;
@@ -96,12 +97,17 @@ function node(i, line, written) {
     reservedHead(i, line, m[1]);
     return { kind: "node", line: i + 1, id: m[1], shape: Kind.FLOW, text: text(m[2]) };
   }
+  m = MAP_NODE.exec(written);
+  if (m) {
+    reservedHead(i, line, m[1]);
+    return { kind: "node", line: i + 1, id: m[1], shape: Kind.MAP, text: text(m[2]) };
+  }
   m = QUERY_NODE.exec(written);
   if (m) {
     reservedHead(i, line, m[1]);
     return { kind: "node", line: i + 1, id: m[1], shape: m[2] !== undefined ? Kind.QUERY : null, text: text(m[2]) };
   }
-  throw bad(i, line, Code.NODE_SYNTAX, "노드는 `id` · `id[글]` · `id([글])` · `md[[글]]` 이다");
+  throw bad(i, line, Code.NODE_SYNTAX, "노드는 `id` · `id[글]` · `id([글])` · `md[[글]]` · `id{{글}}` 이다");
 }
 
 // An edge end's id without a shape: no node token.
