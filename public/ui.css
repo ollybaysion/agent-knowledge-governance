@@ -3253,6 +3253,10 @@ a.sql-col:focus-visible {
   width: min(640px, calc(100vw - 32px));
   max-height: min(600px, calc(100vh - 80px));
   margin-top: 80px;
+}
+/* ⌘K 와 플로우 차트 전체 화면(.fsd)이 같은 덮개를 쓴다 */
+.ck,
+.fsd {
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: 14px;
@@ -3261,11 +3265,13 @@ a.sql-col:focus-visible {
   box-shadow: 0 24px 60px rgba(20, 23, 28, 0.25);
   overflow: hidden;
 }
-.ck[open] {
+.ck[open],
+.fsd[open] {
   display: flex;
   flex-direction: column;
 }
-.ck::backdrop {
+.ck::backdrop,
+.fsd::backdrop {
   background: rgba(20, 23, 28, 0.28);
 }
 .ck-top {
@@ -3667,50 +3673,29 @@ a.mrow.draft {
   font: 12px/1.5 var(--mono);
   white-space: pre;
 }
-/* 읽기 화면: 플로우 차트를 누르면 그림 아래에 mermaid 원문 칸이 펼쳐진다(mermaid.mjs withCode) */
+/* 읽기 화면: 플로우 차트 아래 한 줄 — 노드 · 줄 수와 코드 보기 · 전체 화면(mermaid.mjs withCode).
+   코드 보기는 그 줄 아래에 mermaid 원문 칸을 펼친다. */
 .mmd-fold .mermaid-fig {
-  position: relative;
   padding: 12px 0;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  cursor: pointer;
 }
-.mmd-fold .mermaid-fig:hover {
-  background: var(--hover);
-}
-.fig-hint {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
+.fig-row {
+  display: flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
-  background: var(--field);
-  font-size: 11.5px;
-  font-weight: 600;
+  height: 34px;
+  margin: -10px 0 14px;
+  padding: 0 2px 0 4px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12px;
   color: var(--muted);
-  opacity: 0;
-  transition: opacity 0.12s;
 }
-.mmd-fold .mermaid-fig:hover .fig-hint,
-.mmd-fold .mermaid-fig:focus-visible .fig-hint,
-.mmd-fold.open .fig-hint {
-  opacity: 1;
-}
-.mmd-fold.open .mermaid-fig {
-  margin-bottom: 0;
-  border-color: var(--hairline-soft);
-  border-bottom-color: transparent;
-  border-radius: 10px 10px 0 0;
+.mmd-fold.open .fig-row {
+  margin-bottom: 4px;
 }
 .mcode {
   margin: 0 0 14px;
   border: 1px solid var(--hairline-soft);
-  border-radius: 0 0 10px 10px;
+  border-radius: 10px;
   background: var(--surface-soft);
   overflow: hidden;
 }
@@ -3743,10 +3728,73 @@ a.mrow.draft {
   color: var(--muted-soft);
   user-select: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .fig-hint {
-    transition: none;
-  }
+/* 플로우 차트 전체 화면(mermaid-full.mjs): 덮개는 ⌘K .ck 와 같은 <dialog>, 화면 가장자리에서 24 안쪽.
+   머리 줄은 그래프 탭 .gbar, 그 아래 무대(끌어 옮김) · 코드 칸(높이 38 + 182). */
+.fsd {
+  inset: 24px;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+}
+.fsd .gbar {
+  flex: none;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  border-radius: 0;
+}
+.fs-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.fs-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--hairline);
+}
+.fs-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  background: var(--field);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.fs-stage:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.fs-stage.dragging {
+  cursor: grabbing;
+}
+.fs-inner {
+  flex: none;
+  margin: auto;
+  padding: 24px;
+}
+.fs-inner svg {
+  display: block;
+}
+.fs-code {
+  flex: none;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--hairline-soft);
+  border-radius: 0;
+}
+.fs-code .mcode-b {
+  height: 182px;
+  overflow: auto;
+}
+.fs-code:not(.open) .mcode-h {
+  border-bottom: 0;
+}
+.fs-code:not(.open) .mcode-b {
+  display: none;
 }
 .mmd-frame {
   position: fixed;

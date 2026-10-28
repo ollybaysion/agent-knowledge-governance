@@ -74,16 +74,76 @@ export function inertSvg(svg) {
 /** The lines the reading view's code box shows under a figure: the fence text, its last newline dropped. */
 export const codeLines = (text) => String(text ?? "").replace(/\n$/, "").split("\n");
 
+const OPEN = { "[": "]", "(": ")", "{": "}" };
+const SKIP = /^(flowchart|graph|subgraph|end|classDef|class|style|linkStyle|click|direction|%%)\b/;
+
 /**
- * The reading view's figure after one event: a click, Enter or Space opens a
- * closed code box and closes an open one. → the new open state, or null when
- * the event leaves it as it is.
+ * The nodes a flowchart declares: the ids written with a shape after them
+ * (`id[…]`, `id(…)`, `id{…}`, `id[[…]]`, `id([…])`), each counted once.
+ * Edge labels (`-->|…|`) and the text inside a shape are skipped. → null for
+ * a diagram that is no flowchart (first line not `flowchart` · `graph`).
  */
-export function foldNext(open, { type, key } = {}) {
-  if (type === "click") return !open;
-  if (type === "keydown" && (key === "Enter" || key === " ")) return !open;
-  return null;
+export function flowNodeCount(text) {
+  const lines = String(text ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("%%"));
+  if (!/^(flowchart|graph)\b/.test(lines[0] ?? "")) return null;
+  const ids = new Set();
+  for (const raw of lines.slice(1)) {
+    if (SKIP.test(raw)) continue;
+    const line = raw.replace(/\|[^|]*\|/g, " ");
+    for (let i = 0; i < line.length; i++) {
+      const m = /^[A-Za-z_][\w-]*/.exec(line.slice(i));
+      if (!m || (i > 0 && /[\w-]/.test(line[i - 1]))) continue;
+      const after = line[i + m[0].length];
+      i += m[0].length - 1;
+      if (!(after in OPEN)) continue;
+      ids.add(m[0]);
+      // Past the shape: its text may hold brackets and words of its own.
+      let depth = 0;
+      for (i += 1; i < line.length; i++) {
+        if (line[i] in OPEN) depth++;
+        else if (Object.values(OPEN).includes(line[i]) && --depth === 0) break;
+      }
+    }
+  }
+  return ids.size;
 }
+
+/** The line under a reading-view figure: "플로우 차트 · 노드 n · mermaid m 줄", the node count left out when it is unknown. */
+export function figRowText(text) {
+  const nodes = flowNodeCount(text);
+  return ["플로우 차트", nodes ? `노드 ${nodes}` : null, `mermaid ${codeLines(text).length} 줄`].filter(Boolean).join(" · ");
+}
+
+/** The 코드 보기 button of an open or a closed code box: its label and aria-expanded. */
+export const codeToggle = (open) => ({ label: open ? "코드 접기" : "코드 보기", expanded: String(!!open) });
+
+/** The full-screen view's zoom: the graph tab's step and bounds, the stage's inner margin. */
+export const ZOOM = { min: 0.25, max: 3, step: 1.15, pad: 24, pan: 32 };
+
+const clampZoom = (z) => Math.max(ZOOM.min, Math.min(ZOOM.max, z));
+
+/** The zoom that fills the stage (the smaller of the two ratios, inside its margin). */
+export function fitZoom(stage, natural) {
+  if (!natural?.w || !natural?.h) return 1;
+  return clampZoom(Math.min((stage.w - 2 * ZOOM.pad) / natural.w, (stage.h - 2 * ZOOM.pad) / natural.h));
+}
+
+/** One step in (+1) or out (−1). */
+export const zoomStep = (zoom, dir) => clampZoom(zoom * ZOOM.step ** dir);
+
+/** The full-screen view's key: "in" · "out" · "one" (100%) · "fit", or a pan {dx, dy}. → null for any other key. */
+export function zoomKey({ key, ctrlKey, metaKey, altKey } = {}) {
+  if (ctrlKey || metaKey || altKey) return null;
+  if (key === "+" || key === "=") return "in";
+  if (key === "-" || key === "_") return "out";
+  if (key === "0") return "one";
+  if (key === "f" || key === "F") return "fit";
+  const pan = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
+  return pan ? { dx: pan[0] * ZOOM.pan, dy: pan[1] * ZOOM.pan } : null;
+}
+
+/** The stage's scroll while a drag moves the pointer from `from` to `to`: the picture follows the pointer. */
+export const dragScroll = (start, from, to) => ({ left: start.left - (to.x - from.x), top: start.top - (to.y - from.y) });
 
 /** `fn` runs once, `ms` after the last call. `.cancel()` drops a waiting run. */
 export function debounce(fn, ms) {
