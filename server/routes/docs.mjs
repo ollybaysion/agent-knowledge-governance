@@ -1252,7 +1252,7 @@ export function registerDocsRoutes(app) {
   // the same If-Match rule as links. `origin: null` drops it.
   app.put(
     "/api/docs/:type/:id/origin",
-    { config: { roles: ["admin"] } },
+    { config: { roles: ["admin", "agent"] } },
     async (request, reply) => {
       const { type, id } = request.params;
       if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
