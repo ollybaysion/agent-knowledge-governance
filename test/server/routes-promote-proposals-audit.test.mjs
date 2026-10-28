@@ -157,6 +157,113 @@ test("promote: If-Match mismatch on the TARGETED slot is 409 (S4); non-overlappi
   await cleanup();
 });
 
+// The column table's band and 추정 n 확정 send several column addresses in one body.
+async function threeColumnDoc(app, token) {
+  const doc = newDbSchemaDoc();
+  doc.body.catalog.columns = ["A", "B", "C"].map((name) => ({
+    name,
+    type: "NUMBER",
+    nullable: true,
+  }));
+  doc.body.purpose = { text: "목적", tier: "inferred", evidence: ["p:1"] };
+  doc.body.columnDescs = Object.fromEntries(
+    ["A", "B", "C"].map((n) => [
+      n,
+      { text: `${n} 설명`, tier: "inferred", evidence: [`${n}:1`] },
+    ]),
+  );
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema",
+    headers: auth(token),
+    payload: doc,
+  });
+  assert.equal(res.statusCode, 201, res.body);
+  return res.json().rev;
+}
+
+test("promote: a list of column addresses confirms those columns only", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", group: "admin", token: "edtok" },
+  ]);
+  const rev = await threeColumnDoc(app, "edtok");
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/x/promote",
+    headers: { ...auth("edtok"), "if-match": rev },
+    payload: { slots: ["columnDescs.A", "columnDescs.C"] },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const body = res.json().json.body;
+  assert.deepEqual(res.json().promoted, ["columnDescs.A", "columnDescs.C"]);
+  assert.equal(body.columnDescs.A.tier, "confirmed");
+  assert.equal(body.columnDescs.B.tier, "inferred");
+  assert.equal(body.columnDescs.C.tier, "confirmed");
+  assert.equal(body.purpose.tier, "inferred");
+  assert.equal(body.columnDescs.C.text, "C 설명");
+  await cleanup();
+});
+
+test("promote: a list with one address no longer 추정 is 400 not_inferred naming it, and nothing moves", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", group: "admin", token: "edtok" },
+  ]);
+  const rev0 = await threeColumnDoc(app, "edtok");
+  const first = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/x/promote",
+    headers: { ...auth("edtok"), "if-match": rev0 },
+    payload: { slots: ["columnDescs.A"] },
+  });
+  const rev1 = first.json().rev;
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/x/promote",
+    headers: { ...auth("edtok"), "if-match": rev1 },
+    payload: { slots: ["columnDescs.A", "columnDescs.B"] },
+  });
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.json(), {
+    error: "not_inferred",
+    slots: ["columnDescs.A"],
+  });
+  const now = (
+    await app.inject({
+      method: "GET",
+      url: "/api/docs/db-schema/x",
+      headers: as("reader"),
+    })
+  ).json();
+  assert.equal(now.rev, rev1);
+  assert.equal(now.json.body.columnDescs.B.tier, "inferred");
+  await cleanup();
+});
+
+test("deprecate: admin only, like promote — a user gets 403; a list of addresses withdraws each", async () => {
+  const { app, cleanup } = await setup([
+    { id: "renoir", group: "admin", token: "edtok" },
+  ]);
+  const rev = await threeColumnDoc(app, "edtok");
+  const refused = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/x/deprecate",
+    headers: { ...as("reader"), "if-match": rev },
+    payload: { slots: ["columnDescs.A"] },
+  });
+  assert.equal(refused.statusCode, 403);
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/docs/db-schema/x/deprecate",
+    headers: { ...auth("edtok"), "if-match": rev },
+    payload: { slots: ["columnDescs.A", "columnDescs.B"] },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.equal(res.json().json.body.columnDescs.A.tier, "deprecated");
+  assert.equal(res.json().json.body.columnDescs.B.tier, "deprecated");
+  assert.equal(res.json().json.body.columnDescs.C.tier, "inferred");
+  await cleanup();
+});
+
 test("proposals: submit -> list pending -> adopt lands the slot as inferred and archives the proposal", async () => {
   const { app, cleanup } = await setup([
     { id: "agent:x", group: "agent", token: "agtok" },

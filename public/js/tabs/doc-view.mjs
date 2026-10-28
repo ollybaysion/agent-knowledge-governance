@@ -14,6 +14,7 @@ import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
+import { inferredColumns, slotFailText, TIER_FILTERS, tierCounts, tierShown, togglePick, withObject } from "/lib/column-bulk.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -259,7 +260,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     ]),
     el("h1", { class: `doc-title${type === "db-schema" || type === "msg-format" ? " mono" : ""}`, text: title }),
     type === "db-schema"
-      ? el("div", { class: "doc-class" }, [majorChip(ctx.data.major, ctx.data.usedBy), kindChip(ctx), coverageBar(ctx.data.coverage)])
+      ? el("div", { class: "doc-class" }, [majorChip(ctx.data.major, ctx.data.usedBy), kindChip(ctx), coverageBar(ctx.data.coverage), admin ? headPromote(ctx) : null])
       : null,
     sub ? el("p", { class: "doc-sub", text: sub }) : null,
     el("div", { class: "doc-bar" }, [
@@ -676,6 +677,75 @@ function factsBody(ctx, host, doc) {
   return { sections: [{ key: "설명", title: "설명" }] };
 }
 
+/** 머리의 추정 n 확정 (db-schema, admin): 추정인 열이 없으면 단추도 없다. */
+function headPromote(ctx) {
+  const b = ctx.doc.body ?? {};
+  const order = orderColumns(b.catalog?.columns, b.columnOrder).map((c) => c.name);
+  const items = inferredColumns(ctx.data.slots, order);
+  if (!items.length) return null;
+  const btn = el("button", { type: "button", class: "btn promote sm head-promote", onclick: () => promoteDialog(ctx, items, "열", btn) }, [
+    `추정 ${items.length} 확정`,
+    el("span", { class: "role", text: "admin" }),
+  ]);
+  return btn;
+}
+
+/**
+ * The 확정 확인 창: the names of `items` ({name, address}) as chips, then
+ * 취소 · n 열 확정. 확정 sends the items' addresses only. Esc and a press
+ * on the backdrop close it; focus goes back to `opener`.
+ */
+function promoteDialog(ctx, items, noun, opener) {
+  const n = items.length;
+  const go = el("button", { type: "button", class: "btn promote" }, [`${n} ${noun} 확정`, el("span", { class: "role", text: "admin" })]);
+  const dlg = el("dialog", { class: "dlg promote-dlg", "aria-labelledby": "promote-dlg-t" }, [
+    el("div", { class: "dlg-h" }, el("h3", { id: "promote-dlg-t", text: `추정 ${n} ${withObject(noun)} 확정합니다` })),
+    el("p", { class: "dlg-p", text: "글과 근거는 그대로입니다. 등급만 추정에서 확정으로 바뀝니다. 확정은 admin 의 승인으로 남습니다." }),
+    el("div", { class: "dlg-list" }, items.map((it) => el("span", { class: "chip", text: it.name }))),
+    el("div", { class: "dlg-foot" }, [
+      el("span", { class: "dim", text: `${ctx.id} · rev ${shortRev(ctx.rev)}` }),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "btn ghost", text: "취소", onclick: () => dlg.close() }),
+      go,
+    ]),
+  ]);
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    const ok = await sendSlots(ctx, { verb: "확정", endpoint: "promote", addresses: items.map((it) => it.address), noun });
+    if (ok) dlg.close();
+    else go.disabled = false;
+  });
+  // A press outside the box lands on the dialog itself (its ::backdrop).
+  dlg.addEventListener("click", (e) => {
+    if (e.target !== dlg) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+  dlg.addEventListener("close", () => {
+    dlg.remove();
+    if (opener?.isConnected) opener.focus();
+  });
+  document.body.appendChild(dlg);
+  dlg.showModal();
+}
+
+// promote · deprecate 에 슬롯 주소 배열을 보낸다. 되면 문서를 다시 읽고,
+// 안 되면 토스트에 서버가 준 까닭을 적는다. → 됐는지.
+let slotsSending = false;
+async function sendSlots(ctx, { verb, endpoint, addresses, noun }) {
+  if (slotsSending) return false;
+  slotsSending = true;
+  const r = await api(`/api/docs/${ctx.type}/${enc(ctx.id)}/${endpoint}`, { method: "POST", headers: { "if-match": ctx.rev }, body: { slots: addresses } });
+  slotsSending = false;
+  if (!r.ok) {
+    toast(r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요." : slotFailText(verb, r.status, r.data), "error");
+    return false;
+  }
+  if (addresses.length > 1) toast(`${addresses.length} ${noun} ${verb}했습니다`, "ok");
+  await ctx.reload();
+  return true;
+}
+
 // ---------- db-schema · msg-format: 슬롯 단위 클릭-투-편집 ----------
 // A slot's text is clicked to edit in place (evidence chips, tier preview,
 // word diff); saves are one PUT of the body with If-Match, and a 409 on the
@@ -690,15 +760,87 @@ function slotBody(ctx, host) {
   const live = {};
   const slotByAddr = (addr) => slots.find((s) => s.address === addr);
   const notice = () => $("doc-notice");
+  const noun = type === "db-schema" ? "열" : "필드";
 
-  async function slotAction(verb, address, endpoint) {
-    const r = await api(`/api/docs/${type}/${enc(id)}/${endpoint}`, { method: "POST", headers: { "if-match": ctx.rev }, body: { slots: [address] } });
-    if (!r.ok) {
-      toast(`${verb} 실패 (${r.status})`, "error");
-      return;
-    }
-    reload();
+  const slotAction = (verb, address, endpoint) => sendSlots(ctx, { verb, endpoint, addresses: [address], noun });
+
+  // 여러 줄 고르기 (admin): 추정 줄의 이름 칸을 누르면 골라지고, 고른 줄이
+  // 있으면 표 위에 띠가 선다. 띠의 확정 · 폐기는 고른 주소를 한 번에 보낸다.
+  const canPick = canApprove;
+  let picked = [];
+  const pickable = (slot) => canPick && slot?.tier === "inferred" && !slotOpen(slot);
+  function togglePicked(address) {
+    picked = togglePick(picked, address);
+    paint();
+    host.querySelector(`[data-pick="${CSS.escape(address)}"]`)?.focus();
   }
+  /** The name cell of a pickable row: a checkbox by click, Space and Enter. */
+  function pickCell(td, address) {
+    td.classList.add("pick");
+    td.dataset.pick = address;
+    td.tabIndex = 0;
+    td.setAttribute("role", "checkbox");
+    td.setAttribute("aria-checked", String(picked.includes(address)));
+    td.addEventListener("click", (e) => {
+      if (!e.target.closest?.("a, button, input")) togglePicked(address);
+    });
+    td.addEventListener("keydown", (e) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      e.preventDefault();
+      togglePicked(address);
+    });
+    return td;
+  }
+  /** The band over the table while rows are picked: n 골라짐 · 확정 · 폐기 · 풀기. */
+  function pickBar() {
+    if (!picked.length) return null;
+    const send = (verb, endpoint) => sendSlots(ctx, { verb, endpoint, addresses: picked, noun });
+    return el("div", { class: "selbar" }, [
+      el("span", {}, [el("b", { text: String(picked.length) }), ` ${noun} 골라짐`]),
+      el("span", { class: "sp" }),
+      el("button", { type: "button", class: "btn promote sm", onclick: () => send("확정", "promote") }, ["확정", el("span", { class: "role", text: "admin" })]),
+      canEdit ? el("button", { type: "button", class: "btn danger sm", text: "폐기", onclick: () => send("폐기", "deprecate") }) : null,
+      el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => { picked = []; paint(); } }),
+    ]);
+  }
+
+  // 등급 거르기 (admin): 고른 등급의 줄만 남긴다. 거른 동안 순서는 옮기지
+  // 않는다. 추정을 고른 동안 절 머리에 보이는 n 확정이 선다.
+  // `entries` = 표의 모든 줄 [{name, slot}], 표 순서.
+  let tierFilter = "all";
+  function pickTier(k, entries) {
+    tierFilter = k;
+    const shown = new Set(entries.filter((e) => tierShown(k, e.slot)).map((e) => e.slot?.address));
+    picked = picked.filter((a) => shown.has(a));
+    paint();
+    host.querySelector(`.tier-filter button[data-tier="${k}"]`)?.focus();
+  }
+  function tierChips(entries) {
+    if (!canPick) return null;
+    const counts = tierCounts(entries.map((e) => e.slot));
+    return el(
+      "div",
+      { class: "typechips tfilter tier-filter" },
+      el("div", { class: "tfilter-row", role: "group", "aria-label": "등급" }, [
+        el("span", { class: "dim tfilter-k", text: "등급" }),
+        ...TIER_FILTERS.map(([k, label]) =>
+          el("button", { type: "button", class: tierFilter === k ? "on" : "", "data-tier": k, "aria-pressed": String(tierFilter === k), onclick: () => pickTier(k, entries) }, `${label} ${counts[k]}`),
+        ),
+      ]),
+    );
+  }
+  function shownPromote(entries) {
+    if (!canPick || tierFilter !== "inferred") return null;
+    const items = entries.filter((e) => e.slot?.tier === "inferred").map((e) => ({ name: e.name, address: e.slot.address }));
+    if (!items.length) return null;
+    const btn = el("button", { type: "button", class: "btn promote sm shown-promote", onclick: () => promoteDialog(ctx, items, noun, btn) }, [
+      `보이는 ${items.length} 확정`,
+      el("span", { class: "role", text: "admin" }),
+    ]);
+    return el("span", { class: "sec-right" }, btn);
+  }
+  /** The row standing in for an empty filter. */
+  const noRows = (columns) => el("tr", {}, el("td", { colspan: String(columns.length), class: "dim", text: "이 등급인 줄이 없습니다" }));
   function slotReadActions(slot) {
     const acts = [];
     if (canApprove && slot.tier === "inferred")
@@ -729,6 +871,8 @@ function slotBody(ctx, host) {
     const slot = slotByAddr(address);
     editingAddr = address;
     reconcileFor = null;
+    // A row open to edit leaves the picked rows.
+    picked = picked.filter((a) => a !== address);
     editBuf = { text: (slot && slot.text) || "", evidence: ((slot && slot.evidence) || []).slice() };
     paint();
   }
@@ -961,14 +1105,17 @@ function slotBody(ctx, host) {
   function slotTableRows(columns, cells, slot, cls = "") {
     const plan = slotRowPlan(columns, { open: slotOpen(slot) });
     const acts = slot ? slotReadActions(slot) : [];
+    const pick = pickable(slot) && !!cells.name;
+    const on = pick && picked.includes(slot.address);
     const td = (key) => {
+      if (key === "name" && pick) return pickCell(cells.name, slot.address);
       if (key === "acts") return el("td", { class: "td-act nowrap" }, acts.length ? el("span", { class: "td-acts" }, acts) : null);
       if (key === "empty") return el("td", { class: "td-act nowrap" });
       if (key === "desc") return el("td", {}, slotRow(slot, "cslot"));
       if (key === "mark") return el("td", {}, el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]));
       return cells[key] ?? el("td", {});
     };
-    const row = el("tr", { class: (plan.editColspan ? `${cls} editing-src` : cls).trim() || null }, plan.cells.map(td));
+    const row = el("tr", { class: [cls, plan.editColspan ? "editing-src" : "", on ? "picked" : ""].filter(Boolean).join(" ") || null }, plan.cells.map(td));
     if (!plan.editColspan) return [row];
     return [row, el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(plan.editColspan) }, slotRow(slot, "cslot")))];
   }
@@ -1055,7 +1202,7 @@ function slotBody(ctx, host) {
   async function moveColumn(name, to) {
     const names = orderedNames();
     const from = names.indexOf(name);
-    if (orderBusy || unusedBusy || from < 0 || to === from || to < 0 || to >= names.length) return;
+    if (orderBusy || unusedBusy || tierFilter !== "all" || from < 0 || to === from || to < 0 || to >= names.length) return;
     const next = moveName(names, from, to);
     const before = { doc: ctx.doc, rev: ctx.rev };
     const body = { ...before.doc.body, columnOrder: next };
@@ -1146,8 +1293,12 @@ function slotBody(ctx, host) {
       }),
     );
   }
-  /** The handle cell: drag grip (Alt+↑ · Alt+↓ · Alt+Home · Alt+End on focus) and 맨 위로 · 위로 · 아래로 · 맨 아래로. */
-  function orderCell(name, i, n, locked) {
+  /**
+   * The handle cell: drag grip (Alt+↑ · Alt+↓ · Alt+Home · Alt+End on focus) and 맨 위로 · 위로 · 아래로 · 맨 아래로.
+   * `editing` = this row's 설명 is open; a 등급 거르기 locks every row too.
+   */
+  function orderCell(name, i, n, editing) {
+    const locked = editing || tierFilter !== "all";
     const steps = orderSteps(i, n);
     const grip = el(
       "button",
@@ -1157,7 +1308,7 @@ function slotBody(ctx, host) {
         draggable: locked ? null : "true",
         disabled: locked,
         "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓ · Alt+Home · Alt+End`,
-        title: locked ? "설명을 편집하는 동안은 옮기지 않습니다" : "끌거나 Alt+↑ · Alt+↓ 로 옮깁니다",
+        title: editing ? "설명을 편집하는 동안은 옮기지 않습니다" : locked ? null : "끌거나 Alt+↑ · Alt+↓ 로 옮깁니다",
         onkeydown: (e) => {
           const s = e.altKey ? steps.find((x) => x.key === e.key) : null;
           if (!s) return;
@@ -1221,8 +1372,11 @@ function slotBody(ctx, host) {
       const known = new Set((b().catalog?.columns || []).map((c) => c.name));
       const ordered = orderColumns(b().catalog?.columns, b().columnOrder);
       const columns = slotTableColumns("db-schema", { canOrder });
+      const entries = [];
       const rows = ordered.flatMap((col, i) => {
         const slot = slotByAddr(`columnDescs.${col.name}`);
+        entries.push({ name: col.name, slot });
+        if (!tierShown(tierFilter, slot)) return [];
         const unused = isUnused(b().unusedColumns, col.name);
         const trs = slotTableRows(
           columns,
@@ -1246,7 +1400,9 @@ function slotBody(ctx, host) {
       });
       for (const s of slots) {
         const m = s.address.match(/^columnDescs\.(.+)$/);
-        if (m && !known.has(m[1]))
+        if (!m || known.has(m[1])) continue;
+        entries.push({ name: m[1], slot: s });
+        if (tierShown(tierFilter, s))
           rows.push(
             ...slotTableRows(
               columns,
@@ -1267,11 +1423,14 @@ function slotBody(ctx, host) {
         sec({
           key: "열",
           title: "열",
+          extra: shownPromote(entries),
           children: [
+            tierChips(entries),
+            pickBar(),
             el("p", { class: "dim small cols-sum", text: unusedSummary(b().catalog?.columns, b().unusedColumns) }),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               slotTableHead(columns),
-              el("tbody", {}, rows),
+              el("tbody", {}, rows.length ? rows : noRows(columns)),
             ])),
             el("p", { class: "dim small", text: `${fk ? `FK: ${fk} · ` : ""}수집 ${b().catalog?.fetchedAt ?? "—"} — 열 · 타입 · 빈칸은 catalog-push 로만 바뀝니다.` }),
           ],
@@ -1288,25 +1447,32 @@ function slotBody(ctx, host) {
     } else {
       const fieldColumns = slotTableColumns("msg-format");
       parts.push(sec({ key: "설명", title: "설명", children: [el("p", { class: "dim", text: b().direction === "host->equipment" ? "Host → Equipment" : "Equipment → Host" }), slotRow(slotByAddr("purpose"), "ps")] }));
+      const entries = (b().fields || []).map((f, i) => ({ name: f.name, slot: slotByAddr(`fields[${i}].desc`) }));
+      const fieldRows = (b().fields || []).flatMap((f, i) =>
+        tierShown(tierFilter, entries[i].slot)
+          ? slotTableRows(
+              fieldColumns,
+              {
+                seq: el("td", { class: "dim nowrap", text: String(f.seq) }),
+                name: el("td", { class: "mono nowrap", text: f.name }),
+                type: el("td", { class: "mono dim nowrap", text: f.type }),
+                required: el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
+              },
+              entries[i].slot,
+            )
+          : [],
+      );
       parts.push(
         sec({
           key: "필드",
           title: "필드",
+          extra: shownPromote(entries),
           children: [
+            tierChips(entries),
+            pickBar(),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
               slotTableHead(fieldColumns),
-              el("tbody", {}, (b().fields || []).flatMap((f, i) =>
-                slotTableRows(
-                  fieldColumns,
-                  {
-                    seq: el("td", { class: "dim nowrap", text: String(f.seq) }),
-                    name: el("td", { class: "mono nowrap", text: f.name }),
-                    type: el("td", { class: "mono dim nowrap", text: f.type }),
-                    required: el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
-                  },
-                  slotByAddr(`fields[${i}].desc`),
-                ),
-              )),
+              el("tbody", {}, fieldRows.length ? fieldRows : noRows(fieldColumns)),
             ])),
           ],
         }),
