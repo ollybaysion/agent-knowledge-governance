@@ -1,6 +1,6 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
-// (S4/S5/S6), PUT facts (#12), PUT catalog, PUT tags, GET /api/tags.
-import { dataIdConflicts, TAG_PATTERN, validateForStore } from "../../src/envelope.mjs";
+// (S4/S5/S6), PUT facts (#12), PUT catalog, PUT tags, PUT assets, GET /api/tags.
+import { dataIdConflicts, TAG_PATTERN, unknownAssets, validateForStore } from "../../src/envelope.mjs";
 import { errorReport } from "../../src/flow/flow-error.mjs";
 import { saveCheck } from "../../src/flow/agent-md.mjs";
 import {
@@ -108,6 +108,31 @@ function priorityOf(user) {
   return user.group === "agent" ? "agent" : "human";
 }
 
+/** The doc with `assets` after keywords and tags; `[]` drops the key. */
+export function placeAssets(doc, assets) {
+  const { schema, id, keywords, tags, assets: _old, ...rest } = doc;
+  return {
+    schema,
+    id,
+    ...(keywords !== undefined ? { keywords } : {}),
+    ...(tags !== undefined ? { tags } : {}),
+    ...(assets.length ? { assets } : {}),
+    ...rest,
+  };
+}
+
+/**
+ * The doc PUT's request body is the document body; a top-level `assets` in it
+ * is the envelope's assets[] (no body schema has that key). → {body, assets}
+ * with assets undefined when the request carries none.
+ */
+export function splitPutAssets(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Object.hasOwn(raw, "assets"))
+    return { body: raw, assets: undefined };
+  const { assets, ...body } = raw;
+  return { body, assets };
+}
+
 export function registerDocsRoutes(app) {
   const { storeDir, refs, queue, contracts, types } = app.akg;
   // What the validator needs from the store (a manual's captures, the data
@@ -166,6 +191,12 @@ export function registerDocsRoutes(app) {
       : null;
   const flowWarnings = (check) => (check?.broken.length ? { flowWarnings: check.broken } : {});
 
+  // An assets[] entry the store lacks: 400, each one named.
+  const assetRefusal = (doc) => {
+    const details = unknownAssets(doc, inStore.assetExists);
+    return details.length ? { status: 400, body: { error: "unknown_asset", details } } : null;
+  };
+
   const wikilinksOf = (type, doc, typeIds) => {
     const wikilinks = resolveWikilinks(storeDir, typeIds, type, doc).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
     return wikilinks.length ? { wikilinks } : {};
@@ -179,6 +210,7 @@ export function registerDocsRoutes(app) {
       json: doc,
       md: docMd(storeDir, type, doc, types.isMd(type)),
       rev,
+      assets: doc.assets ?? [],
       tiers: bodySchema ? tierSummary(bodySchema, doc.body) : {},
       slots: bodySchema
         ? listSlotAddresses(bodySchema, doc.body).map((address) => ({
@@ -228,6 +260,7 @@ export function registerDocsRoutes(app) {
             tiers,
             keywords: doc.keywords ?? [],
             tags: doc.tags ?? [],
+            assetCount: (doc.assets ?? []).length,
             links: doc.links ?? [],
             title: titleOf(doc),
             ...originOf(doc),
@@ -516,6 +549,8 @@ export function registerDocsRoutes(app) {
       const missing = missingLinkTargets(storeDir, doc.links);
       if (missing.length)
         return reply.code(400).send({ error: "unknown_link_target", missing });
+      const noAsset = assetRefusal(doc);
+      if (noAsset) return reply.code(noAsset.status).send(noAsset.body);
 
       const relpath = `${type}/${doc.id}.json`;
       const result = await queue.enqueue(
@@ -550,7 +585,11 @@ export function registerDocsRoutes(app) {
       if (!bodySchema) return reply.code(400).send({ error: "unknown_type" });
       const ifMatch = request.headers["if-match"];
       if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
-      const clientBody = request.body;
+      // `assets` beside the body fields: the envelope's assets[] as a whole
+      // (akg push names the pictures the new md shows in the same write).
+      const { body: clientBody, assets: putAssets } = splitPutAssets(request.body);
+      if (putAssets !== undefined && !Array.isArray(putAssets))
+        return reply.code(400).send({ error: "assets_required" });
 
       const result = await queue.enqueue(
         async () => {
@@ -636,13 +675,15 @@ export function registerDocsRoutes(app) {
             body: mergedBody,
           });
           if (merged.error) return { status: 400, body: merged.error };
-          const newDoc = merged.doc;
+          const newDoc = putAssets ? placeAssets(merged.doc, putAssets) : merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length)
             return {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
+          const noAsset = assetRefusal(newDoc);
+          if (noAsset) return noAsset;
           const conflict = dataIdConflict(newDoc);
           if (conflict) return conflict;
           const flow = flowCheck(type, id, newDoc);
@@ -736,6 +777,11 @@ export function registerDocsRoutes(app) {
         const missing = missingLinkTargets(storeDir, doc.links);
         if (missing.length) {
           rejected.push({ ...at, error: "unknown_link_target", missing });
+          continue;
+        }
+        const noAsset = assetRefusal(doc);
+        if (noAsset) {
+          rejected.push({ ...at, ...noAsset.body });
           continue;
         }
         docs.push(doc);
@@ -969,6 +1015,52 @@ export function registerDocsRoutes(app) {
           const rev = persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `tags ${type}/${id}`,
+          });
+          return { status: 200, body: { rev, json: newDoc } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
+    },
+  );
+
+  // The envelope's assets[] as a whole — the pictures the document carries.
+  // Same people and the same If-Match rule as tags. Each sha256 must be in
+  // the asset store (POST /api/assets first); `assets: []` drops the key, and
+  // the md may then name none of them (ASSET_NOT_ATTACHED).
+  app.put(
+    "/api/docs/:type/:id/assets",
+    { config: { roles: ["admin", "agent"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      const ifMatch = request.headers["if-match"];
+      if (!ifMatch) return reply.code(428).send({ error: "if_match_required" });
+      const assets = request.body?.assets;
+      if (!Array.isArray(assets)) return reply.code(400).send({ error: "assets_required" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const closed = closedType(type);
+          if (closed) return closed;
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (ifMatch !== currentRev)
+            return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
+          // Idempotent: committing an identical tree would fail in git.
+          if (JSON.stringify(assets) === JSON.stringify(doc.assets ?? []))
+            return { status: 200, body: { rev: currentRev, json: doc, unchanged: true } };
+
+          const newDoc = placeAssets(doc, assets);
+          const errors = validateForStore(newDoc, refs, inStore);
+          if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
+          const noAsset = assetRefusal(newDoc);
+          if (noAsset) return noAsset;
+          const rev = persistDoc(storeDir, type, newDoc, {
+            author: request.user.id,
+            message: `assets ${type}/${id}`,
           });
           return { status: 200, body: { rev, json: newDoc } };
         },

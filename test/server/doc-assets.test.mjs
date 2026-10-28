@@ -8,7 +8,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { buildApp } from "../../server/app.mjs";
 import { loadSchemas, unknownAssets, validateDocument } from "../../src/envelope.mjs";
+import { pngBytes } from "../fixtures/images.mjs";
+import { signIn, as } from "../sign-in.mjs";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const A = sha("a");
@@ -60,4 +63,140 @@ test("unknownAssets names each entry the store lacks", () => {
   assert.deepEqual(unknownAssets(doc, () => true), []);
   assert.deepEqual(unknownAssets(doc, (s) => s === A), [`$.assets[1]: 그림이 저장소에 없습니다 — ${B}`]);
   assert.deepEqual(unknownAssets(md("voc", "a"), () => false), []);
+});
+
+async function setup() {
+  const home = mkdtempSync(join(tmpdir(), "akg-doc-assets-test-"));
+  const auth = await signIn(home, [
+    { id: "renoir", group: "admin", token: "a" },
+    { id: "bot", group: "agent", token: "g" },
+    { id: "kim", group: "user", token: "u" },
+  ]);
+  const storeDir = join(home, "store");
+  const app = await buildApp({ storeDir, auth });
+  const req = (token, method, url, payload, headers = {}) =>
+    app.inject({ method, url, headers: { ...as(token), ...headers }, ...(payload !== undefined ? { payload } : {}) });
+  const upload = async (bytes, token = "g") => {
+    const r = await app.inject({ method: "POST", url: "/api/assets", headers: { ...as(token), "content-type": "image/png" }, payload: bytes });
+    return r;
+  };
+  const create = async (doc, token = "a") => {
+    const r = await req(token, "POST", `/api/docs/${doc.schema.split("/")[0]}`, doc);
+    assert.equal(r.statusCode, 201, r.body);
+    return r.json().rev;
+  };
+  const stored = (type, id) => JSON.parse(readFileSync(join(storeDir, `${type}/${id}.json`), "utf8"));
+  return {
+    req,
+    upload,
+    create,
+    stored,
+    cleanup: async () => {
+      await app.close();
+      rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+test("POST /api/assets: the agent uploads too; a user does not", async () => {
+  const { upload, cleanup } = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    const r = await upload(png, "g");
+    assert.equal(r.statusCode, 201, r.body);
+    assert.deepEqual(r.json(), { sha256: sha(png), mediaType: "image/png", width: 32, height: 16, existed: false });
+    assert.equal((await upload(pngBytes(8, 8), "u")).statusCode, 403);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a write that names a picture the store lacks is 400 unknown_asset, naming the entry", async () => {
+  const { req, upload, create, cleanup } = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    await upload(png);
+    const r = await req("a", "POST", "/api/docs/unclassified", md("unclassified", "a", { assets: [asset(sha(png)), asset(B)] }));
+    assert.equal(r.statusCode, 400);
+    assert.deepEqual(r.json(), { error: "unknown_asset", details: [`$.assets[1]: 그림이 저장소에 없습니다 — ${B}`] });
+    const bad = await req("a", "POST", "/api/docs/unclassified", md("unclassified", "a", { assets: [asset("x")] }));
+    assert.equal(bad.statusCode, 400);
+    assert.equal(bad.json().error, "validation_failed");
+
+    const batch = await req("g", "POST", "/api/docs/voc/batch", { docs: [md("voc", "v", { assets: [asset(B)] })] });
+    assert.equal(batch.statusCode, 400);
+    assert.equal(batch.json().rejected[0].error, "unknown_asset");
+
+    await create(md("unclassified", "a", { assets: [asset(sha(png))] }));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("PUT assets: admin and agent, If-Match, after keywords and tags; [] drops the key; the same list is no commit; a stale rev is 409", async () => {
+  const { req, upload, create, stored, cleanup } = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    await upload(png);
+    const rev = await create(md("voc", "a", { tags: ["spc"] }));
+    const put = (token, assets, rev, url = "/api/docs/voc/a/assets") => req(token, "PUT", url, { assets }, rev ? { "if-match": rev } : {});
+    const list = [asset(sha(png), { alt: "관리도", width: 32, height: 16 })];
+
+    assert.equal((await put("u", list, rev)).statusCode, 403);
+    assert.equal((await put("g", list)).statusCode, 428);
+    assert.equal((await req("g", "PUT", "/api/docs/voc/a/assets", { assets: "x" }, { "if-match": rev })).statusCode, 400);
+    assert.equal((await put("g", list, rev, "/api/docs/nope/a/assets")).statusCode, 400);
+    assert.equal((await put("g", list, rev, "/api/docs/voc/zz/assets")).statusCode, 404);
+    const missing = await put("g", [asset(B)], rev);
+    assert.equal(missing.statusCode, 400);
+    assert.equal(missing.json().error, "unknown_asset");
+
+    const r = await put("g", list, rev);
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(Object.keys(stored("voc", "a")), ["schema", "id", "keywords", "tags", "assets", "status", "body"]);
+    const got = (await req("u", "GET", "/api/docs/voc/a")).json();
+    assert.deepEqual(got.assets, list);
+    assert.deepEqual(got.json.assets, list);
+    const row = (await req("u", "GET", "/api/docs?type=voc")).json().docs.find((d) => d.id === "a");
+    assert.equal(row.assetCount, 1);
+
+    const stale = await put("a", [], rev);
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, "unknown_base_rev");
+    assert.equal(stale.json().currentRev, r.json().rev);
+
+    const same = await put("a", list, r.json().rev);
+    assert.equal(same.json().unchanged, true);
+    assert.equal(same.json().rev, r.json().rev);
+
+    const cleared = await put("a", [], r.json().rev);
+    assert.equal(cleared.statusCode, 200);
+    assert.equal("assets" in stored("voc", "a"), false);
+    assert.deepEqual((await req("u", "GET", "/api/docs/voc/a")).json().assets, []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("the doc PUT takes assets beside the body fields: the envelope's list, the store check, the body as it was", async () => {
+  const { req, upload, create, stored, cleanup } = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    await upload(png);
+    const rev = await create(md("unclassified", "a"));
+    const body = { name: "a", markdown: "# a\n\n새 글\n" };
+    const missing = await req("g", "PUT", "/api/docs/unclassified/a", { ...body, assets: [asset(B)] }, { "if-match": rev });
+    assert.equal(missing.statusCode, 400);
+    assert.equal(missing.json().error, "unknown_asset");
+    const r = await req("g", "PUT", "/api/docs/unclassified/a", { ...body, assets: [asset(sha(png))] }, { "if-match": rev });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(stored("unclassified", "a").assets, [asset(sha(png))]);
+    assert.deepEqual(stored("unclassified", "a").body, body);
+    // A PUT with no assets keeps them.
+    const kept = await req("g", "PUT", "/api/docs/unclassified/a", { name: "a", markdown: "# a\n\n또\n" }, { "if-match": r.json().rev });
+    assert.equal(kept.statusCode, 200, kept.body);
+    assert.deepEqual(stored("unclassified", "a").assets, [asset(sha(png))]);
+  } finally {
+    await cleanup();
+  }
 });
