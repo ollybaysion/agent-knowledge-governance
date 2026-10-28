@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { findColumn, moveName, orderColumns } from "../../public/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "../../public/lib/column-order.mjs";
 
 const cols = (...names) => names.map((name) => ({ name, type: "NUMBER", nullable: true }));
 const names = (list) => list.map((c) => c.name);
@@ -50,4 +50,24 @@ test("findColumn: ?col= names the 열 row as the catalog spells it, null once th
   assert.equal(findColumn(cols("EQP_ID"), "MODEL_CD"), null);
   assert.equal(findColumn(cols("EQP_ID"), null), null);
   assert.equal(findColumn(undefined, "A"), null);
+});
+
+test("slotTableColumns: the buttons lead, a db-schema puts 타입 last; use · order only for the admin", () => {
+  const keys = (cols) => cols.map((c) => c.key);
+  assert.deepEqual(keys(slotTableColumns("db-schema")), ["acts", "name", "nullable", "desc", "type"]);
+  assert.deepEqual(keys(slotTableColumns("db-schema", { canOrder: true })), ["acts", "use", "order", "name", "nullable", "desc", "type"]);
+  assert.deepEqual(slotTableColumns("db-schema", { canOrder: true }).map((c) => c.label), ["", "사용", "순서", "열", "빈칸", "설명", "타입"]);
+  assert.deepEqual(keys(slotTableColumns("msg-format")), ["acts", "seq", "name", "type", "required", "desc"]);
+});
+
+test("slotRowPlan: the buttons sit in the first cell; an open slot empties it, marks its 설명 and spans every cell below", () => {
+  const cols = slotTableColumns("db-schema", { canOrder: true });
+  const closed = slotRowPlan(cols);
+  assert.equal(closed.cells[0], "acts");
+  assert.deepEqual(closed.cells, cols.map((c) => c.key));
+  assert.equal(closed.editColspan, null);
+  const open = slotRowPlan(cols, { open: true });
+  assert.deepEqual(open.cells, ["empty", "use", "order", "name", "nullable", "mark", "type"]);
+  assert.equal(open.editColspan, cols.length);
+  assert.equal(slotRowPlan(slotTableColumns("msg-format"), { open: true }).editColspan, 6);
 });

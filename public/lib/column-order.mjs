@@ -40,3 +40,46 @@ export function findColumn(columns = [], col) {
   const want = String(col).toLowerCase();
   return names.find((n) => n.toLowerCase() === want) ?? null;
 }
+
+/**
+ * The cells of a slot table (db-schema 열 · msg-format 필드), left to right:
+ * {key, label}. `acts` (확정 · 폐기 · 복원) leads, so a long 설명 never pushes
+ * the buttons out of sight; a db-schema puts 타입 last. `use` · `order` are
+ * the admin's. An open slot's own row spans every cell, so its colspan is the
+ * length of this list.
+ */
+export function slotTableColumns(type, { canOrder = false } = {}) {
+  if (type === "db-schema")
+    return [
+      { key: "acts", label: "" },
+      ...(canOrder
+        ? [
+            { key: "use", label: "사용" },
+            { key: "order", label: "순서" },
+          ]
+        : []),
+      { key: "name", label: "열" },
+      { key: "nullable", label: "빈칸" },
+      { key: "desc", label: "설명" },
+      { key: "type", label: "타입" },
+    ];
+  return [
+    { key: "acts", label: "" },
+    { key: "seq", label: "#" },
+    { key: "name", label: "필드" },
+    { key: "type", label: "타입" },
+    { key: "required", label: "필수" },
+    { key: "desc", label: "설명" },
+  ];
+}
+
+/**
+ * One slot's rows in a slot table. → {cells, editColspan}: `cells` are the
+ * keys of its row, left to right — an open slot (edit · reconcile) has an
+ * empty `acts` cell and a `mark` where its 설명 was; `editColspan` is the
+ * span of the row the open slot moves to (every cell), or null when closed.
+ */
+export function slotRowPlan(columns, { open = false } = {}) {
+  const cells = columns.map((c) => (open && c.key === "acts" ? "empty" : open && c.key === "desc" ? "mark" : c.key));
+  return { cells, editColspan: open ? columns.length : null };
+}

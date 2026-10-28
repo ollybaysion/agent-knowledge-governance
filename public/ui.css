@@ -2294,6 +2294,26 @@ a.sql-col:focus-visible {
 .cols-tbl td.nowrap {
   white-space: nowrap;
 }
+/* 슬롯 표: 맨 왼쪽 단추 칸(확정 · 폐기)은 단추 폭만, 설명 칸이 남는 폭을 쓴다. db-schema 의 타입은 맨 오른쪽 */
+.cols-tbl th.th-desc {
+  width: auto;
+  white-space: normal;
+}
+.cols-tbl th.th-type {
+  width: 1%;
+  white-space: nowrap;
+}
+.cols-tbl td.td-act {
+  padding-right: 4px;
+}
+/* 단추 칸이 앞에 선 만큼 설명 칸이 좁아진다: 근거 칩은 줄을 바꾼다 */
+.cols-tbl .cslot .txt3 {
+  min-width: 160px;
+}
+.cols-tbl .cslot .ev {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .doc-title.mono {
   font-family: var(--mono);
   font-weight: 600;

@@ -8,7 +8,7 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, docJumps, jumpTop, kindOf } from "/lib/table-class.mjs";
-import { findColumn, moveName, orderColumns } from "/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -899,19 +899,41 @@ function slotBody(ctx, host) {
     return el("div", { class: cls, "data-addr": slot.address }, [
       tierBadge(slot.tier),
       el("span", { class: cls === "ps" ? "txt2" : "txt3" }, [slotReadText(slot), ...evidence(slot.evidence)]),
-      el("span", { class: "acts" }, slotReadActions(slot)),
+      // In a table the buttons have their own first cell (slotTableRows).
+      cls === "cslot" ? null : el("span", { class: "acts" }, slotReadActions(slot)),
     ]);
   }
   // A table slot that is open (edit · reconcile) moves into its own row under
   // its row, one cell across every column; its own cell keeps the tier badge.
   const slotOpen = (slot) => !!slot && (editingAddr === slot.address || reconcileFor?.address === slot.address);
-  function slotTableRows(cells, slot, cls = "") {
-    if (!slotOpen(slot)) return [el("tr", { class: cls || null }, [...cells, el("td", {}, slotRow(slot, "cslot"))])];
-    const mark = el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]);
-    return [
-      el("tr", { class: `${cls} editing-src`.trim() }, [...cells, el("td", {}, mark)]),
-      el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(cells.length + 1) }, slotRow(slot, "cslot"))),
-    ];
+  /** The head of a slot table, in slotTableColumns order. */
+  const slotTableHead = (columns) =>
+    el("thead", {}, el("tr", {}, columns.map((c) =>
+      el("th", {
+        scope: "col",
+        class: { acts: "th-act", use: "th-ord", order: "th-ord", desc: "th-desc", type: type === "db-schema" ? "th-type" : null }[c.key] ?? null,
+        "aria-label": c.key === "acts" ? "동작" : null,
+        title: c.key === "order" ? "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)" : null,
+        text: c.label,
+      }),
+    )));
+  /**
+   * One slot's rows: `cells` = {key: td} for the table's own cells; the
+   * buttons (acts) and the 설명 (desc) cells come from the slot.
+   */
+  function slotTableRows(columns, cells, slot, cls = "") {
+    const plan = slotRowPlan(columns, { open: slotOpen(slot) });
+    const acts = slot ? slotReadActions(slot) : [];
+    const td = (key) => {
+      if (key === "acts") return el("td", { class: "td-act nowrap" }, acts.length ? el("span", { class: "td-acts" }, acts) : null);
+      if (key === "empty") return el("td", { class: "td-act nowrap" });
+      if (key === "desc") return el("td", {}, slotRow(slot, "cslot"));
+      if (key === "mark") return el("td", {}, el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]));
+      return cells[key] ?? el("td", {});
+    };
+    const row = el("tr", { class: (plan.editColspan ? `${cls} editing-src` : cls).trim() || null }, plan.cells.map(td));
+    if (!plan.editColspan) return [row];
+    return [row, el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(plan.editColspan) }, slotRow(slot, "cslot")))];
   }
   async function commitSlot(address, text, ev, baseBody, ifMatch) {
     const clientBody = structuredClone(baseBody);
@@ -1158,21 +1180,23 @@ function slotBody(ctx, host) {
       const pk = new Set(b().catalog?.primaryKey ?? []);
       const known = new Set((b().catalog?.columns || []).map((c) => c.name));
       const ordered = orderColumns(b().catalog?.columns, b().columnOrder);
+      const columns = slotTableColumns("db-schema", { canOrder });
       const rows = ordered.flatMap((col, i) => {
         const slot = slotByAddr(`columnDescs.${col.name}`);
         const unused = isUnused(b().unusedColumns, col.name);
         const trs = slotTableRows(
-          [
-            canOrder ? useCell(col.name, unused) : null,
-            canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
-            el("td", { class: "mono nowrap" }, [
+          columns,
+          {
+            use: canOrder ? useCell(col.name, unused) : null,
+            order: canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
+            name: el("td", { class: "mono nowrap" }, [
               col.name,
               pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null,
               unused ? el("span", { class: "unused-chip", text: "미사용" }) : null,
             ]),
-            el("td", { class: "mono dim nowrap", text: col.type }),
-            el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
-          ].filter(Boolean),
+            nullable: el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
+            type: el("td", { class: "mono dim nowrap", text: col.type }),
+          },
           slot,
           unused ? "unused-row" : "",
         );
@@ -1185,13 +1209,14 @@ function slotBody(ctx, host) {
         if (m && !known.has(m[1]))
           rows.push(
             ...slotTableRows(
-              [
-                canOrder ? el("td", { class: "td-use nowrap" }) : null,
-                canOrder ? el("td", { class: "td-grip nowrap" }) : null,
-                el("td", { class: "mono strike nowrap", text: m[1] }),
-                el("td", { class: "dim nowrap", text: "—" }),
-                el("td", { class: "dim nowrap", text: "열 사라짐" }),
-              ].filter(Boolean),
+              columns,
+              {
+                use: el("td", { class: "td-use nowrap" }),
+                order: el("td", { class: "td-grip nowrap" }),
+                name: el("td", { class: "mono strike nowrap", text: m[1] }),
+                nullable: el("td", { class: "dim nowrap", text: "열 사라짐" }),
+                type: el("td", { class: "dim nowrap", text: "—" }),
+              },
               s,
               "dep-row",
             ),
@@ -1205,11 +1230,7 @@ function slotBody(ctx, host) {
           children: [
             el("p", { class: "dim small cols-sum", text: unusedSummary(b().catalog?.columns, b().unusedColumns) }),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
-              el("thead", {}, el("tr", {}, [
-                canOrder ? el("th", { scope: "col", class: "th-ord", text: "사용" }) : null,
-                canOrder ? el("th", { scope: "col", class: "th-ord", title: "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)", text: "순서" }) : null,
-                ...["열", "타입", "빈칸", "설명"].map((t) => el("th", { scope: "col", text: t })),
-              ])),
+              slotTableHead(columns),
               el("tbody", {}, rows),
             ])),
             el("p", { class: "dim small", text: `${fk ? `FK: ${fk} · ` : ""}수집 ${b().catalog?.fetchedAt ?? "—"} — 열 · 타입 · 빈칸은 catalog-push 로만 바뀝니다.` }),
@@ -1225,6 +1246,7 @@ function slotBody(ctx, host) {
           }),
         );
     } else {
+      const fieldColumns = slotTableColumns("msg-format");
       parts.push(sec({ key: "설명", title: "설명", children: [el("p", { class: "dim", text: b().direction === "host->equipment" ? "Host → Equipment" : "Equipment → Host" }), slotRow(slotByAddr("purpose"), "ps")] }));
       parts.push(
         sec({
@@ -1232,15 +1254,16 @@ function slotBody(ctx, host) {
           title: "필드",
           children: [
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
-              el("thead", {}, el("tr", {}, ["#", "필드", "타입", "필수", "설명"].map((t) => el("th", { scope: "col", text: t })))),
+              slotTableHead(fieldColumns),
               el("tbody", {}, (b().fields || []).flatMap((f, i) =>
                 slotTableRows(
-                  [
-                    el("td", { class: "dim nowrap", text: String(f.seq) }),
-                    el("td", { class: "mono nowrap", text: f.name }),
-                    el("td", { class: "mono dim nowrap", text: f.type }),
-                    el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
-                  ],
+                  fieldColumns,
+                  {
+                    seq: el("td", { class: "dim nowrap", text: String(f.seq) }),
+                    name: el("td", { class: "mono nowrap", text: f.name }),
+                    type: el("td", { class: "mono dim nowrap", text: f.type }),
+                    required: el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
+                  },
                   slotByAddr(`fields[${i}].desc`),
                 ),
               )),
