@@ -63,6 +63,24 @@ export function mapErrors(flow, fenceLine, maps, sqlIds) {
   return out;
 }
 
+/**
+ * The first assigning `=` of a line — BE FlowMaps.assign: the `=` of `==` ·
+ * `!=` · `<=` · `>=` is no assignment. A ```chart fence line splits at it.
+ * @returns {number} its index, -1 without one
+ */
+export function assign(text) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "=") continue;
+    if (text[i + 1] === "=") {
+      i++;
+      continue;
+    }
+    if ("!<>=".includes(text[i - 1] ?? "")) continue;
+    return i;
+  }
+  return -1;
+}
+
 // An edge comes into the node, or into the subgraph it starts.
 function takesValues(flow, id) {
   if (flow.edgesInto(id).length) return true;

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { validate, validateNode } from "./validate.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
 import { readAgentMd } from "./flow/agent-md.mjs";
+import { errorReport } from "./flow/flow-error.mjs";
 import { checkVerifySet } from "./verify-set.mjs";
 import { mdImages } from "./md-images.mjs";
 
@@ -358,7 +359,8 @@ export function dataIdConflicts(doc, dataIdOwners) {
 // sections it has is the author's. Checked here: the id, the data ids, the
 // verification set's shape when the md has one, and — once the ids are
 // sound — what the consumer refuses when it reads the md (src/flow/agent-md.mjs:
-// an ASK item, a bind with no flow fence, a flow fence's grammar).
+// an ASK item, a bind with no flow fence, a flow fence's grammar, a query
+// item's ```chart fence — one detail per CHART_* error, `그래프 펜스 오류 N 번째 줄 CODE 사유`).
 function checkSkillMarkdown(doc, errors) {
   checkDerivedId(doc, errors);
   const before = errors.length;
@@ -366,8 +368,10 @@ function checkSkillMarkdown(doc, errors) {
   const idsSound = errors.length === before;
   if (typeof doc.body?.markdown !== "string") return;
   for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
-  const { rejection } = readAgentMd(doc.id, doc.body.markdown);
-  if (rejection && idsSound) fail(errors, `$.body.markdown: ${rejection}`);
+  const { rejection, chartErrors } = readAgentMd(doc.id, doc.body.markdown);
+  if (!rejection || !idsSound) return;
+  if (chartErrors.length) for (const e of chartErrors) fail(errors, `$.body.markdown: 그래프 펜스 오류 ${errorReport(e)}`);
+  else fail(errors, `$.body.markdown: ${rejection}`);
 }
 
 const SEMANTIC_CHECKS = {
