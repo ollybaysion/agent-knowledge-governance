@@ -545,7 +545,9 @@ function hoverSync(root) {
 
 // ---------- md 타입(voc · 등록 · 미분류) ----------
 async function mdBody(ctx, host) {
-  const { doc, canEdit, wiki } = ctx;
+  const { doc, canEdit } = ctx;
+  // [[ ]] chips and the pictures' size and alt.
+  const mdCtx = { wiki: ctx.wiki, assets: doc.assets };
   const { splitBlocks } = await import("/lib/sections.mjs");
   const md = doc.body?.markdown ?? "";
   const split = splitBlocks(md);
@@ -556,7 +558,7 @@ async function mdBody(ctx, host) {
     .filter((l) => !/^#\s+/.test(l))
     .join("\n")
     .trim();
-  if (intro) nodes.push(el("div", { class: "doc-intro" }, mdNodes(intro, { wiki })));
+  if (intro) nodes.push(el("div", { class: "doc-intro" }, mdNodes(intro, mdCtx)));
   if (!split.blocks.length) {
     sections.push({ key: "본문", title: "본문" });
     nodes.push(
@@ -564,7 +566,7 @@ async function mdBody(ctx, host) {
         key: "본문",
         title: "본문",
         onEdit: canEdit ? () => ctx.editSection(null) : null,
-        children: md.trim() && !intro ? mdNodes(md.replace(/^#\s+.*$/m, ""), { wiki }) : intro ? [] : [el("p", { class: "dim", text: "아직 본문이 없습니다." })],
+        children: md.trim() && !intro ? mdNodes(md.replace(/^#\s+.*$/m, ""), mdCtx) : intro ? [] : [el("p", { class: "dim", text: "아직 본문이 없습니다." })],
       }),
     );
   }
@@ -575,7 +577,7 @@ async function mdBody(ctx, host) {
         key: b.key,
         title: b.heading,
         onEdit: canEdit ? () => ctx.editSection(b.key) : null,
-        children: b.body.trim() ? mdNodes(b.body, { wiki }) : [el("p", { class: "dim", text: "비어 있습니다" })],
+        children: b.body.trim() ? mdNodes(b.body, mdCtx) : [el("p", { class: "dim", text: "비어 있습니다" })],
       }),
     );
   }

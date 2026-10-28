@@ -200,3 +200,43 @@ test("the doc PUT takes assets beside the body fields: the envelope's list, the 
     await cleanup();
   }
 });
+
+test("the md's pictures: asset:<sha256> only (ASSET_SCHEME), each attached (ASSET_NOT_ATTACHED), with the md line", () => {
+  const refs = loadSchemas();
+  const errs = (markdown, assets) => validateDocument(md("unclassified", "a", assets ? { assets } : {}, markdown), refs);
+  const text = `# a\n\n![관리도](asset:${A})\n\n글 ![아이콘](asset:${B}) 글\n`;
+  assert.deepEqual(errs(text, [asset(A), asset(B)]), []);
+  assert.deepEqual(errs(text, [asset(A)]), [`$.body.markdown: 5 번째 줄 ASSET_NOT_ATTACHED 그림 ${B} 이 문서 assets 에 없습니다`]);
+  assert.equal(errs(text).length, 2);
+  const [scheme] = errs("# a\n\n글\n![x](https://x.y/z.png)\n");
+  assert.match(scheme, /^\$\.body\.markdown: 4 번째 줄 ASSET_SCHEME /);
+  assert.match(errs("# a\n\n![x](./z.png)\n")[0], /3 번째 줄 ASSET_SCHEME .*\(\.\/z\.png\)/);
+  assert.deepEqual(errs("# a\n\n```\n![x](./z.png)\n```\n"), [], "a fence holds no pictures");
+  // A draft and a skill read the same rule.
+  assert.equal(validateDocument({ ...md("unclassified", "a", {}, text), status: "inactive" }, refs, { draft: true }).length, 2);
+  const skill = { schema: "domain-skill/v1", id: "s", keywords: [], status: "inactive", body: { name: "s", markdown: `# s\n\n![x](asset:${A})\n` } };
+  assert.match(validateDocument(skill, refs, { draft: true })[0], /ASSET_NOT_ATTACHED/);
+});
+
+test("a save names the md line in validation_failed; the rendered md keeps ![글](asset:…) as written", async () => {
+  const { req, upload, create, cleanup } = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    await upload(png);
+    const markdown = `# a\n\n![관리도](asset:${sha(png)})\n\n글 ![아이콘](asset:${sha(png)}) 글\n`;
+    const refused = await req("a", "POST", "/api/docs/unclassified", md("unclassified", "a", {}, markdown));
+    assert.equal(refused.statusCode, 400);
+    assert.equal(refused.json().error, "validation_failed");
+    assert.deepEqual(
+      refused.json().details.map((d) => d.match(/(\d+) 번째 줄 (\w+)/).slice(1)),
+      [["3", "ASSET_NOT_ATTACHED"], ["5", "ASSET_NOT_ATTACHED"]],
+    );
+
+    await create(md("unclassified", "a", { assets: [asset(sha(png))] }, markdown));
+    const got = await req("u", "GET", "/api/docs/unclassified/a?format=md");
+    assert.equal(got.statusCode, 200);
+    assert.equal(got.body, markdown);
+  } finally {
+    await cleanup();
+  }
+});

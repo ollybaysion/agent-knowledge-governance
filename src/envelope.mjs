@@ -10,6 +10,7 @@ import { validate, validateNode } from "./validate.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
 import { readAgentMd } from "./flow/agent-md.mjs";
 import { checkVerifySet } from "./verify-set.mjs";
+import { mdImages } from "./md-images.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -275,6 +276,22 @@ function checkAssets(doc, errors) {
   });
 }
 
+/**
+ * The md body's pictures: each is asset:<sha256> (ASSET_SCHEME) and one of
+ * the document's assets[] (ASSET_NOT_ATTACHED). `N 번째 줄 CODE 사유`, N the md line.
+ */
+function checkMdImages(doc, errors) {
+  const markdown = doc.body?.markdown;
+  if (typeof markdown !== "string") return;
+  const attached = new Set((doc.assets ?? []).map((a) => a.sha256));
+  for (const img of mdImages(markdown)) {
+    if (img.sha256 === null)
+      fail(errors, `$.body.markdown: ${img.line} 번째 줄 ASSET_SCHEME 그림 주소는 asset:<sha256> 입니다 — 저장소 그림만 씁니다 (${img.src || "빈 주소"})`);
+    else if (!attached.has(img.sha256))
+      fail(errors, `$.body.markdown: ${img.line} 번째 줄 ASSET_NOT_ATTACHED 그림 ${img.sha256} 이 문서 assets 에 없습니다`);
+  }
+}
+
 const DATA_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /**
@@ -500,6 +517,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists, mdType
   if (errors.length === 0) {
     checkLinks(doc, errors);
     checkAssets(doc, errors);
+    checkMdImages(doc, errors);
     checkRole(doc, errors);
     if (draft) {
       // A draft skips the completeness/coherence checks a finished doc must

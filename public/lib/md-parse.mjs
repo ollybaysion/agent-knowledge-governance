@@ -1,12 +1,15 @@
 // The md the reading view draws: blocks (headings · paragraphs · lists ·
-// fenced code · tables · quotes · rules) and the inline runs inside them
-// (`code` · **bold** · [[id]] · [text](https://…)). No DOM here; node tests it.
+// fenced code · tables · quotes · rules · a picture alone on its line) and
+// the inline runs inside them (`code` · **bold** · [[id]] · [text](https://…)
+// · ![글](asset:<sha256>)). A picture is the store's alone; another address
+// stays text. No DOM here; node tests it.
 
 const FENCE = /^(`{3,}|~{3,})\s*([\w-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const BULLET = /^(\s*)[-*+]\s+(.*)$/;
 const NUMBERED = /^(\s*)\d+[.)]\s+(.*)$/;
 const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const IMAGE_LINE = /^\s*!\[([^\]\n]*)\]\(asset:([0-9a-f]{64})\)\s*$/;
 
 const cells = (line) =>
   line
@@ -22,6 +25,7 @@ const cells = (line) =>
  *   | {type: "ul" | "ol", items: string[], line: number}
  *   | {type: "code", lang: string, text: string, line: number}
  *   | {type: "table", head: string[], rows: string[][], line: number}
+ *   | {type: "img", alt: string, sha256: string, line: number}
  *   | {type: "hr", line: number})[]}
  */
 export function parseBlocks(markdown) {
@@ -47,6 +51,12 @@ export function parseBlocks(markdown) {
     const h = HEADING.exec(line);
     if (h) {
       out.push({ type: "h", level: h[1].length, text: h[2], line: i });
+      i++;
+      continue;
+    }
+    const img = IMAGE_LINE.exec(line);
+    if (img) {
+      out.push({ type: "img", alt: img[1], sha256: img[2], line: i });
       i++;
       continue;
     }
@@ -97,7 +107,8 @@ export function parseBlocks(markdown) {
       !FENCE.test(lines[i]) &&
       !HEADING.test(lines[i]) &&
       !BULLET.test(lines[i]) &&
-      !NUMBERED.test(lines[i])
+      !NUMBERED.test(lines[i]) &&
+      !IMAGE_LINE.test(lines[i])
     )
       body.push(lines[i++].trim());
     out.push({ type: "p", text: body.join(" "), line: start });
@@ -105,11 +116,12 @@ export function parseBlocks(markdown) {
   return out;
 }
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[\[[^[\]\n]+?\]\])|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))/g;
+const INLINE =
+  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[\[[^[\]\n]+?\]\])|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))|(!\[([^\]\n]*)\]\(asset:([0-9a-f]{64})\))/g;
 
 /**
- * Inline runs: {text} plain, {code}, {bold}, {wiki: inner}, {link: text, href}.
- * Only http(s) addresses become links.
+ * Inline runs: {text} plain, {code}, {bold}, {wiki: inner}, {link: text, href},
+ * {img: sha256, alt}. Only http(s) addresses become links.
  */
 export function inlineRuns(text) {
   const s = String(text ?? "");
@@ -120,6 +132,7 @@ export function inlineRuns(text) {
     if (m[1]) out.push({ code: m[1].slice(1, -1) });
     else if (m[2]) out.push({ bold: m[2].slice(2, -2) });
     else if (m[3]) out.push({ wiki: m[3].slice(2, -2).trim() });
+    else if (m[6]) out.push({ img: m[8], alt: m[7] });
     else out.push({ link: m[4].slice(1, m[4].indexOf("](")), href: m[5] });
     last = m.index + m[0].length;
   }

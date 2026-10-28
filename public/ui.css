@@ -3565,6 +3565,58 @@ a.mrow.draft {
 .mermaid-fig.stale {
   opacity: 0.55;
 }
+/* ![글](asset:<sha256>) — 블록 그림은 mermaid 도식과 같은 틀, 아래에 글 캡션(md.mjs pictureFig) */
+.md-fig {
+  overflow: visible;
+}
+.md-img-a {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+.md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-card);
+}
+.md-img-a:hover .md-img {
+  border-color: var(--muted);
+}
+.md-fig-cap {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+/* 글 안의 그림: 한 줄 높이 */
+.md-inimg-a {
+  display: inline-block;
+  vertical-align: -0.3em;
+}
+.md-inimg {
+  display: block;
+  height: 1.4em;
+  width: auto;
+  border-radius: 3px;
+}
+.md-nofig {
+  display: block;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  font-size: 12.5px;
+  text-align: center;
+}
+:is(p, li, td, blockquote) .md-nofig {
+  display: inline;
+  padding: 0 4px;
+}
 .mmd-err {
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);

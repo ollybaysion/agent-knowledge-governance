@@ -82,7 +82,7 @@ export async function skillBody(ctx) {
   }
   const sections = [];
   const nodes = [];
-  const mdCtx = { wiki };
+  const mdCtx = { wiki, assets: doc.assets };
   let knowledge = null; // the ## 도메인 지식 node and its body
 
   let split = null;
