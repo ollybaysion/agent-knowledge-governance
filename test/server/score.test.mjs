@@ -234,12 +234,14 @@ test("verification queries: this skill's queries then each active linked skill's
     const { rev } = (await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/s" })).json();
     const own = [
       "# s", "", "## 도메인 지식", "", "### A", "", "글", "", "## 데이터", "",
-      "### snsr_id — 센서 ID", "", "물을 센서 (예: S-0004) — 사람이 준다.", "", "```ask", "어느 센서인가요?", "```", "",
-      "### row — 센서 행 @g", "", "```sql", "SELECT a FROM t", " WHERE id = :snsr_id AND eqp = :EQP_ID", "   AND d BETWEEN :start_time AND :end_time", "```", "",
+      "```mermaid", "flowchart TD", "  snsr_id([어느 센서인가요? 예: S-0004])", "  eqp_id([설비])", "  duration([기간])",
+      "  snsr_id --> row", "  eqp_id --> row", "  duration --> row", "```", "",
+      "### row — 센서 행", "", "```sql", "SELECT a FROM t", " WHERE id = :snsr_id AND eqp = :EQP_ID", "   AND d BETWEEN :start_time AND :end_time", "```", "",
     ].join("\n");
     assert.equal((await app.inject({ method: "PUT", url: "/api/docs/domain-skill/s", headers: { ...h, "if-match": rev }, payload: { name: "s", markdown: own } })).statusCode, 200);
     const linkTo = { links: [{ type: "domain-skill", id: "s", rel: "related" }] };
-    const sub = "# sub\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### msg — 메시지\n\n```sql\nSELECT v FROM m WHERE id = :snsr_id AND k = :kind\n```\n\n### kind — 종류\n\n종류 (예: A)\n";
+    // snsr_id comes from s, the flow that leads: its input node names the bind.
+    const sub = "# sub\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n```mermaid\nflowchart TD\n  s[[센서 스킬]]\n  kind([종류 예: A])\n  s --> msg\n  kind --> msg\n```\n\n### msg — 메시지\n\n```sql\nSELECT v FROM m WHERE id = :snsr_id AND k = :kind\n```\n";
     const made = await skill("sub", sub, { role: "sub", ...linkTo });
     assert.equal(made.statusCode, 201, made.body);
     assert.equal((await skill("off", "# off\n\n## 도메인 지식\n\n### X\n\n글\n\n## 데이터\n\n### gone — 꺼짐\n\n```sql\nSELECT 1 FROM dual\n```\n", { ...linkTo, status: "inactive" })).statusCode, 201);
@@ -252,7 +254,7 @@ test("verification queries: this skill's queries then each active linked skill's
         skill: "s", id: "row", title: "센서 행",
         sql: "SELECT a FROM t\n WHERE id = :snsr_id AND eqp = :EQP_ID\n   AND d BETWEEN :start_time AND :end_time",
         binds: [
-          { name: "snsr_id", from: "ask", title: "센서 ID", question: "어느 센서인가요?", text: "물을 센서 (예: S-0004) — 사람이 준다.", example: "S-0004" },
+          { name: "snsr_id", from: "input", title: "어느 센서인가요? 예: S-0004", example: "S-0004" },
           { name: "EQP_ID", from: "eqp" },
           { name: "start_time", from: "start" },
           { name: "end_time", from: "end" },
@@ -262,8 +264,8 @@ test("verification queries: this skill's queries then each active linked skill's
         skill: "sub", id: "msg", title: "메시지",
         sql: "SELECT v FROM m WHERE id = :snsr_id AND k = :kind",
         binds: [
-          { name: "snsr_id", from: "ask", title: "센서 ID", question: "어느 센서인가요?", text: "물을 센서 (예: S-0004) — 사람이 준다.", example: "S-0004" },
-          { name: "kind", from: "ask", title: "종류", question: "종류 (예: A)", text: "종류 (예: A)", example: "A" },
+          { name: "snsr_id", from: "input", title: "어느 센서인가요? 예: S-0004", example: "S-0004" },
+          { name: "kind", from: "input", title: "종류 예: A", example: "A" },
         ],
       },
     ]);

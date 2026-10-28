@@ -22,7 +22,7 @@ export const isTimeBind = (name) => [START_TIME, END_TIME].includes(String(name)
  * The SQL with string literals' contents and comments blanked, position for
  * position, newlines kept — a `:` inside 'HH24:MI' or a comment is no bind.
  */
-function mask(sql) {
+export function mask(sql) {
   const out = sql.split("");
   let i = 0;
   while (i < out.length) {
@@ -59,6 +59,77 @@ export function varsOf(sql) {
     }
   }
   return vars;
+}
+
+const isIdentPart = (c) => c !== undefined && IDENT_PART.test(c);
+const isWordBoundary = (text, at, length) => !isIdentPart(text[at - 1]) && !isIdentPart(text[at + length]);
+
+function indexOfKeyword(m, keyword, from) {
+  const upper = m.toUpperCase();
+  for (let i = upper.indexOf(keyword, from); i >= 0; i = upper.indexOf(keyword, i + 1))
+    if (isWordBoundary(upper, i, keyword.length)) return i;
+  return -1;
+}
+
+function indexOfTopLevelKeyword(m, keyword, from) {
+  const upper = m.toUpperCase();
+  let depth = 0;
+  for (let i = from; i <= upper.length - keyword.length; i++) {
+    const c = upper[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (depth === 0 && upper.startsWith(keyword, i) && isWordBoundary(upper, i, keyword.length)) return i;
+  }
+  return -1;
+}
+
+function splitTopLevel(m, from, to) {
+  const spans = [];
+  let depth = 0;
+  let start = from;
+  for (let i = from; i < to; i++) {
+    if (m[i] === "(") depth++;
+    else if (m[i] === ")") depth--;
+    else if (m[i] === "," && depth === 0) {
+      spans.push([start, i]);
+      start = i + 1;
+    }
+  }
+  spans.push([start, to]);
+  return spans;
+}
+
+const PLAIN_COLUMN = /^[A-Za-z_][A-Za-z0-9_$#]*(\.[A-Za-z_][A-Za-z0-9_$#]*)?$/;
+const ALIAS_TAIL = /^.*\bAS\s+"?([A-Za-z_][A-Za-z0-9_$#]*)"?\s*$/is;
+
+/**
+ * The output column names of a statement, upper case, as the consumer reads
+ * them (SqlRender.columnsOf): each item of the top SELECT list is its `AS`
+ * alias or a plain column. Null when unsure — a statement not starting with
+ * SELECT, a `*`, an expression without an alias.
+ * @returns {string[]|null}
+ */
+export function columnsOf(sql) {
+  if (!sql || !sql.trim()) return null;
+  const m = mask(sql);
+  const selectAt = indexOfKeyword(m, "SELECT", 0);
+  if (selectAt < 0 || m.slice(0, selectAt).trim() !== "") return null;
+  const listStart = selectAt + "SELECT".length;
+  const fromAt = indexOfTopLevelKeyword(m, "FROM", listStart);
+  if (fromAt < 0) return null;
+  const columns = [];
+  for (const [a, b] of splitTopLevel(m, listStart, fromAt)) {
+    const item = m.slice(a, b).trim();
+    if (item === "") return null;
+    const alias = ALIAS_TAIL.exec(item);
+    if (alias) {
+      columns.push(alias[1].toUpperCase());
+      continue;
+    }
+    if (!PLAIN_COLUMN.test(item)) return null;
+    columns.push(item.slice(item.lastIndexOf(".") + 1).toUpperCase());
+  }
+  return columns.length ? columns : null;
 }
 
 const pad = (n, w = 2) => String(n).padStart(w, "0");

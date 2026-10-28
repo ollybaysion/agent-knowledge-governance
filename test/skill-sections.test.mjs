@@ -43,3 +43,12 @@ test("missing sections split to empty bodies; join writes standard order and lea
   );
   assert.equal(joinSkill(title, sections), "# s\n\n## 한 줄 설명:\n\n요약\n\n## 데이터\n\nd\n");
 });
+
+test("the 데이터 section keeps its flow fence before its first ### and its queries, in order, through split and join", () => {
+  const md = readFileSync(new URL("./fixtures/flow/subgraph/state-gate.md", import.meta.url), "utf8");
+  const { title, sections } = splitSkill(md);
+  const data = sections.find((s) => s.key === "데이터").body;
+  assert.ok(data.startsWith("```mermaid\nflowchart TD\n"), data);
+  assert.ok(data.indexOf("```mermaid") < data.indexOf("### eqp_state") && data.indexOf("### eqp_state") < data.indexOf("### alarm_list"));
+  assert.equal(joinSkill(title, sections), md);
+});

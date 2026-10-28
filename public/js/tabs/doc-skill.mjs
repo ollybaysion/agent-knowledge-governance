@@ -284,7 +284,7 @@ function verifySection({ ctx, block, vlib, blib, parsed, last, verifyQueries, an
         const prefill = b.from === "eqp" ? st.eqp : b.from === "start" ? st.duration?.start : b.from === "end" ? st.duration?.end : shared[b.name];
         const i = input(prefill, b.example ? `예: ${b.example}` : b.from === "start" || b.from === "end" ? "2026-10-01T00:00" : "");
         i.addEventListener("input", () => {
-          if (b.from === "ask") shared[b.name] = i.value;
+          if (b.from === "input") shared[b.name] = i.value;
           fill(query, inputs);
         });
         inputs.push([b.name, i]);
@@ -292,7 +292,6 @@ function verifySection({ ctx, block, vlib, blib, parsed, last, verifyQueries, an
         return el("label", { class: "verify-field" }, [
           el("span", { class: "verify-label" }, [`${label} `, el("code", { text: `:${b.name}` })]),
           i,
-          b.from === "ask" && b.question ? el("span", { class: "dim verify-pick-q", text: b.question }) : null,
         ]);
       });
       body.replaceChildren(

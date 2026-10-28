@@ -151,7 +151,7 @@ test("DELETE: If-Match required (428), a stale rev 409, a missing doc 404, a use
 test("after DELETE the same id and the same data ids make a new document", async () => {
   const t = await setup();
   try {
-    const md = "# s\n\n## 데이터\n\n### snsr_id — 센서\n\n```sql\nSELECT 1 FROM t WHERE k = :snsr_id\n```\n";
+    const md = "# s\n\n## 데이터\n\n### snsr_id — 센서\n\n```sql\nSELECT 1 FROM t WHERE k = 1\n```\n";
     assert.equal((await t.call("POST", "/api/docs/domain-skill", skill("s", md))).statusCode, 201);
     assert.equal((await t.del("domain-skill", "s")).statusCode, 200);
     assert.equal((await t.call("POST", "/api/docs/domain-skill", skill("s", md))).statusCode, 201);

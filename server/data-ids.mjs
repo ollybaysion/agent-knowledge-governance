@@ -1,3 +1,4 @@
+import { flowSubgraphIds } from "../src/envelope.mjs";
 import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { coverageOf, tableUses } from "../src/table-class.mjs";
 import { listIds, readJson } from "./store.mjs";
@@ -6,12 +7,23 @@ import { listIds, readJson } from "./store.mjs";
 const DATA_ID_TYPES = ["domain-skill", "domain"];
 
 /**
- * Data id → the stored domain-skill or domain document that has it and
- * whether its item is a query, over every such document except
- * `selfType/selfId` (any type when `selfType` is absent) and the archived
- * ones. A query owner wins over a question owner of the same id. Read on each
- * call: skills are few.
- * @returns {Map<string, {doc: string, query: boolean}>}
+ * Add one skill's names to `owners`: its data ids, its flow fence's subgraph
+ * ids and its own name ({@link dataIdOwners}).
+ */
+export function addOwner(owners, id, markdown) {
+  const add = (name, kind) => owners.set(name, [...(owners.get(name) ?? []), { doc: id, kind }]);
+  for (const item of skillDataIds(markdown)) add(item.id, "data");
+  for (const sub of new Set(flowSubgraphIds(markdown))) add(sub, "subgraph");
+  add(id, "md");
+  return owners;
+}
+
+/**
+ * Name → the stored domain-skill and domain documents that hold it and as
+ * what (a data id, a subgraph id, the document's own name), over every such
+ * document except `selfType/selfId` (any type when `selfType` is absent) and
+ * the archived ones. Read on each call: skills are few.
+ * @returns {Map<string, {doc: string, kind: "data"|"subgraph"|"md"}[]>}
  */
 export function dataIdOwners(storeDir, selfId, selfType = null) {
   const owners = new Map();
@@ -25,20 +37,19 @@ export function dataIdOwners(storeDir, selfId, selfType = null) {
         continue;
       }
       if (!doc || doc.status === "archived" || typeof doc.body?.markdown !== "string") continue;
-      for (const item of skillDataIds(doc.body.markdown))
-        if (!owners.has(item.id) || (item.query && !owners.get(item.id).query))
-          owners.set(item.id, { doc: id, query: item.query });
+      addOwner(owners, id, doc.body.markdown);
     }
   }
   return owners;
 }
 
 /**
- * Table → the 조회 of the active domain-skill and domain documents that read
- * it ({@link tableUses}). Read on each call, like dataIdOwners.
+ * The active domain-skill and domain documents — the agent mds the consumer
+ * registers, in store order. Read on each call, like dataIdOwners.
+ * @returns {{type: string, id: string, markdown: string}[]}
  */
-export function activeTableUses(storeDir) {
-  const docs = [];
+export function agentRegistry(storeDir) {
+  const out = [];
   for (const type of DATA_ID_TYPES) {
     for (const id of listIds(storeDir, type)) {
       let doc;
@@ -47,10 +58,18 @@ export function activeTableUses(storeDir) {
       } catch {
         continue;
       }
-      if (doc?.status === "active") docs.push({ type, id, markdown: doc.body?.markdown });
+      if (doc?.status === "active" && typeof doc.body?.markdown === "string") out.push({ type, id, markdown: doc.body.markdown });
     }
   }
-  return tableUses(docs);
+  return out;
+}
+
+/**
+ * Table → the 조회 of the active domain-skill and domain documents that read
+ * it ({@link tableUses}). Read on each call, like dataIdOwners.
+ */
+export function activeTableUses(storeDir) {
+  return tableUses(agentRegistry(storeDir));
 }
 
 /** A db-schema document's 주요 · 쓰는 조회 · 확정 커버리지, as the list and the doc view carry them. */

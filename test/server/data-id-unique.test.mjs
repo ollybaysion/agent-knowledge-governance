@@ -1,7 +1,7 @@
-// A domain-skill's or domain document's `## 데이터` query ids (items with a
-// ```sql fence) are procurement keys the consumer looks up across every stored
-// skill (active or inactive; archived ones are out), so one may not sit in two. A
-// question (no sql) is the skill's own and may repeat across skills.
+// A domain-skill's or domain document's `## 데이터` item ids and its flow
+// fence's subgraph ids are names the consumer looks up across every stored
+// skill (active or inactive; archived ones are out), so one may not sit in two,
+// and a subgraph id may not be another skill's name.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,17 +31,16 @@ async function setup() {
 }
 const auth = (t) => (as(t));
 
-function skill(name, ids, status = "active", asks = []) {
-  const items = [
-    ...ids.map((id) => `### ${id} — 조회\n\n\`\`\`sql\nSELECT 1 FROM t WHERE k = :${id}\n\`\`\``),
-    ...asks.map((id) => `### ${id} — 물음\n\n어느 ${id}?`),
-  ].join("\n\n");
+/** A skill with a sql item per id; `sub` puts the first item in that subgraph of a flow fence. */
+function skill(name, ids, status = "active", sub = null) {
+  const items = ids.map((id) => `### ${id} — 조회\n\n\`\`\`sql\nSELECT k FROM t WHERE k = 1\n\`\`\``).join("\n\n");
+  const fence = sub ? `\`\`\`mermaid\nflowchart TD\n  subgraph ${sub} [묶음]\n    ${ids[0]}\n  end\n\`\`\`\n\n` : "";
   return {
     schema: "domain-skill/v1",
     id: name,
     keywords: [{ kw: name, inject: "full" }],
     status,
-    body: { name, markdown: `# ${name}\n\n## 데이터\n\n${items}\n` },
+    body: { name, markdown: `# ${name}\n\n## 데이터\n\n${fence}${items}\n` },
   };
 }
 const post = (app, doc) =>
@@ -53,7 +52,7 @@ test("POST: a data id another skill holds is 409 data_id_conflict naming that sk
     assert.equal((await post(app, skill("a", ["snsr_id", "row_a"]))).statusCode, 201);
     const r = await post(app, skill("b", ["row_b", "snsr_id"]));
     assert.equal(r.statusCode, 409, r.body);
-    assert.deepEqual(r.json(), { error: "data_id_conflict", conflicts: [{ id: "snsr_id", doc: "a" }] });
+    assert.deepEqual(r.json(), { error: "data_id_conflict", conflicts: [{ id: "snsr_id", doc: "a", kind: "data" }] });
     const got = await app.inject({ headers: as("reader"), method: "GET", url: "/api/docs/domain-skill/b" });
     assert.equal(got.statusCode, 404);
   } finally {
@@ -61,17 +60,23 @@ test("POST: a data id another skill holds is 409 data_id_conflict naming that sk
   }
 });
 
-test("POST: a question id may sit in every skill; the same id as a query in either skill is 409", async () => {
+test("POST: a subgraph id clashes with another skill's data id, subgraph id and name; a skill's name with another's subgraph id", async () => {
   const { app, cleanup } = await setup();
   try {
-    assert.equal((await post(app, skill("a", ["trace"], "active", ["duration", "param_index"]))).statusCode, 201);
-    assert.equal((await post(app, skill("b", ["events"], "active", ["duration", "param_index"]))).statusCode, 201);
-    const askVsQuery = await post(app, skill("c", ["duration"]));
-    assert.equal(askVsQuery.statusCode, 409, askVsQuery.body);
-    assert.deepEqual(askVsQuery.json().conflicts, [{ id: "duration", doc: "a" }]);
-    const queryVsAsk = await post(app, skill("d", [], "active", ["trace"]));
-    assert.equal(queryVsAsk.statusCode, 409, queryVsAsk.body);
-    assert.deepEqual(queryVsAsk.json().conflicts, [{ id: "trace", doc: "a" }]);
+    assert.equal((await post(app, skill("a", ["trace"], "active", "pick"))).statusCode, 201);
+    const subVsSub = await post(app, skill("b", ["events"], "active", "pick"));
+    assert.equal(subVsSub.statusCode, 409, subVsSub.body);
+    assert.deepEqual(subVsSub.json().conflicts, [{ id: "pick", doc: "a", kind: "subgraph" }]);
+    const subVsData = await post(app, skill("b", ["events"], "active", "trace"));
+    assert.deepEqual(subVsData.json().conflicts, [{ id: "trace", doc: "a", kind: "data" }]);
+    const subVsName = await post(app, skill("b", ["events"], "active", "a"));
+    assert.deepEqual(subVsName.json().conflicts, [{ id: "a", doc: "a", kind: "md" }]);
+    const dataVsSub = await post(app, skill("b", ["pick"]));
+    assert.deepEqual(dataVsSub.json().conflicts, [{ id: "pick", doc: "a", kind: "subgraph" }]);
+    const nameVsSub = await post(app, skill("pick", ["events"]));
+    assert.equal(nameVsSub.statusCode, 409, nameVsSub.body);
+    assert.deepEqual(nameVsSub.json().conflicts, [{ id: "pick", doc: "a", kind: "subgraph" }]);
+    assert.equal((await post(app, skill("b", ["events"], "active", "pick_b"))).statusCode, 201);
   } finally {
     await cleanup();
   }
@@ -84,7 +89,7 @@ test("POST: an inactive skill's ids count, and an inactive draft is refused the 
     for (const status of ["active", "inactive"]) {
       const r = await post(app, skill("b", ["snsr_id"], status));
       assert.equal(r.statusCode, 409, `${status}: ${r.body}`);
-      assert.deepEqual(r.json().conflicts, [{ id: "snsr_id", doc: "a" }]);
+      assert.deepEqual(r.json().conflicts, [{ id: "snsr_id", doc: "a", kind: "data" }]);
     }
   } finally {
     await cleanup();
@@ -135,7 +140,7 @@ test("PUT: the skill's own ids are not a conflict; an id another skill holds is 
     assert.equal(same.statusCode, 200, same.body);
     const taken = await put(["snsr_id", "row_b"]);
     assert.equal(taken.statusCode, 409, taken.body);
-    assert.deepEqual(taken.json(), { error: "data_id_conflict", conflicts: [{ id: "row_b", doc: "b" }] });
+    assert.deepEqual(taken.json(), { error: "data_id_conflict", conflicts: [{ id: "row_b", doc: "b", kind: "data" }] });
   } finally {
     await cleanup();
   }
@@ -152,12 +157,16 @@ test("batch POST: ids shared inside the batch or with the store are 409, with th
     assert.equal(inside.statusCode, 409, inside.body);
     assert.deepEqual(inside.json(), {
       error: "data_id_conflict",
-      conflicts: [{ id: "row", doc: "b", source: "c" }],
+      conflicts: [{ id: "row", doc: "b", kind: "data", source: "c" }],
     });
 
     const store = await batch([skill("b", ["snsr_id"])]);
     assert.equal(store.statusCode, 409, store.body);
-    assert.deepEqual(store.json().conflicts, [{ id: "snsr_id", doc: "a", source: "b" }]);
+    assert.deepEqual(store.json().conflicts, [{ id: "snsr_id", doc: "a", kind: "data", source: "b" }]);
+
+    const sub = await batch([skill("b", ["row_b"], "inactive", "pick"), skill("c", ["pick"])]);
+    assert.equal(sub.statusCode, 409, sub.body);
+    assert.deepEqual(sub.json().conflicts, [{ id: "pick", doc: "b", kind: "subgraph", source: "c" }]);
 
     const ok = await batch([skill("b", ["row_b"]), skill("c", ["row_c"])]);
     assert.equal(ok.statusCode, 201, ok.body);
@@ -183,11 +192,11 @@ test("domain-skill and domain share the data ids: a query id in one type is 409 
     assert.equal((await postDomain(app, domain("k", ["snsr_id"]))).statusCode, 201);
     const fromSkill = await post(app, skill("a", ["snsr_id"]));
     assert.equal(fromSkill.statusCode, 409, fromSkill.body);
-    assert.deepEqual(fromSkill.json().conflicts, [{ id: "snsr_id", doc: "k" }]);
+    assert.deepEqual(fromSkill.json().conflicts, [{ id: "snsr_id", doc: "k", kind: "data" }]);
     assert.equal((await post(app, skill("a", ["row_a"]))).statusCode, 201);
     const fromDomain = await postDomain(app, domain("j", ["row_a"], "inactive"));
     assert.equal(fromDomain.statusCode, 409, fromDomain.body);
-    assert.deepEqual(fromDomain.json().conflicts, [{ id: "row_a", doc: "a" }]);
+    assert.deepEqual(fromDomain.json().conflicts, [{ id: "row_a", doc: "a", kind: "data" }]);
   } finally {
     await cleanup();
   }
@@ -207,7 +216,7 @@ test("PUT: a domain document's own ids are not a conflict; a domain-skill of the
     assert.equal(same.statusCode, 200, same.body);
     const taken = await put("domain-skill", skill("a", ["row_a", "snsr_id"]));
     assert.equal(taken.statusCode, 409, taken.body);
-    assert.deepEqual(taken.json().conflicts, [{ id: "snsr_id", doc: "a" }]);
+    assert.deepEqual(taken.json().conflicts, [{ id: "snsr_id", doc: "a", kind: "data" }]);
   } finally {
     await cleanup();
   }

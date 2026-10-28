@@ -173,6 +173,8 @@ export const skillSectionsLib = import("/lib/shared/skill-sections.mjs").catch((
 export const verifyLib = import("/lib/shared/verify-set.mjs").catch(() => null);
 // The consumer's bind rules (src/sql-bind.mjs): a picked query's SQL with the typed values.
 export const sqlBindLib = import("/lib/shared/sql-bind.mjs").catch(() => null);
+// The consumer's agent md reading and flow checks (src/flow/agent-md.mjs): the editor's flow errors.
+export const flowLib = import("/lib/shared/flow/agent-md.mjs").catch(() => null);
 export const VERIFY_KEY = "답변 품질 검증 Set";
 export const VERIFY_KIND_LABEL = { 1: "일반 지식", 2: "데이터 설명", 3: "데이터 연관", 4: "고도화 분석", 5: "신뢰성" };
 // The score-record/v1 kind names, by the same numbers.

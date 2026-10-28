@@ -55,7 +55,7 @@ test("GET /js/main.mjs, /app.css and /lib/search.mjs are served publicly with th
   await cleanup();
 });
 
-for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", "sql-bind"]) {
+for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", "sql-bind", "flow/agent-md", "flow/flow-compiler", "flow/flow-error", "flow/flow-grammar", "flow/flow-rules"]) {
   test(`GET /lib/shared/${name}.mjs serves src/${name}.mjs, byte for byte, publicly`, async () => {
     const { app, cleanup } = await setup();
     const res = await app.inject({ method: "GET", url: `/lib/shared/${name}.mjs` });
@@ -68,7 +68,7 @@ for (const name of ["skill-sections", "graph-model", "wikilinks", "verify-set", 
 
 test("/lib/shared/ serves only the listed modules, and only to GET", async () => {
   const { app, cleanup } = await setup();
-  for (const url of ["/lib/shared/validate.mjs", "/lib/shared/envelope.mjs", "/lib/shared/..%2Fserver%2Fapp.mjs"]) {
+  for (const url of ["/lib/shared/validate.mjs", "/lib/shared/envelope.mjs", "/lib/shared/..%2Fserver%2Fapp.mjs", "/lib/shared/flow/../envelope.mjs", "/lib/shared/render/index.mjs"]) {
     const res = await app.inject({ method: "GET", url });
     assert.equal(res.statusCode, 404, url);
   }

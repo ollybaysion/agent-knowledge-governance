@@ -35,13 +35,16 @@
 
 ## 데이터
 
-### snsr_id — 센서 ID
-
-값의 출처를 물을 센서 (예: S-0004) — 사람이 준다.
-
-```ask
-어느 센서인가요? 센서 id(snsr_id)를 알려 주세요.
+```mermaid
+flowchart TD
+  snsr_id([센서 ID])
+  snsr_id --> sensor_row
+  snsr_id --> message_row
+  snsr_id --> formula_row
+  snsr_id --> formula_input_rows
 ```
+
+입력 `snsr_id` 는 값의 출처를 물을 센서다(예: S-0004). 사람이 준다.
 
 ### sensor_row — 센서 행
 

@@ -16,7 +16,7 @@ const waiting = new Map(); // render id -> resolve
 const cache = new Map(); // theme + text -> {svg} | {error}
 const last = new Map(); // figure key -> the last answer, shown dimmed while the next draws
 const sheets = new Map(); // svg id -> its constructed sheet
-const info = new WeakMap(); // figure -> {text, fenceLine, source, key}
+const info = new WeakMap(); // figure -> {text, fenceLine, source, key, notes}
 const pending = new Set();
 
 const themeNow = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -101,19 +101,29 @@ function pruneSheets() {
   document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => !drop.has(s));
 }
 
+// The flow check's lines under the figure, in the error box mermaid's own errors use.
+const notesBox = (notes) =>
+  notes?.length
+    ? el("div", { class: "mmd-err", role: "status" }, [
+        el("b", { text: `플로우 오류 ${notes.length}` }),
+        el("pre", { class: "mmd-err-d", text: notes.join("\n") }),
+      ])
+    : null;
+
 function paint(fig, answer) {
-  const { text, fenceLine, source } = info.get(fig);
+  const { text, fenceLine, source, notes } = info.get(fig);
   fig.classList.remove("waiting", "failed");
+  const flow = notesBox(notes);
   const svg = answer.svg ? svgNode(answer.svg) : null;
-  if (svg) return fig.replaceChildren(svg);
+  if (svg) return fig.replaceChildren(...[svg, flow].filter(Boolean));
   const e = mermaidError(answer.error ?? "SVG 를 읽지 못했습니다", fenceLine, text);
   fig.classList.add("failed");
   const box = el("div", { class: "mmd-err", role: "status" }, [
     el("b", { text: e.title }),
     e.detail ? el("pre", { class: "mmd-err-d", text: e.detail }) : null,
   ]);
-  if (source) fig.replaceChildren(box, el("pre", { class: "md-code lang-mermaid" }, el("code", {}, text)));
-  else fig.replaceChildren(box);
+  if (source) fig.replaceChildren(...[box, flow, el("pre", { class: "md-code lang-mermaid" }, el("code", {}, text))].filter(Boolean));
+  else fig.replaceChildren(...[box, flow].filter(Boolean));
 }
 
 function fill(fig, answer) {
@@ -149,10 +159,11 @@ const flushLater = debounce(flush, 300);
  * - key: the same figure across repaints (editor). Until its picture comes,
  *   it shows the last one dimmed instead of an empty box.
  * - delay: wait this long after the last request before drawing (300 = typing).
+ * - notes: lines under the picture in the error box (the editor's flow check).
  */
-export function mermaidFig(text, { fenceLine = null, source = true, key = null, delay = 0 } = {}) {
+export function mermaidFig(text, { fenceLine = null, source = true, key = null, delay = 0, notes = null } = {}) {
   const fig = el("div", { class: "mermaid-fig", role: "figure", "aria-label": "mermaid 도식" });
-  info.set(fig, { text, fenceLine, source, key });
+  info.set(fig, { text, fenceLine, source, key, notes });
   const hit = cache.get(cacheKey(text));
   if (hit) {
     fill(fig, hit);
