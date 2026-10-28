@@ -120,7 +120,7 @@ export function mdNodes(markdown, ctx = {}) {
         key: mm.key == null ? null : `${mm.key}#${n}`,
         delay: mm.delay ?? 0,
         notes: n === 0 && !heading ? mm.flowNotes ?? null : null,
-        // The reading view (no editor ctx): a click opens the mermaid text.
+        // The reading view (no editor ctx): a line under the figure opens the mermaid text and the full screen.
         code: !ctx.mermaid,
       });
     }

@@ -4,8 +4,9 @@
 // The SVG comes in without its <style> and style="" (the page's style-src
 // 'self' refuses both): the rules go into a constructed sheet and the
 // attributes through node.style — CSSOM, which the policy leaves alone.
-import { el, icon, toast } from "./dom.mjs";
-import { INERT_ATTR, INERT_STYLE, codeLines, debounce, foldNext, inertSvg, mermaidError, mermaidTheme } from "/lib/mermaid-src.mjs";
+import { el, icon } from "./dom.mjs";
+import { codeBox, openFull } from "./mermaid-full.mjs";
+import { INERT_ATTR, INERT_STYLE, codeLines, codeToggle, debounce, figRowText, inertSvg, mermaidError, mermaidTheme } from "/lib/mermaid-src.mjs";
 
 const FRAME = "/mermaid-frame.html";
 const CACHE_MAX = 64;
@@ -111,7 +112,7 @@ const notesBox = (notes) =>
     : null;
 
 function paint(fig, answer) {
-  const { text, fenceLine, source, notes, hint } = info.get(fig);
+  const { text, fenceLine, source, notes } = info.get(fig);
   fig.classList.remove("waiting", "failed");
   const flow = notesBox(notes);
   const svg = answer.svg ? svgNode(answer.svg) : null;
@@ -126,58 +127,44 @@ function paint(fig, answer) {
     if (source) fig.replaceChildren(...[box, flow, el("pre", { class: "md-code lang-mermaid" }, el("code", {}, text))].filter(Boolean));
     else fig.replaceChildren(...[box, flow].filter(Boolean));
   }
-  if (hint) fig.append(hint);
 }
 
 let foldNo = 0;
 
 /**
- * The reading view's figure with its code box: a click, Enter or Space on the
- * figure opens the mermaid text under it, the same again closes it.
+ * The reading view's figure with a line under it (플로우 차트 · 노드 n ·
+ * mermaid m 줄): 코드 보기 opens the mermaid text under the line and closes
+ * it, 전체 화면 opens the figure in full screen (mermaid-full.mjs).
  */
 function withCode(fig, text) {
   const id = `mmd-code-${++foldNo}`;
   const lines = codeLines(text);
-  const hintLabel = el("span", { text: "코드 보기" });
-  const hint = el("span", { class: "fig-hint", "aria-hidden": "true" }, [icon("code", 13), hintLabel]);
-  info.get(fig).hint = hint;
-  fig.append(hint);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      toast("복사했습니다");
-    } catch {
-      toast("복사하지 못했습니다 — 코드를 직접 골라 복사하세요", "error");
-    }
-  };
-  const code = el("div", { class: "mcode", id, hidden: true }, [
-    el("div", { class: "mcode-h" }, [
-      el("span", { text: `mermaid · ${lines.length} 줄` }),
-      el("span", { class: "sp" }),
-      el("button", { type: "button", class: "btn sm ghost", onclick: copy }, [icon("copy", 13), "복사"]),
-    ]),
-    el("pre", { class: "mcode-b" }, el("code", {}, lines.flatMap((l, i) => [el("span", { class: "ln", "aria-hidden": "true", text: String(i + 1) }), l, i < lines.length - 1 ? "\n" : null]))),
+  const code = codeBox(lines, { id, hidden: true });
+  const codeBtn = el("button", { type: "button", class: "btn sm ghost", "aria-controls": id, onclick: () => set(code.hidden) });
+  const fullBtn = el("button", { type: "button", class: "btn sm ghost", "aria-haspopup": "dialog", onclick: () => full() }, [icon("expand", 13), "전체 화면"]);
+  const wrap = el("div", { class: "mmd-fold" }, [
+    fig,
+    el("div", { class: "fig-row" }, [el("span", { text: figRowText(text) }), el("span", { class: "sp" }), codeBtn, fullBtn]),
+    code,
   ]);
-  const wrap = el("div", { class: "mmd-fold" }, [fig, code]);
-  fig.tabIndex = 0;
-  fig.setAttribute("role", "button");
-  fig.setAttribute("aria-label", "플로우 차트 — 누르면 mermaid 코드를 펼치고 접습니다");
-  fig.setAttribute("aria-controls", id);
-  fig.setAttribute("aria-expanded", "false");
   const set = (open) => {
+    const t = codeToggle(open);
     wrap.classList.toggle("open", open);
     code.hidden = !open;
-    fig.setAttribute("aria-expanded", String(open));
-    hintLabel.textContent = open ? "코드 접기" : "코드 보기";
+    codeBtn.setAttribute("aria-expanded", t.expanded);
+    codeBtn.replaceChildren(icon("code", 13), t.label);
   };
-  const onEvent = (e) => {
-    const next = foldNext(wrap.classList.contains("open"), e);
-    if (next === null) return;
-    e.preventDefault();
-    set(next);
+  const full = () => {
+    const where = [wrap.closest("section.sec")?.getAttribute("aria-label"), document.querySelector(".doc-title")?.textContent]
+      .filter(Boolean)
+      .join(" · ");
+    const picture = async () => {
+      const answer = await draw(text);
+      return answer.svg ? svgNode(answer.svg) : null;
+    };
+    openFull({ picture, lines, where, codeOpen: !code.hidden, opener: fullBtn });
   };
-  fig.addEventListener("click", onEvent);
-  fig.addEventListener("keydown", onEvent);
+  set(false);
   return wrap;
 }
 
@@ -215,12 +202,13 @@ const flushLater = debounce(flush, 300);
  *   it shows the last one dimmed instead of an empty box.
  * - delay: wait this long after the last request before drawing (300 = typing).
  * - notes: lines under the picture in the error box (the editor's flow check).
- * - code: the reading view's figure — a click opens the mermaid text under
- *   it (withCode). The node handed back is then the figure and its code box.
+ * - code: the reading view's figure — a line under it opens the mermaid text
+ *   and the full screen (withCode). The node handed back is then the figure,
+ *   the line and the code box.
  */
 export function mermaidFig(text, { fenceLine = null, source = true, key = null, delay = 0, notes = null, code = false } = {}) {
   const fig = el("div", { class: "mermaid-fig", role: "figure", "aria-label": "mermaid 도식" });
-  info.set(fig, { text, fenceLine, source, key, notes, hint: null });
+  info.set(fig, { text, fenceLine, source, key, notes });
   const hit = cache.get(cacheKey(text));
   if (hit) fill(fig, hit);
   else {

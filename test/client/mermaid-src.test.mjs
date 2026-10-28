@@ -5,15 +5,22 @@ import { parseBlocks } from "../../public/lib/md-parse.mjs";
 import {
   INERT_ATTR,
   INERT_STYLE,
+  ZOOM,
   codeLines,
+  codeToggle,
   debounce,
-  foldNext,
+  dragScroll,
   errorLine,
+  figRowText,
+  fitZoom,
+  flowNodeCount,
   inertSvg,
   isMermaid,
   mermaidError,
   mermaidFences,
   mermaidTheme,
+  zoomKey,
+  zoomStep,
 } from "../../public/lib/mermaid-src.mjs";
 
 const MD = ["# 문서", "", "## 흐름", "", "```mermaid", "flowchart TD", "  A --> B", "```", "", "```sql", "SELECT 1", "```", "", "~~~Mermaid", "graph LR", "~~~"].join("\n");
@@ -93,19 +100,81 @@ test("debounce runs once, 300ms after the last call, with the last arguments", (
   assert.deepEqual(calls, [2]);
 });
 
-test("the code box under a figure: a click, Enter or Space opens it and the same again closes it; other keys leave it", () => {
-  let open = false;
-  open = foldNext(open, { type: "click" });
-  assert.equal(open, true);
-  open = foldNext(open, { type: "click" });
-  assert.equal(open, false);
-  open = foldNext(open, { type: "keydown", key: "Enter" });
-  assert.equal(open, true);
-  open = foldNext(open, { type: "keydown", key: " " });
-  assert.equal(open, false);
-  assert.equal(foldNext(false, { type: "keydown", key: "Tab" }), null);
-  assert.equal(foldNext(true, { type: "keydown", key: "Escape" }), null);
-  assert.equal(foldNext(true, { type: "mouseover" }), null);
+test("the 코드 보기 button: 코드 접기 and aria-expanded true while the code box is open", () => {
+  assert.deepEqual(codeToggle(false), { label: "코드 보기", expanded: "false" });
+  assert.deepEqual(codeToggle(true), { label: "코드 접기", expanded: "true" });
+});
+
+const SENSOR_FLOW = [
+  "flowchart TD",
+  "  flow_sensor_row[센서 행]",
+  "  flow_message_row[메시지 매핑]",
+  "  flow_formula_row[수식]",
+  "  flow_formula_input_rows[수식 입력 센서]",
+  "  eqpsetupdemo[[설비 셋업 데모]]",
+  "",
+  "  flow_sensor_row -->|snsr_type_cd = 'FLOW'| flow_message_row",
+  "  flow_sensor_row -->|else| flow_formula_row",
+  "  flow_formula_row --> flow_formula_input_rows",
+  "  flow_sensor_row -->|snsr_type_cd in ('FLOW', 'TEMP')| eqpsetupdemo",
+  "  snsr_id([센서 ID])",
+  "  snsr_id --> flow_sensor_row",
+  "  snsr_id --> flow_message_row",
+  "  snsr_id --> flow_formula_row",
+  "  snsr_id --> flow_formula_input_rows",
+].join("\n");
+
+test("flowNodeCount counts each id declared with a shape once, past edge labels and shape text", () => {
+  assert.equal(flowNodeCount(SENSOR_FLOW), 6);
+  assert.equal(flowNodeCount("flowchart LR\n  A[가(나)] --> B{고르기}\n  B -->|예 (x)| C((끝))\n  A[다시] --> C"), 3);
+  assert.equal(flowNodeCount("graph TD\n  A --> B"), 0);
+  assert.equal(flowNodeCount("%% 주석\nflowchart TD\n  subgraph s1[묶음]\n  A[a]\n  end\n  classDef k fill:#fff\n  style A stroke:#000"), 1);
+  assert.equal(flowNodeCount("sequenceDiagram\n  A->>B: hi"), null);
+  assert.equal(flowNodeCount(""), null);
+});
+
+test("figRowText: 플로우 차트 · 노드 n · mermaid m 줄, the node count left out when it is unknown", () => {
+  assert.equal(figRowText(`${SENSOR_FLOW}\n`), "플로우 차트 · 노드 6 · mermaid 16 줄");
+  assert.equal(figRowText("graph TD\n  A --> B"), "플로우 차트 · mermaid 2 줄");
+  assert.equal(figRowText("sequenceDiagram\n  A->>B: hi"), "플로우 차트 · mermaid 2 줄");
+});
+
+test("fitZoom fills the stage inside its margin 24: the smaller ratio, held to 25%–300%", () => {
+  // 1440 × 900: the view 1392 × 852 less the bar 48 = stage 1392 × 804.
+  assert.equal(Math.round(fitZoom({ w: 1392, h: 804 }, { w: 580, h: 380 }) * 100), 199);
+  assert.equal(Math.round(fitZoom({ w: 1392, h: 804 }, { w: 543, h: 370 }) * 100), 204);
+  // The code box 220 open under the stage.
+  assert.equal(Math.round(fitZoom({ w: 1392, h: 804 - 220 }, { w: 580, h: 380 }) * 100), 141);
+  // 1024 × 768: the view 976 × 720.
+  assert.equal(Math.round(fitZoom({ w: 976, h: 672 }, { w: 580, h: 380 }) * 100), 160);
+  assert.equal(fitZoom({ w: 1392, h: 804 }, { w: 60, h: 40 }), ZOOM.max);
+  assert.equal(fitZoom({ w: 300, h: 300 }, { w: 5000, h: 5000 }), ZOOM.min);
+  assert.equal(fitZoom({ w: 300, h: 300 }, null), 1);
+});
+
+test("zoomStep moves by 1.15 and stops at 25% and 300%", () => {
+  assert.equal(zoomStep(1, 1), 1.15);
+  assert.equal(Math.round(zoomStep(zoomStep(1, 1), 1) * 10000), 13225);
+  assert.equal(zoomStep(1.15, -1), 1);
+  assert.equal(zoomStep(2.9, 1), 3);
+  assert.equal(zoomStep(0.26, -1), 0.25);
+});
+
+test("zoomKey: + − 0 f and the arrows (32px); a key with ⌘ · Ctrl · Alt is the browser's", () => {
+  assert.equal(zoomKey({ key: "+" }), "in");
+  assert.equal(zoomKey({ key: "=" }), "in");
+  assert.equal(zoomKey({ key: "-" }), "out");
+  assert.equal(zoomKey({ key: "0" }), "one");
+  assert.equal(zoomKey({ key: "f" }), "fit");
+  assert.deepEqual(zoomKey({ key: "ArrowLeft" }), { dx: -32, dy: 0 });
+  assert.deepEqual(zoomKey({ key: "ArrowDown" }), { dx: 0, dy: 32 });
+  assert.equal(zoomKey({ key: "+", metaKey: true }), null);
+  assert.equal(zoomKey({ key: "-", ctrlKey: true }), null);
+  assert.equal(zoomKey({ key: "a" }), null);
+});
+
+test("dragScroll: the picture follows the pointer, so the scroll moves the other way", () => {
+  assert.deepEqual(dragScroll({ left: 200, top: 100 }, { x: 500, y: 400 }, { x: 440, y: 430 }), { left: 260, top: 70 });
 });
 
 test("the code box lines are the fence text, its last newline dropped", () => {
