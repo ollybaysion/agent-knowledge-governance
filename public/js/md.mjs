@@ -4,12 +4,14 @@
 // fence becomes a figure (mermaid.mjs). ![글](asset:<sha256>) alone on its
 // line is a figure in the same frame, with the 글 as its caption; inside a
 // line it is a picture one line high. A click opens the picture in a new tab.
+// A ```chart fence is one small line — 그래프 line · x ts · y value.
 import { el } from "./dom.mjs";
 import { assetIndex, figureOf } from "/lib/doc-assets.mjs";
 import { inlineRuns, parseBlocks } from "/lib/md-parse.mjs";
 import { isMermaid } from "/lib/mermaid-src.mjs";
 import { mermaidFig } from "./mermaid.mjs";
 import { sqlCode } from "./sql.mjs";
+import { LANG as CHART, chartLine } from "/lib/shared/flow/chart-fence.mjs";
 import { TYPE_LABEL, typeColor } from "./state.mjs";
 
 /** The short tag a chip carries: 표 · msg · 메인 · 도메인 · 매뉴얼 … */
@@ -134,6 +136,8 @@ export function mdNodes(markdown, ctx = {}) {
       case "ol":
         return el(b.type, { class: "md-list" }, b.items.map((t) => el("li", {}, inline(t, ctx))));
       case "code":
+        // A query item's ```chart fence: one small line, the graph it draws.
+        if (b.lang.toLowerCase() === CHART) return el("p", { class: "dim small", text: chartLine(b.text) });
         return el("pre", { class: `md-code${b.lang ? ` lang-${b.lang}` : ""}` }, b.lang === "sql" ? sqlCode(b.text) : el("code", {}, b.text));
       case "table":
         return el("div", { class: "tbl-wrap md-table" }, el("table", {}, [

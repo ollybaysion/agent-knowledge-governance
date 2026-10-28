@@ -101,6 +101,7 @@ export async function renderEditor(type, id, focusKey) {
     const mine = flow.readAgentMd(id, md);
     if (!mine.fence) return null;
     if (mine.flowErrors.length) return mine.flowErrors.map((e) => `${flow.mdLine(e, mine.fence.line)} 줄 ${e.code} ${e.message}`);
+    if (mine.chartErrors.length) return mine.chartErrors.map((e) => `${e.line} 줄 ${e.code} ${e.message}`);
     if (mine.rejection) return [mine.rejection];
     return flow
       .saveCheck(registry, { type, id, markdown: md, active: true })
