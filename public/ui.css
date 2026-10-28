@@ -1175,12 +1175,6 @@ a.chip:hover {
 .doc-full-edit {
   flex: none;
 }
-/* db-schema 머리 띠 오른쪽: 맨 위 · 맨 아래 */
-.doc-jumps {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
 /* 문서 머리 태그 줄: # 칩 · 태그 더하기 */
 .doc-tags {
   display: flex;

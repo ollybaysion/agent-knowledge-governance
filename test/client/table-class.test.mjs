@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { coverageText, docJumps, jumpTop, kindOf, majorCoverage, pathGroups, readFilter, tableGroups, userCount } from "../../public/lib/table-class.mjs";
+import { coverageText, kindOf, majorCoverage, pathGroups, readFilter, tableGroups, userCount } from "../../public/lib/table-class.mjs";
 
 const cov = (confirmed, total) => ({ confirmed, total, ratio: total ? confirmed / total : 0 });
 const ROWS = [
@@ -77,15 +77,4 @@ test("pathGroups: a filter that hides every row leaves the open one only; no ope
   assert.deepEqual(v.order.map((r) => r.id), ["d"]);
   assert.equal(pathGroups(ROWS, { major: "other", kind: "all" }, null).stray, null);
   assert.deepEqual(pathGroups(ROWS).order.map((r) => r.id), ["a", "b", "c", "d"]);
-});
-
-test("docJumps: a db-schema head bar carries 맨 위 · 맨 아래, the other types nothing", () => {
-  assert.deepEqual(docJumps("db-schema").map((j) => [j.where, j.label]), [["top", "맨 위"], ["bottom", "맨 아래"]]);
-  for (const type of ["msg-format", "domain-skill", "domain", "manual", "voc", "unclassified"]) assert.deepEqual(docJumps(type), []);
-});
-
-test("jumpTop: the top is 0, the bottom is the last screen", () => {
-  assert.equal(jumpTop("top", { scrollHeight: 5000, innerHeight: 900 }), 0);
-  assert.equal(jumpTop("bottom", { scrollHeight: 5000, innerHeight: 900 }), 4100);
-  assert.equal(jumpTop("bottom", { scrollHeight: 600, innerHeight: 900 }), 0);
 });
