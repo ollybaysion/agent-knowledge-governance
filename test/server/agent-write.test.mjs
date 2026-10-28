@@ -1,6 +1,6 @@
 // An agent (Bearer) creates and edits documents and their links. It never
 // reaches confirmed (D4), and promote · delete · role · retype · types stay
-// the admin's.
+// the admin's. Origin is the agent's too.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -144,7 +144,35 @@ test("agent: links is 200; a stale rev is 409 for links and for an overlapping e
   }
 });
 
-test("agent: promote · deprecate · activate · delete · role · retype · origin · types stay 403", async () => {
+test("agent: origin is 200 and null drops it; no If-Match is 428, a stale rev is 409", async () => {
+  const t = await setup();
+  try {
+    const created = await t.agent("POST", "/api/docs/voc", vocDoc("n", "# n\n\n글\n"));
+    assert.equal(created.statusCode, 201, created.body);
+    const rev0 = created.json().rev;
+    const origin = { url: "https://wiki.example/1", title: "원본" };
+
+    const set = await t.agent("PUT", "/api/docs/voc/n/origin", { origin }, { "if-match": rev0 });
+    assert.equal(set.statusCode, 200, set.body);
+    assert.deepEqual(set.json().json.origin, origin);
+    assert.equal(t.lastCommit(), "bot-cc|origin voc/n");
+
+    const noIfMatch = await t.agent("PUT", "/api/docs/voc/n/origin", { origin: null });
+    assert.equal(noIfMatch.statusCode, 428);
+
+    const stale = await t.agent("PUT", "/api/docs/voc/n/origin", { origin: null }, { "if-match": rev0 });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, "unknown_base_rev");
+
+    const dropped = await t.agent("PUT", "/api/docs/voc/n/origin", { origin: null }, { "if-match": set.json().rev });
+    assert.equal(dropped.statusCode, 200, dropped.body);
+    assert.equal("origin" in dropped.json().json, false);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("agent: promote · deprecate · activate · delete · role · retype · types stay 403", async () => {
   const t = await setup();
   try {
     const created = await t.admin("POST", "/api/docs/db-schema", dbSchemaDoc());
@@ -157,7 +185,6 @@ test("agent: promote · deprecate · activate · delete · role · retype · ori
       ["DELETE", "/api/docs/db-schema/x", undefined],
       ["PUT", "/api/docs/domain-skill/x/role", { role: "sub" }],
       ["POST", "/api/docs/db-schema/x/retype", { to: "voc" }],
-      ["PUT", "/api/docs/db-schema/x/origin", { origin: { url: "https://wiki.example/1" } }],
       ["PUT", "/api/types/notes", { label: "노트", color: "#7a4bd7" }],
       ["PUT", "/api/types/order", { order: [] }],
     ];
