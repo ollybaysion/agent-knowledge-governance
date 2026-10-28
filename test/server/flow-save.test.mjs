@@ -137,6 +137,22 @@ test("the agent's writes go through the same check; an ASK item is refused in BE
   }
 });
 
+test("an md with two ## 데이터 sections is 400 validation_failed in BE's words, with each heading's line", async () => {
+  const t = await setup();
+  try {
+    const item = "\n\n```sql\nselect a from t\n```\n\n";
+    const two = `# two\n\n## 데이터\n\n### a — 하나${item}## 데이터\n\n### b — 둘${item}`;
+    const r = await t.agent("POST", "/api/docs/domain-skill", skill("two", two));
+    assert.equal(r.statusCode, 400, r.body);
+    assert.deepEqual(r.json(), {
+      error: "validation_failed",
+      details: ["$.body.markdown: two: ## 데이터 절은 하나다, 2 개다 — 3 · 11 번째 줄"],
+    });
+  } finally {
+    await t.cleanup();
+  }
+});
+
 test("the 데이터 section keeps its flow fence and its queries, in order, through save · md · SKILL.md", async () => {
   const t = await setup();
   try {
