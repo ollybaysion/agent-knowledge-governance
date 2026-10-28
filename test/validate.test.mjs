@@ -281,10 +281,10 @@ T-1 지금 어때? 같은 질문에.
 
 ## 데이터
 
-### id — 조회 키
-
-\`\`\`ask
-어느 설비인가요?
+\`\`\`mermaid
+flowchart TD
+  id([어느 설비인가요?])
+  id --> row
 \`\`\`
 
 ### row — 상태 행
@@ -338,7 +338,7 @@ test("domain-skill semantic: a `##` section the consumer does not read passes �
 });
 
 test("domain-skill semantic: a trailing ? or : on a section title is noise, and `##` inside a fence is not a section", () => {
-  const md = SKILL_MD().replace("## 데이터", "## 데이터:") + "\n```sql\n## not a heading\nSELECT 1 FROM dual\n```\n";
+  const md = SKILL_MD().replace("## 데이터", "```sql\n## not a heading\nSELECT 1 FROM dual\n```\n\n## 데이터:");
   assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: md }), refs), []);
 });
 
@@ -360,38 +360,66 @@ test("domain-skill data ids: an id that is not an ascii identifier is rejected, 
 });
 
 test("domain-skill data ids: the same id twice in one document is rejected — active and draft alike", () => {
-  const md = SKILL_MD().replace("### row — 상태 행", "### id - 다시");
+  const md = `${SKILL_MD()}\n### row - 다시\n\n\`\`\`sql\nSELECT 2 FROM dual\n\`\`\`\n`;
   for (const status of ["active", "inactive"])
     assert.deepEqual(
       validateForStore({ ...skillDoc({ name: "x", markdown: md }), status }, refs),
-      ["$.body.markdown: 데이터 항목 id 가 겹칩니다 — id"],
+      ["$.body.markdown: 데이터 항목 id 가 겹칩니다 — row"],
       status,
     );
 });
 
-test("dataIdConflicts: the ids another skill holds, by the lookup the store gives (self left out by it)", () => {
+test("domain-skill data ids: a subgraph id of the flow fence may be no data id and not the document's name — active and draft alike", () => {
+  const withSub = (sub) => SKILL_MD().replace("flowchart TD\n", `flowchart TD\n  subgraph ${sub} [묶음]\n    row[상태 행]\n  end\n`);
+  for (const status of ["active", "inactive"]) {
+    assert.deepEqual(validateForStore({ ...skillDoc({ name: "x", markdown: withSub("pick") }), status }, refs), [], status);
+    assert.deepEqual(validateForStore({ ...skillDoc({ name: "x", markdown: withSub("x") }), status }, refs), ["$.body.markdown: subgraph id 가 문서 이름과 겹칩니다 — x"], status);
+  }
+  const clash = `${withSub("pick")}\n### pick — 고르기\n\n\`\`\`sql\nSELECT 1 FROM dual\n\`\`\`\n`;
+  assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: clash }), refs), ["$.body.markdown: subgraph id 가 데이터 항목 id 와 겹칩니다 — pick"]);
+});
+
+test("domain-skill: what the consumer refuses when it reads the md is refused, in the consumer's words — an active doc only", () => {
+  const ask = SKILL_MD().replace("### row — 상태 행", "### operator — 담당자\n\n\`\`\`ask\n담당자?\n\`\`\`\n\n### row — 상태 행");
+  assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: ask }), refs), [
+    "$.body.markdown: x needs[operator]: ask 펜스는 쓰지 않는다 — 입력은 흐름 펜스의 `id([글])` 노드로 적는다",
+  ]);
+  assert.deepEqual(validateForStore({ ...skillDoc({ name: "x", markdown: ask }), status: "inactive" }, refs), []);
+  const prose = SKILL_MD().replace("### row — 상태 행", "### why — 원인\n\n사람에게 묻는다.\n\n### row — 상태 행");
+  assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: prose }), refs), [
+    "$.body.markdown: x needs[why]: sql 펜스가 없다 — 입력은 흐름 펜스의 `id([글])` 노드로 적는다",
+  ]);
+  const noFence = SKILL_MD().replace(/\`\`\`mermaid[\s\S]*?\`\`\`\n\n/, "");
+  assert.deepEqual(validateDocument(skillDoc({ name: "x", markdown: noFence }), refs), [
+    "$.body.markdown: x needs[row]: :id 를 채울 입력을 적은 펜스가 없다 — 입력은 흐름 펜스의 `id([글])` 노드로 적는다",
+  ]);
+  const chain = SKILL_MD().replace("  id --> row", "  id --> row --> row2");
+  const errors = validateDocument(skillDoc({ name: "x", markdown: chain }), refs);
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0].startsWith("$.body.markdown: x: 조회 흐름 오류로 거부 — 3 번째 줄 CHAIN"), errors[0]);
+});
+
+test("dataIdConflicts: the names another skill holds, by the lookup the store gives (self left out by it)", () => {
   const asked = [];
   const owners = (selfId) => {
     asked.push(selfId);
-    return new Map([["row", { doc: "other-skill", query: true }], ["zzz", { doc: "third", query: true }]]);
+    return new Map([["row", [{ doc: "other-skill", kind: "data" }]], ["zzz", [{ doc: "third", kind: "data" }]]]);
   };
-  assert.deepEqual(dataIdConflicts(skillDoc(), owners), [{ id: "row", doc: "other-skill" }]);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners), [{ id: "row", doc: "other-skill", kind: "data" }]);
   assert.deepEqual(asked, ["x"]);
   assert.deepEqual(dataIdConflicts(skillDoc(), undefined), []);
   assert.deepEqual(dataIdConflicts(minimalDbSchemaDoc(), owners), []);
 });
 
-test("dataIdConflicts: a question shared with another skill's question is no conflict; a query on either side is", () => {
-  // the fixture: `id` is an ask item, `row` a sql item
+test("dataIdConflicts: a subgraph id clashes with another's data id, subgraph id and name; a data id with another's subgraph id; the name with another's subgraph id", () => {
   const owners = (map) => () => new Map(Object.entries(map));
-  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ id: { doc: "o", query: false } })), []);
-  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ id: { doc: "o", query: true } })), [{ id: "id", doc: "o" }]);
-  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ row: { doc: "o", query: false } })), [{ id: "row", doc: "o" }]);
-  const md = SKILL_MD().replace("### id — 조회 키", "### duration — 기간");
-  assert.deepEqual(
-    dataIdConflicts(skillDoc({ name: "x", markdown: md }), owners({ duration: { doc: "o", query: false } })),
-    [],
-  );
+  const sub = skillDoc({ name: "x", markdown: SKILL_MD().replace("flowchart TD\n", "flowchart TD\n  subgraph pick [묶음]\n    row[상태 행]\n  end\n") });
+  for (const kind of ["data", "subgraph", "md"])
+    assert.deepEqual(dataIdConflicts(sub, owners({ pick: [{ doc: "o", kind }] })), [{ id: "pick", doc: "o", kind }], kind);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ row: [{ doc: "o", kind: "subgraph" }] })), [{ id: "row", doc: "o", kind: "subgraph" }]);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ row: [{ doc: "o", kind: "md" }] })), []);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ x: [{ doc: "o", kind: "subgraph" }] })), [{ id: "x", doc: "o", kind: "subgraph" }]);
+  assert.deepEqual(dataIdConflicts(skillDoc(), owners({ x: [{ doc: "o", kind: "data" }] })), []);
 });
 
 test("domain-skill: the shipped examples share no query id", () => {
@@ -399,9 +427,9 @@ test("domain-skill: the shipped examples share no query id", () => {
   const owners = new Map();
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
     const doc = JSON.parse(readFileSync(join(dir, file), "utf8"));
-    for (const { id, query } of skillDataIds(doc.body.markdown)) {
-      if (owners.has(id)) assert.ok(!query && !owners.get(id).query, `${id}: ${owners.get(id).doc} · ${doc.id}`);
-      else owners.set(id, { doc: doc.id, query });
+    for (const { id } of skillDataIds(doc.body.markdown)) {
+      assert.ok(!owners.has(id), `${id}: ${owners.get(id)} · ${doc.id}`);
+      owners.set(id, doc.id);
     }
   }
   assert.ok(owners.size > 0);
@@ -702,7 +730,7 @@ function domainDoc(markdown, extra = {}) {
 }
 
 test("domain/v1: the sub rule — 도메인 지식 alone passes, the id is body.name", () => {
-  assert.deepEqual(validateDocument(domainDoc("# k\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### eqp_id — 설비\n\n```ask\n설비?\n```\n"), refs), []);
+  assert.deepEqual(validateDocument(domainDoc("# k\n\n## 도메인 지식\n\n### A\n\n글\n\n## 데이터\n\n### eqp — 설비\n\n```sql\nSELECT 1 FROM dual\n```\n"), refs), []);
   assert.ok(validateDocument({ ...domainDoc("# k\n\n## 도메인 지식\n\n글\n"), id: "j" }, refs).some((e) => e.includes('expected "k"')));
 });
 
@@ -729,9 +757,9 @@ test("dataIdConflicts: a domain document is checked like a skill, the lookup tol
   let asked = null;
   const owners = (id, type) => {
     asked = [id, type];
-    return new Map([["row", { doc: "other", query: false }]]);
+    return new Map([["row", [{ doc: "other", kind: "data" }]]]);
   };
-  assert.deepEqual(dataIdConflicts(domainDoc(md), owners), [{ id: "row", doc: "other" }]);
+  assert.deepEqual(dataIdConflicts(domainDoc(md), owners), [{ id: "row", doc: "other", kind: "data" }]);
   assert.deepEqual(asked, ["k", "domain"]);
 });
 

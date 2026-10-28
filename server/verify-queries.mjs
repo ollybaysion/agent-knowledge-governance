@@ -1,3 +1,4 @@
+import { readAgentMd } from "../src/flow/agent-md.mjs";
 import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { isEqpBind, START_TIME, END_TIME, varsOf } from "../src/sql-bind.mjs";
 import { knowledgePaths } from "../src/verify-set.mjs";
@@ -64,36 +65,33 @@ const EXAMPLE = /예\s*[:：]\s*([^\s),·]+)/;
  * The queries a verification-set question can name for `own`: its `## 데이터`
  * queries, then each linked skill's, first id wins — the consumer's
  * reachableQueries. Each bind says where its value comes from: the 설정's
- * 설비 (eqp binds), its 기간 (start_time · end_time), or a person (ask), with
- * the ASK item of that id — the query's skill first, then `own`'s.
+ * 설비 (eqp binds), its 기간 (start_time · end_time), or a person (input),
+ * with the flow fence's input node of that name — the query's skill first,
+ * then `own`'s — as its title, and the "예: …" in that title as its example.
  * @param {{id: string, markdown: string}} own
  * @param {{id: string, markdown: string}[]} linked
  */
 export function queryChoices(own, linked) {
-  const items = new Map([own, ...linked].map((s) => [s.id, skillDataIds(s.markdown)]));
-  const askOf = (skill, name) =>
-    [skill, own.id].map((id) => items.get(id).find((d) => !d.query && d.id === name)).find(Boolean);
+  const skills = [own, ...linked];
+  const items = new Map(skills.map((s) => [s.id, skillDataIds(s.markdown)]));
+  const flows = new Map(skills.map((s) => [s.id, readAgentMd(s.id, s.markdown).flow]));
+  const inputOf = (skill, name) =>
+    [skill, own.id].map((id) => flows.get(id).inputs().find((n) => n.id.toLowerCase() === name.toLowerCase())).find(Boolean);
   const seen = new Set();
   const out = [];
   for (const [skill, list] of items) {
     for (const d of list) {
-      if (!d.query || !d.sql || seen.has(d.id)) continue;
+      if (!d.sql || seen.has(d.id)) continue;
       seen.add(d.id);
       const binds = varsOf(d.sql).map((name) => {
         const lower = name.toLowerCase();
         if (isEqpBind(name)) return { name, from: "eqp" };
         if (lower === START_TIME) return { name, from: "start" };
         if (lower === END_TIME) return { name, from: "end" };
-        const ask = askOf(skill, name);
-        if (!ask) return { name, from: "ask" };
-        const example = EXAMPLE.exec(`${ask.text ?? ""}\n${ask.ask ?? ""}`)?.[1] ?? null;
-        return {
-          name, from: "ask",
-          title: ask.title?.replace(/\s+@[A-Za-z][A-Za-z0-9_]*$/, "") ?? null,
-          question: ask.ask ?? ask.text, text: ask.text, example,
-        };
+        const title = inputOf(skill, name)?.title ?? null;
+        return { name, from: "input", title, example: (title && EXAMPLE.exec(title)?.[1]) ?? null };
       });
-      out.push({ skill, id: d.id, title: d.title?.replace(/\s+@[A-Za-z][A-Za-z0-9_]*$/, "") ?? null, sql: d.sql, binds });
+      out.push({ skill, id: d.id, title: d.title, sql: d.sql, binds });
     }
   }
   return out;

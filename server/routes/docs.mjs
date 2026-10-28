@@ -1,7 +1,8 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
 // (S4/S5/S6), PUT facts (#12), PUT catalog.
 import { dataIdConflicts, validateForStore } from "../../src/envelope.mjs";
-import { skillDataIds } from "../../src/skill-data-ids.mjs";
+import { errorReport } from "../../src/flow/flow-error.mjs";
+import { saveCheck } from "../../src/flow/agent-md.mjs";
 import {
   checkVerifySet,
   fromVerificationSet,
@@ -42,7 +43,7 @@ import {
   resolveWikilinks,
   withLinks,
 } from "../links.mjs";
-import { activeTableUses, dataIdOwners, tableClassOf } from "../data-ids.mjs";
+import { activeTableUses, addOwner, agentRegistry, dataIdOwners, tableClassOf } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
 import { UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
@@ -127,6 +128,28 @@ export function registerDocsRoutes(app) {
       ? { status: 409, body: { error: "data_id_conflict", conflicts } }
       : null;
   };
+
+  // What the consumer would leave out once the store holds this write: the
+  // doc's own flow errors refuse it (400), the other agent mds it breaks come
+  // back as flowWarnings. Run inside the queue: the other side is in the store.
+  // `doc` null = the document leaves the store.
+  const flowCheck = (type, id, doc) =>
+    type === "domain-skill" || type === "domain"
+      ? saveCheck(agentRegistry(storeDir), { type, id, markdown: doc?.body?.markdown ?? null, active: doc?.status === "active" })
+      : null;
+  const flowRefusal = (check) =>
+    check?.errors.length
+      ? {
+          status: 400,
+          body: {
+            error: "flow_rejected",
+            fenceLine: check.fenceLine,
+            errors: check.errors,
+            details: check.errors.map((e) => `$.body.markdown: 플로우 오류 ${errorReport(e)}`),
+          },
+        }
+      : null;
+  const flowWarnings = (check) => (check?.broken.length ? { flowWarnings: check.broken } : {});
 
   const wikilinksOf = (type, doc, typeIds) => {
     const wikilinks = resolveWikilinks(storeDir, typeIds, type, doc).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
@@ -329,6 +352,8 @@ export function registerDocsRoutes(app) {
           if (errors.length) return { status: 422, body: { error: "invalid_verification_set", details: errors } };
           const conflict = dataIdConflict(newDoc);
           if (conflict) return conflict;
+          const flow = flowRefusal(flowCheck("domain-skill", id, newDoc));
+          if (flow) return flow;
           const rev = persistDoc(storeDir, "domain-skill", newDoc, {
             author: request.user.id,
             message: `verification-set domain-skill/${id}`,
@@ -358,6 +383,10 @@ export function registerDocsRoutes(app) {
       return { queries: queryChoices(own, linked.link1), pieces: pieceChoices(own, linked) };
     },
   );
+
+  // The agent mds the consumer registers (active domain-skill and domain), for
+  // the editor to run the save's flow check before it saves (src/flow/agent-md.mjs).
+  app.get("/api/flow-facts", { config: { roles: ["user", "agent"] } }, async () => ({ mds: agentRegistry(storeDir) }));
 
   // A person who writes may file an unclassified document; every other type is
   // the admin's and the agent's. The agent's document lands at inferred like
@@ -421,11 +450,14 @@ export function registerDocsRoutes(app) {
             return { status: 409, body: { error: "already_exists" } };
           const conflict = dataIdConflict(doc);
           if (conflict) return conflict;
+          const flow = flowCheck(type, doc.id, doc);
+          const refused = flowRefusal(flow);
+          if (refused) return refused;
           const rev = persistDoc(storeDir, type, doc, {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
           });
-          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc) } };
+          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc), ...flowWarnings(flow) } };
         },
         { priority: priorityOf(request.user) },
       );
@@ -537,6 +569,9 @@ export function registerDocsRoutes(app) {
             };
           const conflict = dataIdConflict(newDoc);
           if (conflict) return conflict;
+          const flow = flowCheck(type, id, newDoc);
+          const refused = flowRefusal(flow);
+          if (refused) return refused;
 
           const note = commitNote(request.headers["x-akg-note"]);
           const rev = persistDoc(storeDir, type, newDoc, {
@@ -545,7 +580,7 @@ export function registerDocsRoutes(app) {
           });
           return {
             status: 200,
-            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc) },
+            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc), ...flowWarnings(flow) },
           };
         },
         { priority: priorityOf(request.user) },
@@ -654,9 +689,7 @@ export function registerDocsRoutes(app) {
             for (const doc of docs) {
               for (const c of dataIdConflicts(doc, () => taken))
                 conflicts.push({ ...c, source: doc.id });
-              for (const { id, query } of skillDataIds(doc.body.markdown))
-                if (!taken.has(id) || (query && !taken.get(id).query))
-                  taken.set(id, { doc: doc.id, query });
+              addOwner(taken, doc.id, doc.body.markdown);
             }
             if (conflicts.length)
               return {
@@ -745,6 +778,9 @@ export function registerDocsRoutes(app) {
             };
           const conflict = dataIdConflict(doc);
           if (conflict) return conflict;
+          const flow = flowCheck(type, id, doc);
+          const refused = flowRefusal(flow);
+          if (refused) return refused;
 
           const rev = persistDoc(storeDir, type, doc, {
             author: request.user.id,
@@ -752,7 +788,7 @@ export function registerDocsRoutes(app) {
           });
           return {
             status: current ? 200 : 201,
-            body: { rev, json: doc, orphans, created: !current },
+            body: { rev, json: doc, orphans, created: !current, ...flowWarnings(flow) },
           };
         },
         { priority: priorityOf(request.user) },
@@ -981,12 +1017,15 @@ export function registerDocsRoutes(app) {
                 status: 400,
                 body: { error: "validation_failed", details: errors },
               };
+            const flow = flowCheck(type, id, newDoc);
+            const refused = flowRefusal(flow);
+            if (refused) return refused;
 
             const rev = persistDoc(storeDir, type, newDoc, {
               author: request.user.id,
               message: `${action} ${type}/${id}`,
             });
-            return { status: 200, body: { rev, json: newDoc } };
+            return { status: 200, body: { rev, json: newDoc, ...flowWarnings(flow) } };
           },
           { priority: priorityOf(request.user) },
         );
@@ -1144,6 +1183,7 @@ export function registerDocsRoutes(app) {
           if (ifMatch !== currentRev)
             return { status: 409, body: { error: "unknown_base_rev", currentRev, current: doc } };
 
+          const flow = flowCheck(type, id, null);
           const md = types.isMd(type);
           const writes = [];
           const removes = [relpath];
@@ -1181,7 +1221,7 @@ export function registerDocsRoutes(app) {
             writes,
             removes,
           });
-          return { status: 200, body: { rev, unlinked } };
+          return { status: 200, body: { rev, unlinked, ...flowWarnings(flow) } };
         },
         { priority: priorityOf(request.user) },
       );

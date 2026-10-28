@@ -64,11 +64,14 @@ export function inline(text, ctx = {}) {
 /**
  * The blocks of an md text as nodes. `ctx.wiki` resolves [[ ]].
  * `ctx.mermaid` (editor preview) shapes the ```mermaid figures: {key, lineBase
- * (document line of the text's first line), delay, source} — see mermaidFig.
+ * (document line of the text's first line), delay, source, flowNotes (the
+ * flow check's lines for the first figure before any heading — the flow
+ * fence of a 데이터 body)} — see mermaidFig.
  */
 export function mdNodes(markdown, ctx = {}) {
   const mm = ctx.mermaid ?? {};
   let figNo = 0;
+  let heading = false;
   return parseBlocks(markdown).map((b) => {
     if (isMermaid(b)) {
       const n = figNo++;
@@ -77,8 +80,10 @@ export function mdNodes(markdown, ctx = {}) {
         source: mm.source ?? true,
         key: mm.key == null ? null : `${mm.key}#${n}`,
         delay: mm.delay ?? 0,
+        notes: n === 0 && !heading ? mm.flowNotes ?? null : null,
       });
     }
+    if (b.type === "h") heading = true;
     switch (b.type) {
       case "h": {
         const tag = `h${Math.min(6, Math.max(3, b.level + 1))}`;
@@ -88,8 +93,6 @@ export function mdNodes(markdown, ctx = {}) {
       case "ol":
         return el(b.type, { class: "md-list" }, b.items.map((t) => el("li", {}, inline(t, ctx))));
       case "code":
-        if (b.lang === "ask")
-          return el("div", { class: "md-ask" }, [el("span", { class: "md-ask-t", text: "물음" }), el("span", { text: b.text })]);
         return el("pre", { class: `md-code${b.lang ? ` lang-${b.lang}` : ""}` }, b.lang === "sql" ? sqlCode(b.text) : el("code", {}, b.text));
       case "table":
         return el("div", { class: "tbl-wrap md-table" }, el("table", {}, [

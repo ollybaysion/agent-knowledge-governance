@@ -73,3 +73,11 @@ test("coverageOf: an unusedColumns column's slot counts on neither side, confirm
   assert.deepEqual(coverageOf({ ...body, unusedColumns: ["C", "GONE"] }), { confirmed: 2, total: 3, ratio: 2 / 3 });
   assert.deepEqual(coverageOf({ ...body, unusedColumns: [] }), coverageOf(body));
 });
+
+test("tableUses: a 데이터 section with a flow fence — the queries' tables only, the fence is no query", () => {
+  const markdown = "# s\n\n## 데이터\n\n```mermaid\nflowchart TD\n  eqp-scope[[설비]]\n  eqp-scope --> q\n  q -->|\"src in ('FROM_X')\"| r\n```\n\n### q — 조회\n\n```sql\nSELECT src FROM fdc_eqp WHERE eqp_id = :eqp_id\n```\n\n### r — 다음\n\n```sql\nSELECT a FROM alarm_hist WHERE src = :src\n```\n";
+  assert.deepEqual([...tableUses([{ type: "domain-skill", id: "s", markdown }])], [
+    ["FDC_EQP", [{ type: "domain-skill", id: "s", query: "q" }]],
+    ["ALARM_HIST", [{ type: "domain-skill", id: "s", query: "r" }]],
+  ]);
+});

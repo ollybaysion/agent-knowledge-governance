@@ -32,6 +32,11 @@ export const SHARED_MODULES = new Set([
   "sql-bind.mjs",
   "graph-model.mjs",
   "wikilinks.mjs",
+  "flow/agent-md.mjs",
+  "flow/flow-compiler.mjs",
+  "flow/flow-error.mjs",
+  "flow/flow-grammar.mjs",
+  "flow/flow-rules.mjs",
 ]);
 
 // A module path below /js/ or /lib/: lower-case words, one level of folder.
@@ -55,8 +60,8 @@ export function registerDashboardRoutes(app) {
   app.get("/js/*", { config: { public: true } }, async (request, reply) =>
     sendModule(reply, join(PUBLIC_DIR, "js"), request.params["*"]),
   );
-  app.get("/lib/shared/:file", { config: { public: true } }, async (request, reply) => {
-    const { file } = request.params;
+  app.get("/lib/shared/*", { config: { public: true } }, async (request, reply) => {
+    const file = request.params["*"];
     if (!SHARED_MODULES.has(file)) return reply.code(404).send({ error: "not_found" });
     return sendModule(reply, SRC_DIR, file);
   });

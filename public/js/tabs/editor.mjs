@@ -7,7 +7,7 @@ import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { el, icon, toast } from "../dom.mjs";
 import { mdNodes, wikiResolver } from "../md.mjs";
 import { setLeaveGuard } from "../router.mjs";
-import { VERIFY_KEY, dataIdConflictText, shortRev, skillSectionsLib } from "../shared.mjs";
+import { VERIFY_KEY, dataIdConflictText, flowLib, shortRev, skillSectionsLib } from "../shared.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TYPE_LABEL, canEdit, isMdType, typeColor } from "../state.mjs";
 import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock } from "/lib/sections.mjs";
@@ -43,7 +43,13 @@ export async function renderEditor(type, id, focusKey) {
     toast("admin 만 고칠 수 있습니다.", "error");
     return location.replace(back);
   }
-  const [res, docs, lib] = await Promise.all([api(`/api/docs/${type}/${enc(id)}`), allDocs(), skillSectionsLib]);
+  const [res, docs, lib, flow, facts] = await Promise.all([
+    api(`/api/docs/${type}/${enc(id)}`),
+    allDocs(),
+    skillSectionsLib,
+    isSkillType(type) ? flowLib : null,
+    isSkillType(type) ? api("/api/flow-facts") : null,
+  ]);
   if (ticket !== editorTicket) return;
   if (!res.ok) {
     toast(`문서를 불러오지 못했습니다 (${res.status})`, "error");
@@ -86,6 +92,21 @@ export async function renderEditor(type, id, focusKey) {
   let conflict = false;
 
   const blocksNow = () => saved.blocks.map((b) => ({ ...b, body: edited.get(b.key) ?? b.body }));
+  // The save's flow check run here before saving (src/flow/agent-md.mjs), on
+  // the md as it would be saved: lines for the 데이터 section's flow figure.
+  const registry = facts?.ok ? facts.data.mds : null;
+  function flowNotes() {
+    if (!flow || !registry || saved.mode !== "skill") return null;
+    const md = joinBlocks({ ...saved, head: editedHead }, blocksNow(), opts);
+    const mine = flow.readAgentMd(id, md);
+    if (!mine.fence) return null;
+    if (mine.flowErrors.length) return mine.flowErrors.map((e) => `${mine.fence.line + e.line} 줄 ${e.code} ${e.message}`);
+    if (mine.rejection) return [mine.rejection];
+    return flow.saveCheck(registry, { type, id, markdown: md, active: true }).errors.map((e) => `${e.code} ${e.message}`);
+  }
+  // The other agent mds the last save broke (the server's flowWarnings), for the save toast.
+  let flowWarn = null;
+  const savedToast = (message) => toast(flowWarn ? `${message} — ${flowWarn}` : message, flowWarn ? "error" : undefined);
   const dirtyKeys = () => changedKeys(saved.blocks, blocksNow());
   const headDirty = () => saved.mode === "plain" && editedHead !== saved.head;
   const anyDirty = () => dirtyKeys().length > 0 || headDirty();
@@ -111,6 +132,8 @@ export async function renderEditor(type, id, focusKey) {
     if (r.ok) {
       doc = r.data.json;
       rev = r.data.rev;
+      const broken = r.data.flowWarnings ?? [];
+      flowWarn = broken.length ? `이 저장으로 플로우가 깨진 md: ${broken.map((b) => b.md).join(" · ")}` : null;
       invalidateDocs();
       return true;
     }
@@ -154,7 +177,7 @@ export async function renderEditor(type, id, focusKey) {
     ({ split: saved, opts } = splitOf(doc.body.markdown ?? ""));
     for (const b of saved.blocks) edited.set(b.key, b.key === key ? b.body : keep.get(b.key) ?? b.body);
     editedHead = keepHead;
-    toast(`절 저장: ${block.heading}`);
+    savedToast(`절 저장: ${block.heading}`);
     paint();
   }
 
@@ -168,7 +191,7 @@ export async function renderEditor(type, id, focusKey) {
     saveDocBtn.disabled = false;
     if (!ok) return;
     setLeaveGuard(null);
-    toast("문서를 저장했습니다");
+    savedToast("문서를 저장했습니다");
     location.hash = `#/doc/${type}/${enc(id)}`;
   }
 
@@ -353,6 +376,7 @@ export async function renderEditor(type, id, focusKey) {
     // ```mermaid figures redraw 300ms after typing stops; errors carry the
     // document line, as the gutter numbers it.
     const fig = (key, lineBase) => ({ key, lineBase, delay: 300, source: false });
+    const notes = flowNotes();
     if (headText) parts.push(el("div", { class: "ed-pv-head" }, mdNodes(headText, { wiki, mermaid: fig(HEAD, null) })));
     for (const b of saved.blocks) {
       const body = edited.get(b.key) ?? "";
@@ -374,7 +398,7 @@ export async function renderEditor(type, id, focusKey) {
         }, [
           el("div", { class: "ed-pv-meta" }, [el("span", { class: "dim mono", text: r.get(b.key) ? `줄 ${r.get(b.key).from}-${r.get(b.key).to}` : "비어 있음" }), cur ? el("span", { class: "chip curchip", text: "커서 절" }) : null]),
           el("h2", { class: "sec-t", text: b.heading }),
-          el("div", { class: "sec-b" }, body.trim() ? mdNodes(body, { wiki, mermaid: fig(b.key, r.get(b.key)?.bodyFrom ?? null) }) : [el("p", { class: "dim", text: "비어 있습니다" })]),
+          el("div", { class: "sec-b" }, body.trim() ? mdNodes(body, { wiki, mermaid: { ...fig(b.key, r.get(b.key)?.bodyFrom ?? null), flowNotes: b.key === "데이터" ? notes : null } }) : [el("p", { class: "dim", text: "비어 있습니다" })]),
         ]),
       );
     }

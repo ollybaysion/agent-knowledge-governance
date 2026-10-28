@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate, validateNode } from "./validate.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
+import { readAgentMd } from "./flow/agent-md.mjs";
 import { checkVerifySet } from "./verify-set.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -200,7 +201,10 @@ function checkLinks(doc, errors) {
 
 const DATA_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
 
-/** A skill's data item ids: ascii identifiers, each once in the document. */
+/**
+ * A skill's data item ids: ascii identifiers, each once in the document, none
+ * the id of the flow fence's subgraph nor the document's own name.
+ */
 function checkSkillDataIds(doc, errors) {
   const markdown = doc.body?.markdown;
   if (typeof markdown !== "string") return;
@@ -218,41 +222,59 @@ function checkSkillDataIds(doc, errors) {
   }
   for (const id of repeated)
     fail(errors, `$.body.markdown: 데이터 항목 id 가 겹칩니다 — ${id}`);
+  for (const id of flowSubgraphIds(markdown)) {
+    if (seen.has(id)) fail(errors, `$.body.markdown: subgraph id 가 데이터 항목 id 와 겹칩니다 — ${id}`);
+    if (id === doc.id) fail(errors, `$.body.markdown: subgraph id 가 문서 이름과 겹칩니다 — ${id}`);
+  }
 }
 
+/** The subgraph ids the md's flow fence writes, read as far as the fence reads. */
+export const flowSubgraphIds = (markdown) => readAgentMd("", markdown ?? "").flow.subgraphIds();
+
 /**
- * The data ids a skill shares with other stored skills where a query is on
- * either side — the consumer looks a query up by id across every skill, keeps
- * the first and silently drops the rest, so a write must not create one. A
- * question (an item without ```sql) is the skill's own: every skill that asks
- * `duration` or `param_index` carries its own item, and two of those never
- * conflict. Kept apart from validateDocument's errors: a conflict is a 409
- * (the store has the other side), not a 400 about this document alone.
+ * The names a skill shares with other stored skills — the consumer looks a
+ * query and a subgraph up by name across every skill, keeps the first and
+ * drops the rest, so a write must not create one. A data id clashes with
+ * another's data id or subgraph id; a subgraph id with any of the other's
+ * data ids, subgraph ids and document names; the document's own name with
+ * another's subgraph id. Kept apart from validateDocument's errors: a
+ * conflict is a 409 (the store has the other side), not a 400 about this
+ * document alone.
  * @param {object} doc
- * @param {(selfId: string, selfType: string) => Map<string, {doc: string, query: boolean}>} [dataIdOwners]
- *   data id → the stored skill that has it and whether its item is a query,
- *   `selfType/selfId` and archived ones left out
- * @returns {{id: string, doc: string}[]}
+ * @param {(selfId: string, selfType: string) => Map<string, {doc: string, kind: "data"|"subgraph"|"md"}[]>} [dataIdOwners]
+ *   name → the stored skills that hold it and as what, `selfType/selfId`
+ *   and archived ones left out
+ * @returns {{id: string, doc: string, kind: string}[]} kind: what the other side holds the name as
  */
 export function dataIdConflicts(doc, dataIdOwners) {
   if (!SKILL_SCHEMAS.has(doc?.schema) || !dataIdOwners) return [];
-  const mine = new Map();
-  for (const d of skillDataIds(doc.body?.markdown)) mine.set(d.id, mine.get(d.id) || d.query);
-  if (mine.size === 0) return [];
+  const markdown = doc.body?.markdown;
+  const mine = [...new Set(skillDataIds(markdown).map((d) => d.id))].map((id) => ({ id, against: ["data", "subgraph"] }));
+  for (const id of new Set(flowSubgraphIds(markdown))) mine.push({ id, against: ["data", "subgraph", "md"] });
+  mine.push({ id: doc.id, against: ["subgraph"] });
   const owners = dataIdOwners(doc.id, doc.schema.split("/")[0]);
-  return [...mine]
-    .filter(([id, query]) => owners.has(id) && (query || owners.get(id).query))
-    .map(([id]) => ({ id, doc: owners.get(id).doc }));
+  const out = [];
+  for (const { id, against } of mine) {
+    const owner = (owners.get(id) ?? []).find((o) => against.includes(o.kind));
+    if (owner) out.push({ id, doc: owner.doc, kind: owner.kind });
+  }
+  return out;
 }
 
 // The body is the author's md verbatim (user decision 2026-09-21): which `##`
-// sections it has is the author's. Checked here: the id, the data ids, and
-// the verification set's shape when the md has one.
+// sections it has is the author's. Checked here: the id, the data ids, the
+// verification set's shape when the md has one, and — once the ids are
+// sound — what the consumer refuses when it reads the md (src/flow/agent-md.mjs:
+// an ASK item, a bind with no flow fence, a flow fence's grammar).
 function checkSkillMarkdown(doc, errors) {
   checkDerivedId(doc, errors);
+  const before = errors.length;
   checkSkillDataIds(doc, errors);
+  const idsSound = errors.length === before;
   if (typeof doc.body?.markdown !== "string") return;
   for (const e of checkVerifySet(doc.body.markdown).errors) fail(errors, `$.body.markdown: ${e}`);
+  const { rejection } = readAgentMd(doc.id, doc.body.markdown);
+  if (rejection && idsSound) fail(errors, `$.body.markdown: ${rejection}`);
 }
 
 const SEMANTIC_CHECKS = {

@@ -1469,25 +1469,6 @@ a.sql-col:focus-visible {
   -webkit-line-clamp: 3;
   line-clamp: 3;
 }
-.md-ask {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 0;
-  padding: 10px 14px;
-  border: 1px dashed var(--hairline);
-  border-radius: 10px;
-  font-size: 13.5px;
-}
-.md-ask-t {
-  padding: 0 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--amber) 22%, transparent);
-  color: var(--amber-ink);
-  font-size: 11px;
-  font-weight: 700;
-  flex: none;
-}
 .md-table table,
 .cols-tbl {
   font-size: 13px;

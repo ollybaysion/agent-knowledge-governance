@@ -96,3 +96,13 @@ test("sameSection: the ## rule (trailing ? : and spaces) plus any spacing around
   assert.equal(sameSection("DB", "DB / PARAM_INFO"), false);
   assert.equal(sameSection("", ""), false);
 });
+
+test("withBlock: editing another section leaves the 데이터 flow fence and its queries where they were", () => {
+  const md = skill.joinSkill("게이트", [
+    { key: "한 줄 설명", heading: "한 줄 설명", body: "멈춤 점검." },
+    { key: "데이터", heading: "데이터", body: "```mermaid\nflowchart TD\n  q[조회]\n```\n\n### q — 조회\n\n```sql\nSELECT a FROM t\n```" },
+  ]);
+  const opts = { skill, order: skill.SKILL_SECTIONS };
+  const out = withBlock(splitBlocks(md, opts), "한 줄 설명", "설비가 멈췄을 때.", opts);
+  assert.equal(out, md.replace("멈춤 점검.", "설비가 멈췄을 때."));
+});
