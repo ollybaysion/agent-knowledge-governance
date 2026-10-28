@@ -12,6 +12,24 @@ export const edgeText = (e) =>
 // A query and a map stand at the same place on an edge: a query's place.
 const atQueryPlace = (kind) => kind === Kind.QUERY || kind === Kind.MAP;
 
+/** An input node text's pieces — BE QueryFlow.piecesOf: cut at `·`, trimmed, the empty ones dropped. */
+export const piecesOf = (text) => (text == null ? [] : String(text).split(/\s*·\s*/).map((p) => p.trim()).filter((p) => p !== ""));
+
+/** The head of an input node text's option piece — BE QueryFlow.OPTION_HEAD. A space after it may be there or not. */
+export const OPTION_HEAD = "선택:";
+
+/** The piece is an option piece (starts with {@link OPTION_HEAD}). */
+export const optionPiece = (piece) => piece != null && piece.startsWith(OPTION_HEAD);
+
+/** One option piece's options: the rest after the head cut at `,`, trimmed, the empty ones dropped. */
+export const optionsIn = (piece) => piece.slice(OPTION_HEAD.length).split(",").map((p) => p.trim()).filter((p) => p !== "");
+
+/** An input node text's options — the first option piece after the first piece ({@link optionsIn}), written order; [] without one. */
+export function optionsOf(text) {
+  const piece = piecesOf(text).slice(1).find(optionPiece);
+  return piece === undefined ? [] : optionsIn(piece);
+}
+
 /**
  * The graph a fence writes. Edges belong to their caller (the side that gives the value).
  * nodes: first-seen order, one per id ({id, kind, title, subgraph}); edges:
@@ -55,6 +73,17 @@ export class QueryFlow {
 
   inputs() {
     return this.nodes.filter((n) => n.kind === Kind.INPUT);
+  }
+
+  /** An input node's options ({@link optionsOf} of its text); [] for another node or none. */
+  optionsOf(id) {
+    const n = this.node(id);
+    return n?.kind === Kind.INPUT ? optionsOf(n.title) : [];
+  }
+
+  /** The id is an input node with options — BE QueryFlow.choiceInput. */
+  choiceInput(id) {
+    return this.optionsOf(id).length > 0;
   }
 
   /** Flow nodes that are an edge's caller — the flows that lead. */
@@ -115,6 +144,26 @@ export class QueryFlow {
 QueryFlow.EMPTY = new QueryFlow();
 
 const NAME = { [Kind.INPUT]: "입력 id([글])", [Kind.QUERY]: "조회 id[글]", [Kind.FLOW]: "흐름 md[[글]]", [Kind.MAP]: "변환 id{{글}}" };
+
+// An input node text's option pieces checked — BE FlowCompiler.options: one
+// piece at most, one option or more, none twice, none with `'`. The first
+// piece (the name) is not looked at.
+function options(t) {
+  const found = piecesOf(t.text).slice(1).filter(optionPiece);
+  const out = [];
+  const head = `입력 ${t.id}: `;
+  if (found.length > 1) out.push(flowError(t.line, Code.INPUT_OPTION, `${head}${OPTION_HEAD} 토막이 ${found.length} 개다 — 하나만 쓴다`));
+  if (found.length === 0) return out;
+  const list = optionsIn(found[0]);
+  if (list.length === 0) out.push(flowError(t.line, Code.INPUT_OPTION, `${head}선택지가 비었다 — \`${OPTION_HEAD} a, b\` 로 적는다`));
+  const seen = new Set();
+  for (const option of list) {
+    if (option.includes("'")) out.push(flowError(t.line, Code.INPUT_OPTION, `${head}선택지 ${option} 에 ' 가 든다`));
+    if (seen.has(option)) out.push(flowError(t.line, Code.INPUT_OPTION, `${head}선택지 ${option} 가 둘이다`));
+    seen.add(option);
+  }
+  return out;
+}
 
 /**
  * Tokens woven into a flow. Nodes in first-seen order, an edge's ends
@@ -189,6 +238,7 @@ export function compileTokens(tokens) {
         } else if (had !== t.shape)
           errors.push(flowError(t.line, Code.SHAPE_CONFLICT, `노드 ${t.id} 의 모양이 둘이다 — ${shapedAt.get(t.id)} 번째 줄은 ${NAME[had]}, 이 줄은 ${NAME[t.shape]}`));
       }
+      if (t.shape === Kind.INPUT && t.text !== null && !titles.has(t.id)) errors.push(...options(t));
       if (t.text !== null && !titles.has(t.id)) titles.set(t.id, t.text);
     } else {
       if (open !== null)
