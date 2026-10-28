@@ -3539,6 +3539,14 @@ a.mrow.draft {
 .selbar b {
   color: var(--body-strong);
 }
+/* 열 절의 등급 거르기 칩 줄과 절 머리 오른쪽의 보이는 n 확정 */
+.tfilter.tier-filter {
+  padding: 0 0 8px;
+}
+.sec-h .sec-right {
+  display: inline-flex;
+  margin-left: auto;
+}
 /* 추정 n 확정 확인 창: 설명 한 줄 · 열 이름 칩 */
 .dlg-p {
   margin: 8px 0 0;

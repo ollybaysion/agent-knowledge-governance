@@ -1,5 +1,28 @@
-// 열 표 · 필드 표의 여러 줄 확정 · 폐기와 머리의 추정 n 확정. 화면 상태만
-// 다룬다: 고른 줄은 저장하지 않고, 문서를 다시 읽으면 처음으로 돌아간다.
+// 열 표 · 필드 표의 여러 줄 확정 · 폐기, 머리의 추정 n 확정, 등급 거르기.
+// 화면 상태만 다룬다: 고른 줄과 거르기는 저장하지 않고, 문서를 다시 읽으면
+// 처음으로 돌아간다.
+
+/** 등급 거르기 칩, 왼쪽부터: [거르기 키, 칩 글]. "all" = 모든 줄. */
+export const TIER_FILTERS = [
+  ["all", "전체"],
+  ["scaffold", "빈칸"],
+  ["inferred", "추정"],
+  ["confirmed", "확정"],
+];
+
+/** True when the row of `slot` shows under `filter`; a row without a slot shows under 전체 only. */
+export const tierShown = (filter, slot) =>
+  filter === "all" || (!!slot && slot.tier === filter);
+
+/** Rows per filter key, over the table's row slots (undefined = a row without a slot). */
+export function tierCounts(slots) {
+  const counts = Object.fromEntries(TIER_FILTERS.map(([k]) => [k, 0]));
+  for (const s of slots ?? []) {
+    counts.all += 1;
+    if (s && s.tier !== "all" && s.tier in counts) counts[s.tier] += 1;
+  }
+  return counts;
+}
 
 /** `list` with `address` added at the end, or taken out when it is there; the input is left alone. */
 export function togglePick(list, address) {

@@ -4,11 +4,56 @@ import assert from "node:assert/strict";
 import {
   inferredColumns,
   slotFailText,
+  TIER_FILTERS,
+  tierCounts,
+  tierShown,
   togglePick,
   withObject,
 } from "../../public/lib/column-bulk.mjs";
 
 const slot = (address, tier) => ({ address, tier });
+
+test("TIER_FILTERS: 전체 · 빈칸 · 추정 · 확정, left to right", () => {
+  assert.deepEqual(
+    TIER_FILTERS.map(([, label]) => label),
+    ["전체", "빈칸", "추정", "확정"],
+  );
+});
+
+test("tierShown: 전체 keeps every row; a tier keeps its own rows; a row without a slot is 전체 only", () => {
+  const inf = slot("columnDescs.A", "inferred");
+  const dep = slot("columnDescs.B", "deprecated");
+  assert.equal(tierShown("all", inf), true);
+  assert.equal(tierShown("all", undefined), true);
+  assert.equal(tierShown("inferred", inf), true);
+  assert.equal(tierShown("confirmed", inf), false);
+  assert.equal(tierShown("scaffold", undefined), false);
+  assert.equal(tierShown("all", dep), true);
+  assert.equal(tierShown("inferred", dep), false);
+});
+
+test("tierCounts: rows per chip; a deprecated row and a row without a slot count in 전체 only", () => {
+  const rows = [
+    slot("columnDescs.A", "inferred"),
+    slot("columnDescs.B", "inferred"),
+    slot("columnDescs.C", "confirmed"),
+    slot("columnDescs.D", "scaffold"),
+    slot("columnDescs.E", "deprecated"),
+    undefined,
+  ];
+  assert.deepEqual(tierCounts(rows), {
+    all: 6,
+    scaffold: 1,
+    inferred: 2,
+    confirmed: 1,
+  });
+  assert.deepEqual(tierCounts(undefined), {
+    all: 0,
+    scaffold: 0,
+    inferred: 0,
+    confirmed: 0,
+  });
+});
 
 test("inferredColumns: the 추정 column slots only, in the table's order; purpose and queries stay out", () => {
   const slots = [
