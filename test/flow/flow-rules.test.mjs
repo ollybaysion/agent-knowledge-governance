@@ -244,16 +244,23 @@ test("간선으로 처음 나온 노드도 그 subgraph 에 든다", () => {
 });
 
 test("subgraph 줄의 꼴 글 닫기 중첩을 본다", () => {
-  assert.deepEqual(codes("flowchart TD\nsubgraph param-pick [고르기]\na\nend"), ["SUBGRAPH_ID", "SUBGRAPH_END"]);
-  assert.deepEqual(codes("flowchart TD\nsubgraph Pick [고르기]\na\nend"), ["SUBGRAPH_ID", "SUBGRAPH_END"]);
-  assert.deepEqual(codes('flowchart TD\nsubgraph "고르기"\na\nend'), ["SUBGRAPH_ID", "SUBGRAPH_END"]);
-  assert.deepEqual(codes("flowchart TD\nsubgraph pick\na\nend"), ["SUBGRAPH_TITLE", "SUBGRAPH_END"]);
-  assert.deepEqual(codes("flowchart TD\nsubgraph pick [ ]\na\nend"), ["SUBGRAPH_TITLE", "SUBGRAPH_END"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph param-pick [고르기]\na\nend"), ["SUBGRAPH_ID"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph Pick [고르기]\na\nend"), ["SUBGRAPH_ID"]);
+  assert.deepEqual(codes('flowchart TD\nsubgraph "고르기"\na\nend'), ["SUBGRAPH_ID"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph pick\na\nend"), ["SUBGRAPH_TITLE"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph pick [ ]\na\nend"), ["SUBGRAPH_TITLE"]);
   assert.deepEqual(codes("flowchart TD\nsubgraph pick [고르기]\na"), ["SUBGRAPH_UNCLOSED"]);
   assert.deepEqual(codes("flowchart TD\na\nend"), ["SUBGRAPH_END"]);
   assert.deepEqual(codes("flowchart TD\nsubgraph pick [고르기]\na\nsubgraph inner [안]\nb\nend\nend"), ["SUBGRAPH_NESTED"]);
   assert.deepEqual(codes("flowchart TD\nsubgraph pick [고르기]\nend"), ["SUBGRAPH_EMPTY"]);
-  assert.deepEqual(codes("flowchart TD\nsubgraph end [고르기]\na\nend"), ["RESERVED_WORD", "SUBGRAPH_END"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph end [고르기]\na\nend"), ["RESERVED_WORD"]);
+});
+
+test("틀린 subgraph 여는 줄도 짝 end 를 받는다 — 오류는 여는 줄 하나다", () => {
+  assert.deepEqual(compile("flowchart TD\nsubgraph param-pick [고르기]\na\nend").errors.map((e) => [e.line, e.code]), [[2, "SUBGRAPH_ID"]]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph bad-id [틀림]\na\nend\nend"), ["SUBGRAPH_ID", "SUBGRAPH_END"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph bad-id [틀림]\nsubgraph g [묶음]\na\nend\nend\nb"), ["SUBGRAPH_ID"]);
+  assert.deepEqual(codes("flowchart TD\nsubgraph g [묶음]\na\nsubgraph bad-id [틀림]\nb\nend\nend"), ["SUBGRAPH_ID"]);
 });
 
 test("한 노드는 한 subgraph 에 든다", () => {

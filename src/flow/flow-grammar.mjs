@@ -135,7 +135,15 @@ function tokens(i, line) {
   if (line.startsWith("%%{")) throw bad(i, line, Code.DIRECTIVE, "지시문 %%{…}%% 은 쓸 수 없다");
   if (line.startsWith("%%")) return [];
   const first = line.split(/[\s[(|-]/)[0].toLowerCase();
-  if (first === "subgraph") return [subgraph(i, line)];
+  if (first === "subgraph") {
+    try {
+      return [subgraph(i, line)];
+    } catch (err) {
+      // A subgraph line that does not read still opens one: its `end` closes it.
+      if (err instanceof Bad) err.token = { kind: "subgraph", line: i + 1, id: null, title: null };
+      throw err;
+    }
+  }
   if (line === "end") return [{ kind: "end", line: i + 1 }];
   if (RESERVED.has(first))
     throw bad(i, line, Code.RESERVED_WORD, `${first} 은 쓸 수 없다 — 노드 · 간선 · 주석 · subgraph · end 줄만 쓴다`);
@@ -185,6 +193,7 @@ export function lex(fence) {
     } catch (err) {
       if (!(err instanceof Bad)) throw err;
       errors.push(err.error);
+      if (err.token) out.push(err.token);
     }
   });
   return { tokens: out, errors };

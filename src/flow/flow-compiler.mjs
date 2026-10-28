@@ -109,7 +109,8 @@ const NAME = { [Kind.INPUT]: "입력 id([글])", [Kind.QUERY]: "조회 id[글]",
 /**
  * Tokens woven into a flow. Nodes in first-seen order, an edge's ends
  * counted. `subgraph id [글]` becomes the flow node `id`, and a node first
- * seen inside it sits in it; the subgraph id itself sits in none.
+ * seen inside it sits in it; the subgraph id itself sits in none. A subgraph
+ * token with id null (its line did not read) only takes its `end`.
  * @returns {{flow: QueryFlow, errors: object[]}} the flow woven as far as it reads
  */
 export function compileTokens(tokens) {
@@ -120,13 +121,19 @@ export function compileTokens(tokens) {
   const subgraphAt = new Map(); // subgraph id -> its line
   let open = null;
   let nested = 0;
+  let unread = 0; // subgraphs opened outside any subgraph by a line that did not read (id null)
   const edges = [];
   const errors = [];
   for (const t of tokens) {
     if (t.kind === "subgraph") {
       if (open !== null) {
         nested++;
-        errors.push(flowError(t.line, Code.SUBGRAPH_NESTED, `subgraph ${t.id}: subgraph ${open} 안에 열었다 — subgraph 안에 subgraph 는 쓸 수 없다`));
+        if (t.id !== null)
+          errors.push(flowError(t.line, Code.SUBGRAPH_NESTED, `subgraph ${t.id}: subgraph ${open} 안에 열었다 — subgraph 안에 subgraph 는 쓸 수 없다`));
+        continue;
+      }
+      if (t.id === null) {
+        unread++;
         continue;
       }
       const had = kinds.get(t.id) ?? null;
@@ -143,8 +150,9 @@ export function compileTokens(tokens) {
       open = t.id;
     } else if (t.kind === "end") {
       if (nested > 0) nested--;
-      else if (open === null) errors.push(flowError(t.line, Code.SUBGRAPH_END, "end: 닫을 subgraph 가 없다"));
-      else open = null;
+      else if (open !== null) open = null;
+      else if (unread > 0) unread--;
+      else errors.push(flowError(t.line, Code.SUBGRAPH_END, "end: 닫을 subgraph 가 없다"));
     } else if (t.kind === "node") {
       if (open !== null) {
         if (t.id === open) {
