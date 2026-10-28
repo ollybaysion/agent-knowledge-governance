@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { QueryFlow, compile } from "../../src/flow/flow-compiler.mjs";
-import { check, conditionColumns, cycle, edgeKinds, elses, facts, md, mdCycle, nodes, sources } from "../../src/flow/flow-rules.mjs";
+import { check, conditionColumns, conditionOptions, cycle, edgeKinds, elses, facts, md, mdCycle, nodes, sources } from "../../src/flow/flow-rules.mjs";
 
 function parse(fence) {
   const { flow, errors } = compile(fence);
@@ -157,6 +157,59 @@ test("점 간선은 입력에서 조회로만 쓴다", () => {
 test("조건 라벨은 조회 caller 의 간선에만 쓴다", () => {
   assert.deepEqual(codesOf(edgeKinds(flow("a([입력])\na -->|x = '1'| r"))), ["CONDITION_PLACE"]);
   assert.deepEqual(codesOf(edgeKinds(flow("m[[흐름]]\nm -->|else| r"))), ["CONDITION_PLACE"]);
+});
+
+test("선택지 없는 입력의 조건은 CONDITION_PLACE 이고 선택 토막이 없다고 적는다", () => {
+  const errors = edgeKinds(flow("a([입력 · 힌트])\na -->|a = '1'| r"));
+  assert.deepEqual(codesOf(errors), ["CONDITION_PLACE"]);
+  assert.match(errors[0].message, /입력 a 에 `선택:` 토막이 없다$/);
+});
+
+// An input caller with options — =, !=, in, else.
+const CHOICE = `mode([분석 방식 · 선택: trend, events, compare])
+mode -->|"mode = 'trend'"| param_list
+mode -->|"mode in ('events', 'compare')"| interlock_history
+mode -->|"mode != 'trend'"| spec_doc
+mode -->|else| eqp_by_line
+`;
+
+test("선택지 있는 입력의 조건은 간선 종류 컬럼 값 검사를 지난다", () => {
+  const own = flow(CHOICE);
+  assert.deepEqual(edgeKinds(own), []);
+  assert.deepEqual(elses(own), []);
+  assert.deepEqual(conditionColumns(own, factsOf(own)), []);
+  assert.deepEqual(conditionOptions(own), []);
+  assert.deepEqual(conditionColumns(flow("mode([방식 · 선택: a, b])\nmode -->|MODE = 'a'| param_list"), factsOf(own)), []);
+});
+
+test("입력 caller 의 조건 컬럼은 그 입력 id 여야 한다", () => {
+  const own = flow("mode([방식 · 선택: a, b])\nmode -->|kind = 'a'| param_list");
+  assert.deepEqual(conditionColumns(own, factsOf(own)), [
+    { line: 0, code: "CONDITION_COLUMN", message: "간선 mode -->|kind = 'a'| param_list: 컬럼 kind 는 입력 노드 id mode 여야 한다" },
+  ]);
+});
+
+test("입력 caller 의 조건 값은 선택지에 있어야 한다", () => {
+  assert.deepEqual(codesOf(conditionOptions(flow("mode([방식 · 선택: a, b])\nmode -->|mode = 'c'| param_list"))), ["CONDITION_OPTION"]);
+  assert.deepEqual(codesOf(conditionOptions(flow("mode([방식 · 선택: a, b])\nmode -->|mode != 'z'| param_list"))), ["CONDITION_OPTION"]);
+  assert.deepEqual(conditionOptions(flow("mode([방식 · 선택: a, b])\nmode -->|\"mode in ('a', 'x', 'y')\"| param_list")).map((e) => e.message), [
+    "간선 mode -->|mode in ('a', 'x', 'y')| param_list: 값 x 가 입력 mode 의 선택지 [a, b] 에 없다",
+    "간선 mode -->|mode in ('a', 'x', 'y')| param_list: 값 y 가 입력 mode 의 선택지 [a, b] 에 없다",
+  ]);
+});
+
+test("입력 caller 의 else 도 하나까지다", () => {
+  assert.deepEqual(codesOf(elses(flow("mode([방식 · 선택: a, b])\nmode -->|else| param_list\nmode -->|else| spec_doc"))), ["ELSE_DUPLICATE"]);
+});
+
+test("선택지 있는 입력도 흐름으로 가는 간선은 EDGE_KIND 다", () => {
+  assert.deepEqual(codesOf(edgeKinds(flow("m[[흐름]]\nmode([방식 · 선택: a, b])\nmode -->|mode = 'a'| m"))), ["EDGE_KIND"]);
+});
+
+test("조건 값 검사는 조건 컬럼 검사 뒤에 돈다", () => {
+  const own = flow("mode([방식 · 선택: a, b])\nmode -->|kind = 'c'| spec_doc\nspec_index([번호])\nspec_index --> spec_doc");
+  const f = facts("interlock", [], POOL, new Map([["interlock", md("interlock", own, [])]]));
+  assert.deepEqual(codesOf(check(own, f)), ["CONDITION_COLUMN", "CONDITION_OPTION"]);
 });
 
 test("간선에 쓰지 않은 흐름 노드는 오류다", () => {

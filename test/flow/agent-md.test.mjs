@@ -30,6 +30,21 @@ test("BE 테스트 md 는 BE 처럼 모두 통과한다", () => {
   }
 });
 
+test("선택 분기 md 는 BE 처럼 통과하고, 선택 토막 · 조건이 틀리면 md 줄과 코드를 낸다", () => {
+  const common = file("skills/eqp-scope.md");
+  const mode = file("flow-choice/analysis-mode.md");
+  assert.deepEqual(checkFiles([common, mode]).lines, ["OK eqp-scope.md", "OK analysis-mode.md"]);
+  const broken = (from, to) => checkFiles([common, { path: mode.path, text: mode.text.replace(from, to) }]).lines;
+  assert.deepEqual(broken("선택: trend, events, compare", "선택: trend, trend"), [
+    "OK eqp-scope.md",
+    "analysis-mode.md:16 INPUT_OPTION 입력 mode: 선택지 trend 가 둘이다",
+  ]);
+  assert.match(broken("선택: trend, events, compare · ", "")[1], /^analysis-mode\.md:13 CONDITION_PLACE .* 입력 mode 에 `선택:` 토막이 없다$/);
+  assert.match(broken("mode = 'events'", "kind = 'events'")[1], /^analysis-mode\.md:13 CONDITION_COLUMN .*컬럼 kind 는 입력 노드 id mode 여야 한다$/);
+  assert.match(broken("mode = 'events'", "mode = 'event'")[1], /^analysis-mode\.md:13 CONDITION_OPTION .*값 event 가 입력 mode 의 선택지 \[trend, events, compare\] 에 없다$/);
+  assert.match(broken('mode -->|"mode = \'events\'"|', "mode -->|else|")[1], /^analysis-mode\.md:13 ELSE_DUPLICATE /);
+});
+
 test("문법 오류는 md 파일의 줄로 낸다", () => {
   const r = checkFiles([md("bad.md", "flowchart TD\n  eqp-scope[[설비]] --> param_list\n  a --> b --> c", PARAM_LIST)]);
   assert.equal(r.ok, false);

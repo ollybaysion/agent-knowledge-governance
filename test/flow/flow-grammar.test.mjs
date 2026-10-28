@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { compile } from "../../src/flow/flow-compiler.mjs";
+import { compile, optionsOf } from "../../src/flow/flow-compiler.mjs";
 import { CODES, errorText } from "../../src/flow/flow-error.mjs";
 import { condition } from "../../src/flow/flow-grammar.mjs";
 
@@ -157,12 +157,37 @@ test("변환 노드 id{{글}} 를 노드 줄과 간선 끝에 적고 그 줄을 
   assert.deepEqual(codes("flowchart TD\nm{{a{b}}"), ["NODE_SYNTAX"]);
 });
 
+test("선택 토막은 쌍점과 쉼표를 받고 선택지가 된다", () => {
+  const flow = parse("flowchart TD\nmode([분석 방식 · 선택: trend, events, compare])\nmode -->|\"mode = 'trend'\"| q");
+  assert.deepEqual(flow.optionsOf("mode"), ["trend", "events", "compare"]);
+  assert.deepEqual(codes("flowchart TD\nmode([방식 · 선택:a,b])"), []);
+  assert.deepEqual(codes("flowchart TD\nmode([방식 · 선택: a(b)])"), ["NODE_SYNTAX"]);
+});
+
+test("선택 토막의 선택지는 앞뒤 공백을 떼고 빈 것을 버리며 첫 토막과 입력 아닌 노드는 보지 않는다", () => {
+  assert.deepEqual(optionsOf("분석 방식 · 선택: trend, events , compare,, · 하나를 고른다"), ["trend", "events", "compare"]);
+  assert.deepEqual(optionsOf("방식 · 선택:a,b"), ["a", "b"]);
+  assert.deepEqual(optionsOf("선택: a, b"), []);
+  assert.deepEqual(optionsOf("로트 번호 · 예 LOT1"), []);
+  assert.deepEqual(parse("flowchart TD\nq[가 · 선택: a]").optionsOf("q"), []);
+});
+
+test("선택 토막이 틀리면 INPUT_OPTION 이다", () => {
+  assert.throws(() => parse("flowchart TD\nmode([방식 · 선택: ])"), { message: "2 번째 줄 입력 mode: 선택지가 비었다 — `선택: a, b` 로 적는다" });
+  assert.deepEqual(codes("flowchart TD\nmode([방식 · 선택: , ,])"), ["INPUT_OPTION"]);
+  assert.throws(() => parse("flowchart TD\nmode([방식 · 선택: a, b, a])"), { message: "2 번째 줄 입력 mode: 선택지 a 가 둘이다" });
+  assert.throws(() => parse("flowchart TD\nmode([방식 · 선택: a, it's])"), { message: "2 번째 줄 입력 mode: 선택지 it's 에 ' 가 든다" });
+  assert.throws(() => parse("flowchart TD\nmode([방식 · 선택: a · 선택: b])"), { message: "2 번째 줄 입력 mode: 선택: 토막이 2 개다 — 하나만 쓴다" });
+  assert.deepEqual(codes("flowchart TD\nmode([방식 · 선택: a])\nmode([방식 · 선택: a])"), []);
+  assert.deepEqual(codes("flowchart TD\nmode([방식 · 선택: a, a]) --> q"), ["INPUT_OPTION"]);
+});
+
 test("오류 코드는 이름이 계약이다", () => {
   assert.deepEqual(CODES, [
     "HEADER", "DIRECTIVE", "RESERVED_WORD", "AMPERSAND", "CHAIN", "ARROW", "EDGE_SYNTAX",
-    "NODE_SYNTAX", "CONDITION_SYNTAX", "INPUT_ID", "SHAPE_CONFLICT", "UNKNOWN_ID", "INPUT_IS_QUERY", "QUERY_IS_MD",
+    "NODE_SYNTAX", "CONDITION_SYNTAX", "INPUT_ID", "INPUT_OPTION", "SHAPE_CONFLICT", "UNKNOWN_ID", "INPUT_IS_QUERY", "QUERY_IS_MD",
     "SELF_FLOW", "FLOW_ALONE", "EDGE_KIND", "OPTIONAL_EDGE", "CONDITION_PLACE", "ELSE_DUPLICATE", "CONDITION_COLUMN",
-    "UNSOURCED_VAR", "UNSUPPORTED_EQP_FLOW", "CYCLE", "MD_CYCLE", "SUBGRAPH_ID", "SUBGRAPH_TITLE", "SUBGRAPH_UNCLOSED",
+    "CONDITION_OPTION", "UNSOURCED_VAR", "UNSUPPORTED_EQP_FLOW", "CYCLE", "MD_CYCLE", "SUBGRAPH_ID", "SUBGRAPH_TITLE", "SUBGRAPH_UNCLOSED",
     "SUBGRAPH_END", "SUBGRAPH_NESTED", "SUBGRAPH_MEMBER", "SUBGRAPH_EMPTY", "SUBGRAPH_ID_CLASH",
     "MAP_ITEM", "MAP_FENCE", "MAP_SHAPE", "MAP_LINE", "MAP_EXPR", "MAP_DUP", "MAP_SOURCE", "MAP_SCOPE", "MAP_NO_SOURCE", "MAP_ALONE",
     "CHART_KIND", "CHART_KEY", "CHART_REQUIRED", "CHART_COLUMN", "CHART_BINS", "CHART_DUPLICATE",
