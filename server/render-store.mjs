@@ -67,7 +67,9 @@ export function docsWrites(storeDir, type, docs, { drop = null } = {}) {
   const writes = [];
   const removes = [];
   for (const doc of docs) {
-    writes.push({ relpath: `${type}/${doc.id}.json`, content: stableJson(doc) });
+    // `absorbed` lives in the sidecar (absorbedPath): the document file never holds it.
+    const { absorbed: _absorbed, ...stored } = doc;
+    writes.push({ relpath: `${type}/${doc.id}.json`, content: stableJson(stored) });
     // Only an active doc gets a rendered md; inactive (a draft being built up,
     // or #7 bulk-loaded) or archived has its md REMOVED instead — a stale file
     // left in rendered/ would ship to every mirror via /api/bundle. A draft
@@ -97,6 +99,24 @@ export function docsWrites(storeDir, type, docs, { drop = null } = {}) {
     });
   }
   return { writes, removes };
+}
+
+/** The sidecar beside store/<type>/<id>.json that holds `absorbed` (listIds skips it). */
+export const absorbedPath = (type, id) => `${type}/${id}.meta.json`;
+
+/** The envelope as the read routes serve it: the stored doc plus its sidecar's `absorbed`. */
+export function withAbsorbed(storeDir, type, doc) {
+  const absorbed = readJson(storeDir, absorbedPath(type, doc.id))?.absorbed;
+  return absorbed ? { ...doc, absorbed } : doc;
+}
+
+/** Write the sidecar's `absorbed` in its own commit; the document's rev stays. */
+export function persistAbsorbed(storeDir, type, id, absorbed, { author, message }) {
+  return commitFiles(storeDir, {
+    author,
+    message,
+    writes: [{ relpath: absorbedPath(type, id), content: stableJson({ absorbed }) }],
+  });
 }
 
 /**

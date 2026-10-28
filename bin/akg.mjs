@@ -18,6 +18,7 @@ import { installSkills } from "../src/mirror/install-skills.mjs";
 import { propose } from "../src/client/propose.mjs";
 import { catalogPush } from "../src/client/catalog-push.mjs";
 import { push, checkPushFile } from "../src/client/push.mjs";
+import { absorbMark, listDocs } from "../src/client/absorb.mjs";
 import { AkgApiError } from "../src/client/errors.mjs";
 
 const USAGE = `usage:
@@ -25,11 +26,16 @@ const USAGE = `usage:
   akg propose <type>/<id> <proposal.json> [--server <url>] [--mirror <dir>]
   akg catalog-push <table> <describe.json> [--server <url>] [--mirror <dir>]
   akg push <type>/<id> <file.json|file.md> [--create] [--note <글>] [--rev <rev>] [--dry-run] [--server <url>] [--mirror <dir>]
+  akg absorb-mark <type>/<id> [--rev <rev>] [--server <url>] [--mirror <dir>]
+  akg list [<type>] [--stale-absorbed] [--server <url>] [--mirror <dir>]
 
 push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
   .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain)의 본문 글.
   서버의 현재 rev 로 고친다(--rev 를 주면 그 rev). 없는 문서는 --create 일 때만 만든다(.md 는 비활성으로).
   슬롯은 추정까지만 들어간다 — 승격 · 삭제 · 활성화는 admin 화면에서.
+absorb-mark: 문서의 지식을 1급 문서에 녹였다고 표시한다(absorbed). --rev = 녹일 때 읽은 rev,
+  없으면 서버의 현재 rev. 문서 rev 는 그대로다.
+list: 문서 한 줄씩 "<type>/<id> <rev> <녹임 rev|->". --stale-absorbed = 녹임 rev 가 없거나 rev 와 다른 문서만.
 `;
 
 // The types a proposal can name: the server's list as of the last sync, or
@@ -57,6 +63,7 @@ function parseArgs(argv) {
     dryRun: false,
     note: null,
     rev: null,
+    staleAbsorbed: false,
   };
   const positional = [];
   for (let i = 0; i < rest.length; i++) {
@@ -64,6 +71,7 @@ function parseArgs(argv) {
     if (a === "--skills") flags.skills = true;
     else if (a === "--create") flags.create = true;
     else if (a === "--dry-run") flags.dryRun = true;
+    else if (a === "--stale-absorbed") flags.staleAbsorbed = true;
     else if (a === "--note") flags.note = rest[++i];
     else if (a === "--rev") flags.rev = rest[++i];
     else if (a === "--skills-dir") flags.skillsDir = rest[++i];
@@ -409,9 +417,41 @@ async function runPush(positional, flags, token, serverUrl) {
   }
 }
 
+async function runAbsorbMark(positional, flags, token, serverUrl) {
+  const [spec] = positional;
+  const slashIdx = spec ? spec.indexOf("/") : -1;
+  if (!spec || slashIdx <= 0 || slashIdx === spec.length - 1) {
+    process.stderr.write(USAGE);
+    process.exit(1);
+  }
+  const type = spec.slice(0, slashIdx);
+  const id = spec.slice(slashIdx + 1);
+  try {
+    const { absorbed } = await absorbMark({ serverUrl, token, type, id, rev: flags.rev });
+    process.stdout.write(`absorbed ${type}/${id} (rev ${absorbed.rev})\n`);
+  } catch (err) {
+    process.stderr.write(`akg absorb-mark failed: ${err.message}\n`);
+    if (err instanceof AkgApiError) writeServerError("akg absorb-mark", err.body);
+    // Fail CLOSED, same reasoning as propose.
+    process.exit(1);
+  }
+}
+
+async function runList(positional, flags, token, serverUrl) {
+  const [type] = positional;
+  try {
+    const docs = await listDocs({ serverUrl, token, type, staleAbsorbed: flags.staleAbsorbed });
+    for (const d of docs) process.stdout.write(`${d.type}/${d.id} ${d.rev ?? "-"} ${d.absorbed?.rev ?? "-"}\n`);
+  } catch (err) {
+    process.stderr.write(`akg list failed: ${err.message}\n`);
+    if (err instanceof AkgApiError) writeServerError("akg list", err.body);
+    process.exit(1);
+  }
+}
+
 async function main() {
   const { cmd, flags, positional } = parseArgs(process.argv.slice(2));
-  if (!["sync", "propose", "catalog-push", "push"].includes(cmd)) {
+  if (!["sync", "propose", "catalog-push", "push", "absorb-mark", "list"].includes(cmd)) {
     process.stderr.write(USAGE);
     process.exit(1);
   }
@@ -443,6 +483,8 @@ async function main() {
   else if (cmd === "propose")
     await runPropose(positional, token, serverUrl, mirrorDir);
   else if (cmd === "catalog-push") await runCatalogPush(positional, token, serverUrl);
+  else if (cmd === "absorb-mark") await runAbsorbMark(positional, flags, token, serverUrl);
+  else if (cmd === "list") await runList(positional, flags, token, serverUrl);
   else await runPush(positional, flags, token, serverUrl);
 }
 

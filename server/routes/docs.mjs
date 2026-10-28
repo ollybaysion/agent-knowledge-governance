@@ -26,9 +26,12 @@ import {
   hasAsset,
 } from "../store.mjs";
 import {
+  absorbedPath,
+  persistAbsorbed,
   persistDoc,
   renderDocMd,
   docsWrites,
+  withAbsorbed,
 } from "../render-store.mjs";
 import { docMdPath, rendersToMd } from "../../src/render/index.mjs";
 import { listSlotAddresses, tierSummary, getSlot } from "../slots.mjs";
@@ -182,8 +185,11 @@ export function registerDocsRoutes(app) {
   app.get(
     "/api/docs",
     { config: { roles: ["user", "agent"] } },
-    async (request) => {
-      const { type, tier, q } = request.query ?? {};
+    async (request, reply) => {
+      const { type, tier, q, absorbed } = request.query ?? {};
+      // absorbed=stale: the documents whose absorbed.rev is missing or behind their rev.
+      if (absorbed !== undefined && absorbed !== "stale")
+        return reply.code(400).send({ error: "invalid_query", param: "absorbed", allowed: ["stale"] });
       const docs = [];
       const typeIds = types.ids();
       let uses = null; // read once, at the first db-schema
@@ -196,6 +202,9 @@ export function registerDocsRoutes(app) {
           if (q && !id.includes(q)) continue;
           const tiers = tierSummary(bodySchema, doc.body);
           if (tier && !tiers[tier]) continue;
+          const rev = revOfPath(storeDir, `${t}/${id}.json`);
+          const mark = withAbsorbed(storeDir, t, doc).absorbed;
+          if (absorbed === "stale" && mark?.rev === rev) continue;
           docs.push({
             type: t,
             id,
@@ -217,8 +226,9 @@ export function registerDocsRoutes(app) {
                   columns: (doc.body?.catalog?.columns ?? []).map((c) => c.name),
                 }
               : {}),
-            rev: revOfPath(storeDir, `${t}/${id}.json`),
+            rev,
             updatedAt: changedAtOfPath(storeDir, `${t}/${id}.json`),
+            ...(mark ? { absorbed: mark } : {}),
             // The body's [[ ]] with where each points: the graph draws them
             // thin and the unresolved ones as 끊긴 연결.
             ...wikilinksOf(t, doc, typeIds),
@@ -250,7 +260,41 @@ export function registerDocsRoutes(app) {
         return reply.send(docMd(storeDir, type, doc, types.isMd(type)) ?? "");
       }
       if (rev) reply.header("etag", rev);
-      return docView(type, id, doc, rev);
+      return docView(type, id, withAbsorbed(storeDir, type, doc), rev);
+    },
+  );
+
+  // Marks the document as absorbed into a first-class document at `rev`, its
+  // current rev. Only the sidecar changes, so the document keeps its rev and
+  // an If-Match the caller holds stays good.
+  app.put(
+    "/api/docs/:type/:id/absorbed",
+    { config: { roles: ["admin", "agent"] } },
+    async (request, reply) => {
+      const { type, id } = request.params;
+      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+      if (!isValidId(id)) return reply.code(400).send({ error: "invalid_path_param", param: "id" });
+      const rev = request.body?.rev;
+      if (typeof rev !== "string" || rev === "")
+        return reply.code(400).send({ error: "rev_required", message: "몸은 { rev } 입니다 — 녹일 때 읽은 문서 rev" });
+
+      const result = await queue.enqueue(
+        async () => {
+          const relpath = `${type}/${id}.json`;
+          const doc = readJson(storeDir, relpath);
+          if (!doc) return { status: 404, body: { error: "not_found" } };
+          const currentRev = revOfPath(storeDir, relpath);
+          if (rev !== currentRev) return { status: 409, body: { error: "unknown_base_rev", currentRev } };
+          const absorbed = { rev, at: new Date().toISOString(), by: request.user.id };
+          persistAbsorbed(storeDir, type, id, absorbed, {
+            author: request.user.id,
+            message: `absorbed ${type}/${id} @ ${rev.slice(0, 7)}`,
+          });
+          return { status: 200, body: { rev: currentRev, absorbed } };
+        },
+        { priority: priorityOf(request.user) },
+      );
+      return reply.code(result.status).send(result.body);
     },
   );
 
@@ -1127,7 +1171,8 @@ export function registerDocsRoutes(app) {
           const pointsHere = (l) => l.type === type && l.id === id;
           const relinked = [];
           const writes = [];
-          const removes = [relpath, docMdPath(type, doc, { md: types.isMd(type) })];
+          // The absorbed mark names the old path's rev: the move drops it.
+          const removes = [relpath, absorbedPath(type, id), docMdPath(type, doc, { md: types.isMd(type) })];
           for (const t of types.ids()) {
             const changed = [];
             for (const sid of listIds(storeDir, t)) {
@@ -1186,7 +1231,7 @@ export function registerDocsRoutes(app) {
           const flow = flowCheck(type, id, null);
           const md = types.isMd(type);
           const writes = [];
-          const removes = [relpath];
+          const removes = [relpath, absorbedPath(type, id)];
           if (rendersToMd(type, doc, { md })) removes.push(docMdPath(type, doc, { md }));
           if (type === "domain-skill" && (doc.role ?? "main") === "main") removes.push(`score/${id}.json`);
 

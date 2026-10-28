@@ -331,3 +331,46 @@ test("cli: unknown command -> exit 1, usage printed", async () => {
     await cleanup();
   }
 });
+
+test("cli absorb-mark + list --stale-absorbed: the mark takes the doc out of the stale list until the doc changes", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  try {
+    const post = (name) =>
+      app.inject({
+        method: "POST",
+        url: "/api/docs/voc",
+        headers: as("ed-tok"),
+        payload: { schema: "voc/v1", id: name, status: "active", body: { name, markdown: `# ${name}\n\n글\n` } },
+      });
+    const rev0 = (await post("a")).json().rev;
+    await post("b");
+
+    const all = await runCli(["list", "voc", "--stale-absorbed"], { serverUrl });
+    assert.equal(all.status, 0, all.stderr);
+    assert.deepEqual(all.stdout.trim().split("\n").map((l) => l.split(" ")[0]).sort(), ["voc/a", "voc/b"]);
+    assert.match(all.stdout, new RegExp(`^voc/a ${rev0} -$`, "m"));
+
+    const marked = await runCli(["absorb-mark", "voc/a"], { serverUrl });
+    assert.equal(marked.status, 0, marked.stderr);
+    assert.equal(marked.stdout, `absorbed voc/a (rev ${rev0})\n`);
+
+    const stale = await runCli(["list", "voc", "--stale-absorbed"], { serverUrl });
+    assert.deepEqual(stale.stdout.trim().split("\n").map((l) => l.split(" ")[0]), ["voc/b"]);
+    const listed = await runCli(["list", "voc"], { serverUrl });
+    assert.match(listed.stdout, new RegExp(`^voc/a ${rev0} ${rev0}$`, "m"));
+
+    const edited = await app.inject({
+      method: "PUT",
+      url: "/api/docs/voc/a",
+      headers: { ...as("ed-tok"), "if-match": rev0 },
+      payload: { name: "a", markdown: "# a\n\n새 글\n" },
+    });
+    assert.equal(edited.statusCode, 200);
+    const again = await runCli(["absorb-mark", "voc/a", "--rev", rev0], { serverUrl });
+    assert.equal(again.status, 1);
+    assert.match(again.stderr, /바뀌었습니다/);
+    assert.match(again.stderr, new RegExp(`서버 rev: ${edited.json().rev}`));
+  } finally {
+    await cleanup();
+  }
+});

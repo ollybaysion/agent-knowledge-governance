@@ -76,8 +76,27 @@ const KEYWORD_SCHEMA = {
   },
 };
 
-// json-spec §2 — the keys fixed for every type. `keywords`, `links`, `role`
-// and `origin` are the optional keys; absent keywords read as [].
+/**
+ * Where this document's knowledge went into a first-class document
+ * (domain-skill · db-schema). Kept in the sidecar store/<type>/<id>.meta.json,
+ * so marking it leaves the document's rev as it is; the read routes put it
+ * back on the envelope.
+ */
+export const ABSORBED_SCHEMA = {
+  type: "object",
+  description:
+    "이 문서의 지식이 다른 문서(1급: domain-skill · db-schema)에 녹여졌다는 표시. rev = 녹일 때 읽은 이 문서의 rev, at = 표시한 시각(ISO), by = 표시한 사람 · 에이전트. 1급 문서에 있어도 뜻은 같다: 이 문서가 다른 문서에 녹여졌다. PUT /api/docs/:type/:id/absorbed 가 쓴다.",
+  additionalProperties: false,
+  required: ["rev", "at", "by"],
+  properties: {
+    rev: { type: "string", pattern: "^[0-9a-f]{40}$" },
+    at: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}T" },
+    by: { type: "string", pattern: "\\S" },
+  },
+};
+
+// json-spec §2 — the keys fixed for every type. `keywords`, `links`, `role`,
+// `origin` and `absorbed` are the optional keys; absent keywords read as [].
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -107,6 +126,7 @@ const ENVELOPE_SCHEMA = {
         title: { type: "string", pattern: "\\S" },
       },
     },
+    absorbed: ABSORBED_SCHEMA,
   },
 };
 
