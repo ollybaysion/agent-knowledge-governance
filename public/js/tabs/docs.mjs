@@ -4,8 +4,8 @@
 // the types, until the tag is picked again. A document open: the
 // left 288 is the path column (타입 › 문서 · ‹ 탐색으로 · same-type list),
 // which folds to a 48 band from the handle on its right edge.
-import { allDocs, api } from "../api.mjs";
-import { $, el, icon } from "../dom.mjs";
+import { allDocs, api, invalidateDocs } from "../api.mjs";
+import { $, el, icon, toast } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
 import { SUB_LABEL, docRows, inDocsTab, move, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
@@ -14,8 +14,9 @@ import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
 import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, pathGroups, readFilter, tableGroups } from "/lib/table-class.mjs";
+import { activateBody, activateToast, dialogNames, headState, pickable, pickableIds, pickedRows, picksFor, toggleAll, togglePicked } from "/lib/doc-bulk.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
-import { TIER_LABEL, TYPES, TYPE_LABEL, typeColor } from "../state.mjs";
+import { TIER_LABEL, TYPES, TYPE_LABEL, canEdit, typeColor } from "../state.mjs";
 
 const enc = encodeURIComponent;
 export const typeLabel = (type) => (type === "domain-skill" ? SUB_LABEL : TYPE_LABEL[type] ?? type);
@@ -40,16 +41,17 @@ const tierChip = (d) => {
   return t ? tierBadge(t) : null;
 };
 
-/** A document row of column 2 and the path column. */
-function docRow(d, { on, id }) {
-  return el("li", { class: `mrow${on ? " on" : ""}`, role: "option", id, "aria-selected": String(!!on), "data-key": `${d.type}/${d.id}` }, [
+/** A document row of column 2 and the path column. `pick` = the box slot in front of the name (column 2, admin). */
+function docRow(d, { on, id, pick = null, picked = false }) {
+  return el("li", { class: `mrow${on ? " on" : ""}${picked ? " picked" : ""}`, role: "option", id, "aria-selected": String(!!on), "data-key": `${d.type}/${d.id}` }, [
     el("div", { class: "mrow-top" }, [
+      pick,
       el("span", { class: `mrow-name${d.type === "db-schema" || d.type === "msg-format" ? " mono" : ""}`, text: rowName(d) }),
       isFav(d) ? el("span", { class: "fav-mark", "aria-label": "즐겨찾기" }, icon("star", 12)) : null,
       d.status === "inactive" ? el("span", { class: "mini-off", text: "비활성" }) : null,
       el("span", { class: "mrow-chev" }, icon("right", 14)),
     ]),
-    el("div", { class: "mrow-sub" }, [
+    el("div", { class: `mrow-sub${pick ? " ind" : ""}` }, [
       tierChip(d),
       d.type === "db-schema" ? kindBadge(kindOf(d)) : null,
       d.type === "db-schema" ? coverageBar(d.coverage) : null,
@@ -284,6 +286,9 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
   if (state.col === 2 && !listOf(state.i1).length) state.col = 1;
   // A doc row in column 1 shows its own type's list in column 2, itself picked.
   let picked = null;
+  // 여러 문서 활성화 (admin): the type whose list holds the boxes, and the ids picked in it.
+  const admin = canEdit();
+  let bulk = { type: null, ids: new Set() };
 
   const c1 = el("div", { class: "mcol mcol1", role: "listbox", tabindex: "0", "aria-label": "즐겨찾기 · 최근 · 타입" });
   const c2 = el("div", { class: "mcol mcol2", role: "listbox", tabindex: "0", "aria-label": "문서" });
@@ -408,9 +413,28 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       return;
     }
     const t = types.find((x) => x.id === type);
+    bulk = picksFor(bulk, type, list);
+    const repaint2 = (focus) => {
+      paint2();
+      c2.querySelector(focus)?.focus();
+    };
+    // An inactive row's box; any other row keeps the box's place empty.
+    const pickBox = (d) => {
+      if (!pickable(d)) return el("span", { class: "mrow-pick", "aria-hidden": "true" });
+      const box = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": `${rowName(d)} 고르기`, "data-pick": d.id });
+      box.checked = bulk.ids.has(d.id);
+      // The box picks; the row around it keeps its own press (미리보기 · 열기).
+      box.addEventListener("click", (e) => e.stopPropagation());
+      box.addEventListener("dblclick", (e) => e.stopPropagation());
+      box.addEventListener("change", () => {
+        bulk.ids = togglePicked(bulk.ids, d.id);
+        repaint2(`[data-pick="${CSS.escape(d.id)}"]`);
+      });
+      return box;
+    };
     const row = (d, i) => {
       const on = picked ? picked.id === d.id : state.i2 === i;
-      const li = docRow(d, { on, id: `m2-${i}` });
+      const li = docRow(d, { on, id: `m2-${i}`, pick: admin ? pickBox(d) : null, picked: admin && bulk.ids.has(d.id) });
       if (on && state.col === 2) li.classList.add("cur");
       li.addEventListener("click", () => {
         if (r?.kind === "doc") return open(d);
@@ -429,19 +453,45 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       }
     } else list.forEach((d, i) => items.push(row(d, i)));
     const filtering = type === "db-schema" && r?.kind === "type";
+    let headBox = null;
+    if (admin) {
+      const st = headState(list, bulk.ids);
+      headBox = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": "보이는 비활성 전부 고르기", "data-pick-all": "" });
+      headBox.checked = st === "all";
+      headBox.indeterminate = st === "some";
+      headBox.disabled = !pickableIds(list).length;
+      headBox.addEventListener("change", () => {
+        bulk.ids = toggleAll(list, bulk.ids);
+        repaint2("[data-pick-all]");
+      });
+    }
+    const bar = admin && bulk.ids.size
+      ? el("div", { class: "mcol-sub" }, el("div", { class: "selbar", role: "group", "aria-label": "고른 문서" }, [
+          el("span", {}, [el("b", { text: String(bulk.ids.size) }), " 골라짐"]),
+          el("span", { class: "sp" }),
+          el("button", { type: "button", class: "btn primary sm", "data-bulk-go": "", text: "활성화", onclick: () => confirmActivate(type, list, bulk.ids) }),
+          el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => {
+            bulk.ids = new Set();
+            repaint2("[data-pick-all]");
+          } }),
+        ]))
+      : document.createTextNode("");
     c2.replaceChildren(
-      el("div", { class: "mcol-h" }, [
+      el("div", { class: `mcol-h${admin ? " boxed" : ""}` }, [
+        headBox,
         el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
         el("b", { text: t?.label ?? typeLabel(type) }),
         el("span", { class: "dim", text: String(list.length) }),
         el("span", { class: "sp" }),
         el("span", { class: "dim", text: groups ? "주요 → 기타 · 최근 수정 순" : "최근 수정 순" }),
       ]),
+      bar,
       filtering
         ? filterChips(tableFilter, (f) => {
             tableFilter = f;
             saveFilter(f);
             state = { ...state, i2: 0 };
+            bulk.ids = new Set();
             paint();
           })
         : document.createTextNode(""),
@@ -451,6 +501,45 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
         : el("p", { class: "dim pnone", text: filtering && docRows(docs, type).length ? "거르기에 맞는 표가 없습니다." : "문서가 없습니다." }),
     );
     c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
+  }
+  // 활성화 → this dialog: how many, their names, then POST /api/docs/:type/activate with each row's list rev.
+  function confirmActivate(type, list, ids) {
+    const rows = pickedRows(list, ids);
+    const { names, more } = dialogNames(rows);
+    const cancel = el("button", { type: "button", class: "btn ghost", text: "취소" });
+    const go = el("button", { type: "button", class: "btn primary", text: `${rows.length} 개 활성화` });
+    const dlg = el("dialog", { class: "dlg bulk-dlg", "aria-labelledby": "bulk-dlg-h" }, [
+      el("div", { class: "dlg-h" }, el("h3", { id: "bulk-dlg-h", text: `문서 ${rows.length} 개를 활성화합니다` })),
+      el("p", { class: "dlg-p", text: "활성 — 다음 동기화부터 주입됩니다." }),
+      el("ul", { class: "bulk-dlg-docs", "aria-label": "활성화할 문서" }, [
+        ...names.map((n) => el("li", { text: n })),
+        more ? el("li", { class: "more", text: `… 외 ${more}` }) : null,
+      ]),
+      el("div", { class: "dlg-foot" }, [el("span", { class: "dim", text: "admin 결정 · 문서마다 rev 를 맞춰 봅니다" }), el("span", { class: "sp" }), cancel, go]),
+    ]);
+    cancel.addEventListener("click", () => dlg.close());
+    // A press on the backdrop lands on the dialog itself, outside its box.
+    dlg.addEventListener("click", (e) => {
+      if (e.target !== dlg) return;
+      const b = dlg.getBoundingClientRect();
+      if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) dlg.close();
+    });
+    dlg.addEventListener("close", () => {
+      dlg.remove();
+      c2.querySelector("[data-bulk-go]")?.focus();
+    });
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      cancel.disabled = true;
+      const r = await api(`/api/docs/${enc(type)}/activate`, { method: "POST", body: activateBody(list, ids) });
+      const t = activateToast(r.status, r.data);
+      dlg.close();
+      toast(t.text, t.error ? "error" : undefined);
+      invalidateDocs();
+      renderBrowse(type);
+    });
+    document.body.appendChild(dlg);
+    dlg.showModal();
   }
   let previewTicket = 0;
   async function paint3() {
