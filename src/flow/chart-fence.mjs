@@ -35,6 +35,8 @@ export const DEFAULT_BINS = 20;
 const MIN_BINS = 1;
 const MAX_BINS = 200;
 const COLUMN_KEYS = ["x", "y", "series", "facet", "value"];
+/** The keys that take one column — a comma is CHART_COLUMN. y · series take several. */
+const SINGLE_COLUMN_KEYS = ["x", "facet", "value"];
 
 /** null for a blank value. */
 const single = (text) =>
@@ -174,6 +176,15 @@ export function readChart(query, fence, outputs) {
         ),
       );
   }
+  for (const key of SINGLE_COLUMN_KEYS)
+    if (values.has(key) && values.get(key).includes(","))
+      errors.push(
+        flowError(
+          lines.get(key),
+          Code.CHART_COLUMN,
+          `${key} 는 열 하나다: ${values.get(key)}`,
+        ),
+      );
 
   const warning =
     outputs == null

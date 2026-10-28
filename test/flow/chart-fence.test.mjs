@@ -211,6 +211,22 @@ test("CHART_COLUMN: 출력 열에 없는 열은 그 키 줄이고 대소문자�
   assert.equal(chartOf("kind = line\nx = TS\ny = VALUE").x, "TS");
 });
 
+test("CHART_COLUMN: x · facet · value 에 쉼표가 들면 그 키 줄이다", () => {
+  assert.deepEqual(
+    errors(
+      "kind = heatmap\nx = ts, value\ny = snsr_id\nfacet = snsr_type_cd,snsr_id\nvalue = value, value2",
+    ),
+    [
+      err(13, "CHART_COLUMN", "x 는 열 하나다: ts, value"),
+      err(15, "CHART_COLUMN", "facet 는 열 하나다: snsr_type_cd,snsr_id"),
+      err(16, "CHART_COLUMN", "value 는 열 하나다: value, value2"),
+    ],
+  );
+  assert.deepEqual(errors("kind = line\nx = ts, value\ny = value"), [
+    err(13, "CHART_COLUMN", "x 는 열 하나다: ts, value"),
+  ]);
+});
+
 test("select * 는 열을 검사하지 않고 통과하며, 펜스 줄에 경고를 남긴다", () => {
   const text =
     "# 그래프\n\n## 데이터\n\n### trend — 트렌드\n\n```sql\nselect * from fdc_trace\n```\n\n```chart\nkind = line\nx = anything\ny = whatever\n```\n";
