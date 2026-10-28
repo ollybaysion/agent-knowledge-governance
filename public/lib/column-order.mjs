@@ -83,3 +83,17 @@ export function slotRowPlan(columns, { open = false } = {}) {
   const cells = columns.map((c) => (open && c.key === "acts" ? "empty" : open && c.key === "desc" ? "mark" : c.key));
   return { cells, editColspan: open ? columns.length : null };
 }
+
+/**
+ * The move buttons beside the grip of row `i` of `n`, left to right:
+ * 맨 위로 · 위로 · 아래로 · 맨 아래로. `to` is the index the row moves to;
+ * `off` = already there. `key` is the grip's Alt+ key that does the same.
+ */
+export function orderSteps(i, n) {
+  return [
+    { label: "맨 위로", icon: "up-line", to: 0, off: i === 0, key: "Home" },
+    { label: "위로", icon: "up", to: i - 1, off: i === 0, key: "ArrowUp" },
+    { label: "아래로", icon: "down", to: i + 1, off: i === n - 1, key: "ArrowDown" },
+    { label: "맨 아래로", icon: "down-line", to: n - 1, off: i === n - 1, key: "End" },
+  ];
+}

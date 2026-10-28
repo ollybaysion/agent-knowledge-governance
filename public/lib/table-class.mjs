@@ -82,18 +82,3 @@ export function majorCoverage(docs) {
 
 /** 쓰는 스킬 수: the distinct documents among usedBy. */
 export const userCount = (d) => new Set((d?.usedBy ?? []).map((u) => `${u.type}/${u.id}`)).size;
-
-/**
- * The 맨 위 · 맨 아래 buttons a document's head bar carries: a db-schema has
- * a long 열 table, the other types none. `where` names the end it scrolls to.
- */
-export const docJumps = (type) =>
-  type === "db-schema"
-    ? [
-        { where: "top", label: "맨 위", icon: "up-line" },
-        { where: "bottom", label: "맨 아래", icon: "down-line" },
-      ]
-    : [];
-
-/** The page offset a jump scrolls to: 0 for the top, the last screen for the bottom. */
-export const jumpTop = (where, { scrollHeight, innerHeight }) => (where === "top" ? 0 : Math.max(0, scrollHeight - innerHeight));

@@ -1,14 +1,14 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집;
-// a db-schema: 맨 위 · 맨 아래), the tag row (# chips · 태그 더하기), then the body as
+// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집),
+// the tag row (# chips · 태그 더하기), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
-import { KIND_LABEL, docJumps, jumpTop, kindOf } from "/lib/table-class.mjs";
-import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
+import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
+import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -239,12 +239,6 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     canEdit && (isSkillType(type) || isMdType(type))
       ? el("button", { type: "button", class: "btn sm doc-full-edit", onclick: () => ctx.editSection(null) }, [icon("pencil", 14), "전체 편집"])
       : null;
-  const jumps = docJumps(type);
-  const jumpBar = jumps.length
-    ? el("span", { class: "doc-jumps", role: "group", "aria-label": "문서 끝으로" }, jumps.map((j) =>
-        el("button", { type: "button", class: "btn sm ghost", onclick: () => jumpTo(j.where) }, [icon(j.icon, 14), j.label]),
-      ))
-    : null;
   return el("header", { class: "doc-head" }, [
     el("p", { class: "doc-eyebrow" }, [
       el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
@@ -260,7 +254,6 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       el("span", { class: "doc-bar-title", text: title, "aria-hidden": "true" }),
       el("div", { class: "doc-chips" }, chips.filter(Boolean)),
       fullEdit,
-      jumpBar,
     ]),
     tagRow(ctx),
     metaRow,
@@ -316,13 +309,6 @@ function tagRow(ctx) {
     field = el("label", { class: "chipfield tag-in" }, [icon("plus", 12), input]);
   }
   return el("div", { class: "doc-tags" }, [el("span", { class: "dt-k", text: "태그" }), ...tags.map(chip), field]);
-}
-
-/** Scroll the page to its top or its bottom; smooth unless the reader asks for less motion. */
-function jumpTo(where) {
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const top = jumpTop(where, { scrollHeight: document.documentElement.scrollHeight, innerHeight });
-  window.scrollTo({ top, behavior: still ? "auto" : "smooth" });
 }
 
 // The chip row sticks under the head; once the title has scrolled away the
@@ -1109,8 +1095,9 @@ function slotBody(ctx, host) {
       }),
     );
   }
-  /** The handle cell: drag grip (Alt+↑ · Alt+↓ on focus) and 위 · 아래. */
+  /** The handle cell: drag grip (Alt+↑ · Alt+↓ · Alt+Home · Alt+End on focus) and 맨 위로 · 위로 · 아래로 · 맨 아래로. */
   function orderCell(name, i, n, locked) {
+    const steps = orderSteps(i, n);
     const grip = el(
       "button",
       {
@@ -1118,19 +1105,21 @@ function slotBody(ctx, host) {
         class: "grip",
         draggable: locked ? null : "true",
         disabled: locked,
-        "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓`,
+        "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓ · Alt+Home · Alt+End`,
         title: locked ? "설명을 편집하는 동안은 옮기지 않습니다" : "끌거나 Alt+↑ · Alt+↓ 로 옮깁니다",
         onkeydown: (e) => {
-          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          const s = e.altKey ? steps.find((x) => x.key === e.key) : null;
+          if (!s) return;
           e.preventDefault();
-          moveColumn(name, i + (e.key === "ArrowUp" ? -1 : 1));
+          moveColumn(name, s.to);
         },
       },
       icon("grip", 14),
     );
-    const step = (label, iconName, to, off) =>
-      el("button", { type: "button", class: "ord-btn", "aria-label": `${name} ${label}`, title: label, disabled: locked || off, onclick: () => moveColumn(name, to) }, icon(iconName, 13));
-    return el("td", { class: "td-grip nowrap" }, el("span", { class: "ord" }, [grip, step("위로", "up", i - 1, i === 0), step("아래로", "down", i + 1, i === n - 1)]));
+    // 위로 · 아래로 keep their title; 맨 위로 · 맨 아래로 carry the name in aria-label only.
+    const step = (s) =>
+      el("button", { type: "button", class: "ord-btn", "aria-label": `${name} ${s.label}`, title: s.key.startsWith("Arrow") ? s.label : null, disabled: locked || s.off, onclick: () => moveColumn(name, s.to) }, icon(s.icon, 13));
+    return el("td", { class: "td-grip nowrap" }, el("span", { class: "ord" }, [grip, ...steps.map(step)]));
   }
   function wireDrop(tr, name) {
     const grip = tr.querySelector(".grip");
