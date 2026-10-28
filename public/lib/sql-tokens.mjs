@@ -97,6 +97,21 @@ export function tableLookup(index) {
 }
 
 /**
+ * The tooltip of a table name: {head: the table, count: "열 n", text: the
+ * table description (purpose) or "설명 없음"}; null for a table the index
+ * lacks.
+ */
+export function tableTip(index, id) {
+  const entry = index?.[id];
+  if (!entry) return null;
+  return {
+    head: entry.table ?? id.toUpperCase(),
+    count: `열 ${Object.keys(entry.columns ?? {}).length}`,
+    text: entry.purpose || "설명 없음",
+  };
+}
+
+/**
  * The tokens with what they point at: a table name that is a db-schema
  * document gets `table: id`; an identifier that is a column of a table the
  * statement names gets `column: {id, name, text}` — `alias.COL` through its

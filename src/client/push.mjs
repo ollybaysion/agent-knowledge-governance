@@ -1,6 +1,6 @@
 // akg CLI `push`: write one document with the agent token — a new document
-// (POST /api/docs/:type), an edit (PUT /api/docs/:type/:id) and its links
-// (PUT …/links). The server keeps every slot at inferred or below (D4), so a
+// (POST /api/docs/:type), an edit (PUT /api/docs/:type/:id), its links
+// (PUT …/links) and its tags (PUT …/tags). The server keeps every slot at inferred or below (D4), so a
 // push never confirms anything. Fail-closed like propose: any refusal throws.
 //
 // The file is either the whole document (.json: envelope + body) or, for a
@@ -10,7 +10,7 @@
 import { AkgApiError } from "./errors.mjs";
 
 /** Envelope keys push writes; the others belong to their own admin routes. */
-const WRITTEN_KEYS = new Set(["schema", "id", "body", "links"]);
+const WRITTEN_KEYS = new Set(["schema", "id", "body", "links", "tags"]);
 
 function base(serverUrl) {
   return String(serverUrl).replace(/\/+$/, "");
@@ -43,6 +43,7 @@ export function checkPushFile({ type, id, file }) {
   if (!doc.body || typeof doc.body !== "object" || Array.isArray(doc.body))
     problems.push("body 객체가 없습니다");
   if (doc.links !== undefined && !Array.isArray(doc.links)) problems.push("links 는 배열이어야 합니다");
+  if (doc.tags !== undefined && !Array.isArray(doc.tags)) problems.push("tags 는 배열이어야 합니다");
   return problems;
 }
 
@@ -128,6 +129,14 @@ export async function push({ serverUrl, token, type, id, file, create = false, n
       if (isStale(linked)) throw new AkgApiError(`push: 본문은 들어갔고 links 는 서버가 앞섭니다 — sync 뒤 다시`, linked);
       if (linked.status !== 200) throw fail("push: 본문은 들어갔고 links 실패", linked);
       newRev = linked.body.rev;
+    }
+    // The file's tags as they are; the same tags as the server's: nothing to write.
+    const tags = doc.tags;
+    if (Array.isArray(tags) && JSON.stringify(tags) !== JSON.stringify(edited.body.json?.tags ?? [])) {
+      const tagged = await send(fetchImpl, `${url}/tags`, { method: "PUT", token, rev: newRev, payload: { tags } });
+      if (isStale(tagged)) throw new AkgApiError(`push: 본문은 들어갔고 tags 는 서버가 앞섭니다 — sync 뒤 다시`, tagged);
+      if (tagged.status !== 200) throw fail("push: 본문은 들어갔고 tags 실패", tagged);
+      newRev = tagged.body.rev;
     }
     for (const key of Object.keys(doc)) {
       if (WRITTEN_KEYS.has(key)) continue;

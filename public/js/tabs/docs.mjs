@@ -1,12 +1,15 @@
-// 문서 탭. Nothing picked yet: the whole body is the column browser
-// (즐겨찾기 · 최근 · 타입 → 문서 → 미리보기, ← → ↑ ↓ ↩). A document open: the
+// 문서 탭. Nothing picked yet: the whole body is the tag panel (태그 · 문서 수)
+// and the column browser (즐겨찾기 · 최근 · 타입 → 문서 → 미리보기, ← → ↑ ↓ ↩).
+// A tag picked: the types count its documents and column 2 holds them, across
+// the types, until the tag is picked again. A document open: the
 // left 288 is the path column (타입 › 문서 · ‹ 탐색으로 · same-type list),
 // which folds to a 48 band from the handle on its right edge.
 import { allDocs, api } from "../api.mjs";
 import { $, el, icon } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
-import { SUB_LABEL, docRows, inDocsTab, move, rowTier, typeRows } from "/lib/miller.mjs";
+import { SUB_LABEL, docRows, inDocsTab, move, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
+import { tagRows, withTag } from "/lib/tags.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
@@ -210,12 +213,54 @@ export function pathPanel(type, id, docs, draftId = null) {
   return { node, collapsed: isFolded, bind: (l) => (layout = l) };
 }
 
-// ---------- 탐색: 밀러 열 ----------
-export async function renderBrowse(pickType = null) {
+// ---------- 탐색: 태그 패널 + 밀러 열 ----------
+// The tag the browser filters by, kept while the page lives.
+let pickedTag = null;
+
+/** Open the browser with `tag` picked (a tag chip in a document's head). */
+export function showTag(tag) {
+  pickedTag = tag;
+  location.hash = "#/docs";
+}
+
+/** The tag panel: every tag with its document count; a press picks it, the same press drops it. */
+function tagPanel(counts, onPick) {
+  const all = tagRows(counts);
+  const list = el("ul", { class: "tlist", "aria-label": "태그" });
+  const paint = (q) => {
+    const rows = tagRows(counts, q);
+    list.replaceChildren(
+      ...rows.map(({ tag, count }) =>
+        el("li", {}, el("button", { type: "button", class: `trow${tag === pickedTag ? " on" : ""}`, "data-tag": tag, "aria-pressed": String(tag === pickedTag), onclick: () => onPick(tag) }, [
+          el("span", { class: "tg-h", text: "#" }),
+          el("span", { class: "trow-name", text: tag }),
+          el("span", { class: "tg-n", text: String(count) }),
+        ])),
+      ),
+    );
+    if (!rows.length) list.append(el("li", { class: "dim pnone", text: all.length ? "맞는 태그가 없습니다." : "태그를 단 문서가 없습니다." }));
+  };
+  const search = el("input", { type: "search", class: "psearch", placeholder: "태그 찾기", "aria-label": "태그 찾기" });
+  search.addEventListener("input", () => paint(search.value));
+  paint("");
+  return el("aside", { class: "panel tagp", "aria-label": "태그" }, [
+    el("div", { class: "plabel" }, [el("span", { text: "태그" }), el("span", { class: "count-pill", text: String(all.length) })]),
+    el("label", { class: "psearch-w" }, [icon("search", 14), search]),
+    el("div", { class: "panel-scroll" }, list),
+  ]);
+}
+
+export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
   setActiveTab("docs");
   setCrumbs([{ label: "문서" }]);
-  const docs = await allDocs();
-  const types = typeRows(TYPES, docs);
+  const [docs, tagRes] = await Promise.all([allDocs(), api("/api/tags")]);
+  const counts = tagRes.ok ? tagRes.data?.tags ?? {} : {};
+  if (pickedTag && !counts[pickedTag]) pickedTag = null;
+  const tag = pickedTag;
+  // A tag picked: the types count the documents that carry it.
+  const shown = tag ? withTag(docs, tag) : docs;
+  const types = typeRows(TYPES, shown);
+  const groupsByTag = tag ? tagGroups(TYPES, docs, tag) : [];
   const sh = liveShelf(shelf(), docs);
   const docRowsIn = docs.filter(inDocsTab);
   // Column 1: 즐겨찾기 · 최근 (documents) then the types.
@@ -225,14 +270,16 @@ export async function renderBrowse(pickType = null) {
     ...types.map((t) => ({ kind: "type", type: t })),
   ];
   const firstType = col1.findIndex((r) => r.kind === "type" && (pickType ? r.type.id === pickType : r.type.count > 0));
-  let state = { col: pickType ? 2 : 1, i1: Math.max(0, firstType), i2: 0 };
+  // A tag picked and no type asked for: i1 = -1, column 2 holds the tag's documents across the types.
+  let state = tag && !pickType ? { col: 2, i1: -1, i2: 0 } : { col: pickType ? 2 : 1, i1: Math.max(0, firstType), i2: 0 };
   // db-schema: 주요 then 기타, through the filter; the arrow keys walk the same order.
   let tableFilter = savedFilter();
-  const groupsOf = (type, filter = tableFilter) => (type === "db-schema" ? tableGroups(docRows(docs, type), filter) : null);
+  const groupsOf = (type, filter = tableFilter) => (type === "db-schema" ? tableGroups(docRows(shown, type), filter) : null);
   const listOf = (i1) => {
+    if (i1 === -1) return groupsByTag.flatMap((g) => g.rows);
     const r = col1[i1];
     if (r?.kind !== "type") return [];
-    return groupsOf(r.type.id)?.flatMap((g) => g.rows) ?? docRows(docs, r.type.id);
+    return groupsOf(r.type.id)?.flatMap((g) => g.rows) ?? docRows(shown, r.type.id);
   };
   if (state.col === 2 && !listOf(state.i1).length) state.col = 1;
   // A doc row in column 1 shows its own type's list in column 2, itself picked.
@@ -261,7 +308,11 @@ export async function renderBrowse(pickType = null) {
       el("span", { class: "dim" }, ["에이전트 문서(domain-skill main)는 ", el("a", { href: "#/agents", text: "에이전트" }), " 탭에 있습니다"]),
     ]),
   ]);
-  screen().appendChild(el("main", { class: "main browse", "aria-label": "문서 탐색" }, root));
+  const pick = (t) => {
+    pickedTag = pickedTag === t ? null : t;
+    renderBrowse(null, { focusTag: t });
+  };
+  screen().appendChild(el("main", { class: "main browse", "aria-label": "문서 탐색" }, el("div", { class: "browse-grid" }, [tagPanel(counts, pick), root])));
 
   const sizes = { n1: col1.length, n2: (i) => listOf(i).length, isDocRow: (i) => col1[i]?.kind === "doc" };
   function currentDoc() {
@@ -279,7 +330,7 @@ export async function renderBrowse(pickType = null) {
     col1.forEach((r, i) => {
       const group = r.kind === "doc" ? r.group : "type";
       if (group !== lastGroup) {
-        rows.push(group === "fav" ? head("즐겨찾기", "star") : group === "recent" ? head("최근", "clock") : head(`타입 ${types.length}`, "file", "타입 관리 순서"));
+        rows.push(group === "fav" ? head("즐겨찾기", "star") : group === "recent" ? head("최근", "clock") : head(`타입 ${types.length}`, "file", tag ? `#${tag} 안` : "타입 관리 순서"));
         lastGroup = group;
       }
       const on = state.i1 === i;
@@ -293,7 +344,7 @@ export async function renderBrowse(pickType = null) {
         ]));
       } else {
         const t = r.type;
-        rows.push(el("li", { class: `mrow1 type${on ? " on" : ""}${on && state.col === 1 ? " cur" : ""}${t.archived ? " off" : ""}`, role: "option", id: optId, "aria-selected": String(on), onclick: () => { state = { col: 1, i1: i, i2: 0 }; paint(); } }, [
+        rows.push(el("li", { class: `mrow1 type${on ? " on" : ""}${on && state.col === 1 ? " cur" : ""}${t.archived || (tag && !t.count) ? " off" : ""}`, role: "option", id: optId, "aria-selected": String(on), onclick: () => { state = { col: 1, i1: i, i2: 0 }; paint(); } }, [
           el("span", { class: "tdot", style: { "--c": t.color }, "aria-hidden": "true" }),
           el("span", { class: "mrow-name", text: t.label }),
           el("span", { class: "dim mrow-n", text: String(t.count) }),
@@ -304,9 +355,42 @@ export async function renderBrowse(pickType = null) {
       }
     });
     c1.replaceChildren(el("ul", { class: "mlist" }, rows));
-    c1.setAttribute("aria-activedescendant", `m1-${state.i1}`);
+    if (state.i1 >= 0) c1.setAttribute("aria-activedescendant", `m1-${state.i1}`);
+    else c1.removeAttribute("aria-activedescendant");
+  }
+  // Column 2 with the tag and no type: one group per type.
+  function paintTag2() {
+    const items = [];
+    let i = 0;
+    for (const g of groupsByTag) {
+      items.push(el("li", { class: "mgroup", role: "presentation" }, [el("span", { class: "tdot", style: { "--c": g.color }, "aria-hidden": "true" }), ` ${g.label}`, el("span", { class: "count-pill", text: String(g.rows.length) })]));
+      for (const d of g.rows) {
+        const n = i++;
+        const on = state.i2 === n;
+        const li = docRow(d, { on, id: `m2-${n}` });
+        if (on && state.col === 2) li.classList.add("cur");
+        li.addEventListener("click", () => {
+          state = { col: 2, i1: -1, i2: n };
+          paint();
+        });
+        li.addEventListener("dblclick", () => open(d));
+        items.push(li);
+      }
+    }
+    c2.replaceChildren(
+      el("div", { class: "mcol-h" }, [
+        el("span", { class: "tg-h", text: "#" }),
+        el("b", { text: tag }),
+        el("span", { class: "dim", text: String(i) }),
+        el("span", { class: "sp" }),
+        el("span", { class: "dim", text: "타입 순 · 최근 수정 순" }),
+      ]),
+      el("ul", { class: "mlist" }, items),
+    );
+    c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
   }
   function paint2() {
+    if (state.i1 === -1) return paintTag2();
     const r = col1[state.i1];
     let list = listOf(state.i1);
     let type = r?.kind === "type" ? r.type.id : null;
@@ -377,7 +461,9 @@ export async function renderBrowse(pickType = null) {
         ? [el("span", { class: "tdot", style: { "--c": typeColor(d.type) } }), ` ${typeLabel(d.type)} `, icon("right", 12), el("b", { class: "mono", text: d.id })]
         : col1[state.i1]?.kind === "type"
           ? [el("span", { class: "tdot", style: { "--c": col1[state.i1].type.color } }), ` ${col1[state.i1].type.label}`]
-          : []),
+          : tag
+            ? [`태그 `, icon("right", 12), el("b", { text: `#${tag}` })]
+            : []),
     );
     if (!d) {
       c3.replaceChildren(el("p", { class: "dim mpreview-empty", text: "문서를 고르면 여기에 미리보기가 섭니다." }));
@@ -421,7 +507,8 @@ export async function renderBrowse(pickType = null) {
     }
   });
   paint();
-  (state.col === 2 ? c2 : c1).focus({ preventScroll: true });
+  const tagBtn = focusTag ? root.parentElement.querySelector(`.trow[data-tag="${CSS.escape(focusTag)}"]`) : null;
+  (tagBtn ?? (state.col === 2 ? c2 : c1)).focus({ preventScroll: true });
 }
 
 function preview(d, data, docs, open, repaint) {

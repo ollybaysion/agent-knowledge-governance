@@ -71,6 +71,20 @@ export function inertSvg(svg) {
   );
 }
 
+/** The lines the reading view's code box shows under a figure: the fence text, its last newline dropped. */
+export const codeLines = (text) => String(text ?? "").replace(/\n$/, "").split("\n");
+
+/**
+ * The reading view's figure after one event: a click, Enter or Space opens a
+ * closed code box and closes an open one. → the new open state, or null when
+ * the event leaves it as it is.
+ */
+export function foldNext(open, { type, key } = {}) {
+  if (type === "click") return !open;
+  if (type === "keydown" && (key === "Enter" || key === " ")) return !open;
+  return null;
+}
+
 /** `fn` runs once, `ms` after the last call. `.cancel()` drops a waiting run. */
 export function debounce(fn, ms) {
   let timer = null;

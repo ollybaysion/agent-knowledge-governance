@@ -1,13 +1,14 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집), then the body as
+// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집;
+// a db-schema: 맨 위 · 맨 아래), the tag row (# chips · 태그 더하기), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
-import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
-import { findColumn, moveName, orderColumns } from "/lib/column-order.mjs";
+import { KIND_LABEL, docJumps, jumpTop, kindOf } from "/lib/table-class.mjs";
+import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -30,7 +31,8 @@ import { agentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
-import { pathPanel, typeLabel } from "./docs.mjs";
+import { pathPanel, showTag, typeLabel } from "./docs.mjs";
+import { addTag } from "/lib/tags.mjs";
 import { deleteDraftsOf } from "../drafts.mjs";
 import { refreshReviewCount } from "../review-count.mjs";
 import { deleteConfirmText } from "/lib/miller.mjs";
@@ -237,6 +239,12 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     canEdit && (isSkillType(type) || isMdType(type))
       ? el("button", { type: "button", class: "btn sm doc-full-edit", onclick: () => ctx.editSection(null) }, [icon("pencil", 14), "전체 편집"])
       : null;
+  const jumps = docJumps(type);
+  const jumpBar = jumps.length
+    ? el("span", { class: "doc-jumps", role: "group", "aria-label": "문서 끝으로" }, jumps.map((j) =>
+        el("button", { type: "button", class: "btn sm ghost", onclick: () => jumpTo(j.where) }, [icon(j.icon, 14), j.label]),
+      ))
+    : null;
   return el("header", { class: "doc-head" }, [
     el("p", { class: "doc-eyebrow" }, [
       el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
@@ -252,9 +260,69 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       el("span", { class: "doc-bar-title", text: title, "aria-hidden": "true" }),
       el("div", { class: "doc-chips" }, chips.filter(Boolean)),
       fullEdit,
+      jumpBar,
     ]),
+    tagRow(ctx),
     metaRow,
   ]);
+}
+
+/**
+ * The head's tag row: a chip per tag opens the browser with that tag picked.
+ * An editor removes a tag with its × and adds one in 태그 더하기 (Enter or ,),
+ * each a PUT …/tags with If-Match. No tags and no editor: no row.
+ */
+function tagRow(ctx) {
+  const { type, doc, canEdit } = ctx;
+  const tags = doc.tags ?? [];
+  if (!tags.length && !canEdit) return null;
+  async function save(next) {
+    const r = await api(`/api/docs/${type}/${enc(doc.id)}/tags`, { method: "PUT", headers: { "if-match": ctx.rev }, body: { tags: next } });
+    if (!r.ok) {
+      toast(
+        r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 바꾸세요." : `태그를 저장하지 못했습니다 (${r.status})${r.data?.details ? ` — ${r.data.details.join(" · ")}` : ""}`,
+        "error",
+      );
+      return false;
+    }
+    await ctx.reload();
+    document.querySelector(".tag-in input")?.focus();
+    return true;
+  }
+  const name = (t) => [el("span", { class: "tg-h", text: "#" }), t];
+  const chip = (t) =>
+    canEdit
+      ? el("span", { class: "chip tg" }, [
+          el("button", { type: "button", class: "tg-go", "aria-label": `#${t} 태그 문서 보기`, onclick: () => showTag(t) }, name(t)),
+          el("button", { type: "button", class: "tg-x", "aria-label": `태그 ${t} 빼기`, onclick: () => save(tags.filter((x) => x !== t)) }, icon("x", 11)),
+        ])
+      : el("button", { type: "button", class: "chip tg", "aria-label": `#${t} 태그 문서 보기`, onclick: () => showTag(t) }, name(t));
+  let field = null;
+  if (canEdit) {
+    const input = el("input", { type: "text", placeholder: "태그 더하기", "aria-label": "태그 더하기", maxlength: 32, spellcheck: "false", autocomplete: "off" });
+    input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter" && e.key !== ",") return;
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      const r = addTag(tags, input.value);
+      if (r.error) return toast(r.error, "error");
+      if (r.tags === tags) {
+        input.value = "";
+        return;
+      }
+      input.disabled = true;
+      if (!(await save(r.tags))) input.disabled = false;
+    });
+    field = el("label", { class: "chipfield tag-in" }, [icon("plus", 12), input]);
+  }
+  return el("div", { class: "doc-tags" }, [el("span", { class: "dt-k", text: "태그" }), ...tags.map(chip), field]);
+}
+
+/** Scroll the page to its top or its bottom; smooth unless the reader asks for less motion. */
+function jumpTo(where) {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const top = jumpTop(where, { scrollHeight: document.documentElement.scrollHeight, innerHeight });
+  window.scrollTo({ top, behavior: still ? "auto" : "smooth" });
 }
 
 // The chip row sticks under the head; once the title has scrolled away the
@@ -831,19 +899,41 @@ function slotBody(ctx, host) {
     return el("div", { class: cls, "data-addr": slot.address }, [
       tierBadge(slot.tier),
       el("span", { class: cls === "ps" ? "txt2" : "txt3" }, [slotReadText(slot), ...evidence(slot.evidence)]),
-      el("span", { class: "acts" }, slotReadActions(slot)),
+      // In a table the buttons have their own first cell (slotTableRows).
+      cls === "cslot" ? null : el("span", { class: "acts" }, slotReadActions(slot)),
     ]);
   }
   // A table slot that is open (edit · reconcile) moves into its own row under
   // its row, one cell across every column; its own cell keeps the tier badge.
   const slotOpen = (slot) => !!slot && (editingAddr === slot.address || reconcileFor?.address === slot.address);
-  function slotTableRows(cells, slot, cls = "") {
-    if (!slotOpen(slot)) return [el("tr", { class: cls || null }, [...cells, el("td", {}, slotRow(slot, "cslot"))])];
-    const mark = el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]);
-    return [
-      el("tr", { class: `${cls} editing-src`.trim() }, [...cells, el("td", {}, mark)]),
-      el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(cells.length + 1) }, slotRow(slot, "cslot"))),
-    ];
+  /** The head of a slot table, in slotTableColumns order. */
+  const slotTableHead = (columns) =>
+    el("thead", {}, el("tr", {}, columns.map((c) =>
+      el("th", {
+        scope: "col",
+        class: { acts: "th-act", use: "th-ord", order: "th-ord", desc: "th-desc", type: type === "db-schema" ? "th-type" : null }[c.key] ?? null,
+        "aria-label": c.key === "acts" ? "동작" : null,
+        title: c.key === "order" ? "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)" : null,
+        text: c.label,
+      }),
+    )));
+  /**
+   * One slot's rows: `cells` = {key: td} for the table's own cells; the
+   * buttons (acts) and the 설명 (desc) cells come from the slot.
+   */
+  function slotTableRows(columns, cells, slot, cls = "") {
+    const plan = slotRowPlan(columns, { open: slotOpen(slot) });
+    const acts = slot ? slotReadActions(slot) : [];
+    const td = (key) => {
+      if (key === "acts") return el("td", { class: "td-act nowrap" }, acts.length ? el("span", { class: "td-acts" }, acts) : null);
+      if (key === "empty") return el("td", { class: "td-act nowrap" });
+      if (key === "desc") return el("td", {}, slotRow(slot, "cslot"));
+      if (key === "mark") return el("td", {}, el("div", { class: "cslot" }, [tierBadge(slot.tier), el("span", { class: "dim small", text: "아래에서 편집 중" })]));
+      return cells[key] ?? el("td", {});
+    };
+    const row = el("tr", { class: (plan.editColspan ? `${cls} editing-src` : cls).trim() || null }, plan.cells.map(td));
+    if (!plan.editColspan) return [row];
+    return [row, el("tr", { class: "slot-edit-row" }, el("td", { colspan: String(plan.editColspan) }, slotRow(slot, "cslot")))];
   }
   async function commitSlot(address, text, ev, baseBody, ifMatch) {
     const clientBody = structuredClone(baseBody);
@@ -1090,21 +1180,23 @@ function slotBody(ctx, host) {
       const pk = new Set(b().catalog?.primaryKey ?? []);
       const known = new Set((b().catalog?.columns || []).map((c) => c.name));
       const ordered = orderColumns(b().catalog?.columns, b().columnOrder);
+      const columns = slotTableColumns("db-schema", { canOrder });
       const rows = ordered.flatMap((col, i) => {
         const slot = slotByAddr(`columnDescs.${col.name}`);
         const unused = isUnused(b().unusedColumns, col.name);
         const trs = slotTableRows(
-          [
-            canOrder ? useCell(col.name, unused) : null,
-            canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
-            el("td", { class: "mono nowrap" }, [
+          columns,
+          {
+            use: canOrder ? useCell(col.name, unused) : null,
+            order: canOrder ? orderCell(col.name, i, ordered.length, slotOpen(slot)) : null,
+            name: el("td", { class: "mono nowrap" }, [
               col.name,
               pk.has(col.name) ? el("span", { class: "keychip", text: "키" }) : null,
               unused ? el("span", { class: "unused-chip", text: "미사용" }) : null,
             ]),
-            el("td", { class: "mono dim nowrap", text: col.type }),
-            el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
-          ].filter(Boolean),
+            nullable: el("td", { class: "dim nowrap", text: col.nullable ? "가능" : "—" }),
+            type: el("td", { class: "mono dim nowrap", text: col.type }),
+          },
           slot,
           unused ? "unused-row" : "",
         );
@@ -1117,13 +1209,14 @@ function slotBody(ctx, host) {
         if (m && !known.has(m[1]))
           rows.push(
             ...slotTableRows(
-              [
-                canOrder ? el("td", { class: "td-use nowrap" }) : null,
-                canOrder ? el("td", { class: "td-grip nowrap" }) : null,
-                el("td", { class: "mono strike nowrap", text: m[1] }),
-                el("td", { class: "dim nowrap", text: "—" }),
-                el("td", { class: "dim nowrap", text: "열 사라짐" }),
-              ].filter(Boolean),
+              columns,
+              {
+                use: el("td", { class: "td-use nowrap" }),
+                order: el("td", { class: "td-grip nowrap" }),
+                name: el("td", { class: "mono strike nowrap", text: m[1] }),
+                nullable: el("td", { class: "dim nowrap", text: "열 사라짐" }),
+                type: el("td", { class: "dim nowrap", text: "—" }),
+              },
               s,
               "dep-row",
             ),
@@ -1137,11 +1230,7 @@ function slotBody(ctx, host) {
           children: [
             el("p", { class: "dim small cols-sum", text: unusedSummary(b().catalog?.columns, b().unusedColumns) }),
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
-              el("thead", {}, el("tr", {}, [
-                canOrder ? el("th", { scope: "col", class: "th-ord", text: "사용" }) : null,
-                canOrder ? el("th", { scope: "col", class: "th-ord", title: "끌거나 위 · 아래 단추로 열 순서를 바꿉니다 (화면에서만)", text: "순서" }) : null,
-                ...["열", "타입", "빈칸", "설명"].map((t) => el("th", { scope: "col", text: t })),
-              ])),
+              slotTableHead(columns),
               el("tbody", {}, rows),
             ])),
             el("p", { class: "dim small", text: `${fk ? `FK: ${fk} · ` : ""}수집 ${b().catalog?.fetchedAt ?? "—"} — 열 · 타입 · 빈칸은 catalog-push 로만 바뀝니다.` }),
@@ -1157,6 +1246,7 @@ function slotBody(ctx, host) {
           }),
         );
     } else {
+      const fieldColumns = slotTableColumns("msg-format");
       parts.push(sec({ key: "설명", title: "설명", children: [el("p", { class: "dim", text: b().direction === "host->equipment" ? "Host → Equipment" : "Equipment → Host" }), slotRow(slotByAddr("purpose"), "ps")] }));
       parts.push(
         sec({
@@ -1164,15 +1254,16 @@ function slotBody(ctx, host) {
           title: "필드",
           children: [
             el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl" }, [
-              el("thead", {}, el("tr", {}, ["#", "필드", "타입", "필수", "설명"].map((t) => el("th", { scope: "col", text: t })))),
+              slotTableHead(fieldColumns),
               el("tbody", {}, (b().fields || []).flatMap((f, i) =>
                 slotTableRows(
-                  [
-                    el("td", { class: "dim nowrap", text: String(f.seq) }),
-                    el("td", { class: "mono nowrap", text: f.name }),
-                    el("td", { class: "mono dim nowrap", text: f.type }),
-                    el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
-                  ],
+                  fieldColumns,
+                  {
+                    seq: el("td", { class: "dim nowrap", text: String(f.seq) }),
+                    name: el("td", { class: "mono nowrap", text: f.name }),
+                    type: el("td", { class: "mono dim nowrap", text: f.type }),
+                    required: el("td", { class: "nowrap", text: f.required ? "✓" : "—" }),
+                  },
                   slotByAddr(`fields[${i}].desc`),
                 ),
               )),

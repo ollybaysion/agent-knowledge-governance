@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { sqlPlan, tableLookup, tableRefs, tokenize } from "../../public/lib/sql-tokens.mjs";
+import { sqlPlan, tableLookup, tableRefs, tableTip, tokenize } from "../../public/lib/sql-tokens.mjs";
 
 const kinds = (sql) => tokenize(sql).filter((t) => t.t !== "ws").map((t) => `${t.t}:${t.v}`);
 
@@ -77,4 +77,15 @@ test("sqlPlan links known tables, resolves alias.COL through the alias, and a ba
 test("sqlPlan without an index gives the colours only", () => {
   const plan = sqlPlan("SELECT EQP_ID FROM fdc_equipment", null);
   assert.ok(plan.every((t) => !t.table && !t.column));
+});
+
+test("tableTip: the table name, its column count and its description; 설명 없음 when empty, null for an unknown table", () => {
+  const index = {
+    fdc_sensor: { table: "FDC_SENSOR", purpose: "센서 — 설비 1:N 종속", columns: { SNSR_ID: { text: null }, EQP_ID: { text: "설비" } } },
+    bare: { table: "BARE", purpose: null, columns: {} },
+  };
+  assert.deepEqual(tableTip(index, "fdc_sensor"), { head: "FDC_SENSOR", count: "열 2", text: "센서 — 설비 1:N 종속" });
+  assert.deepEqual(tableTip(index, "bare"), { head: "BARE", count: "열 0", text: "설명 없음" });
+  assert.equal(tableTip(index, "nope"), null);
+  assert.equal(tableTip(null, "fdc_sensor"), null);
 });

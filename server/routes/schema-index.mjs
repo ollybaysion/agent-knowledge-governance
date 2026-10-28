@@ -1,12 +1,14 @@
-// GET /api/schema-index: every live db-schema document as {table, columns},
-// for the reading view's SQL — table names become links, column names links
-// with their description. Built again when db-schema/ gets a new commit.
+// GET /api/schema-index: every live db-schema document as {table, purpose,
+// columns}, for the reading view's SQL — table names become links with the
+// table description, column names links with their description. Built again
+// when db-schema/ gets a new commit.
 import { listIds, readJson, revOfPath } from "../store.mjs";
 
 const GONE = new Set(["inactive", "archived"]);
 
 /**
- * {id: {table, columns: {COL: {text}}}} from the db-schema documents.
+ * {id: {table, purpose, columns: {COL: {text}}}} from the db-schema documents.
+ * purpose = the 설명 slot's text, else null.
  * text = columnDescs[COL].text, else catalog.columns[].comment, else null.
  * @param {{id: string, status?: string, body?: object}[]} docs
  */
@@ -22,7 +24,7 @@ export function schemaIndex(docs) {
     for (const [name, slot] of Object.entries(body.columnDescs ?? {})) {
       if (!columns[name] && slot?.text) columns[name] = { text: slot.text };
     }
-    out[doc.id] = { table: body.table ?? doc.id.toUpperCase(), columns };
+    out[doc.id] = { table: body.table ?? doc.id.toUpperCase(), purpose: body.purpose?.text || null, columns };
   }
   return out;
 }

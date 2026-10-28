@@ -1,6 +1,7 @@
 // akg CLI `absorb-mark` and `list`: the absorb skill marks a document as
 // absorbed into a first-class document (PUT /api/docs/:type/:id/absorbed)
-// and lists the documents still to absorb (GET /api/docs?absorbed=stale).
+// and lists the documents still to absorb (GET /api/docs?absorbed=stale) or
+// the ones that carry a tag (GET /api/docs?tag=).
 // Fail-closed like push: any refusal throws.
 import { AkgApiError } from "./errors.mjs";
 
@@ -40,13 +41,14 @@ export async function absorbMark({ serverUrl, token, type, id, rev = null, fetch
 
 /**
  * The list rows of GET /api/docs.
- * @param {{serverUrl: string, token: string, type?: string|null, staleAbsorbed?: boolean, fetchImpl?: typeof fetch}} opts
+ * @param {{serverUrl: string, token: string, type?: string|null, staleAbsorbed?: boolean, tag?: string|null, fetchImpl?: typeof fetch}} opts
  * @returns {Promise<object[]>}
  */
-export async function listDocs({ serverUrl, token, type = null, staleAbsorbed = false, fetchImpl = fetch }) {
+export async function listDocs({ serverUrl, token, type = null, staleAbsorbed = false, tag = null, fetchImpl = fetch }) {
   const query = new URLSearchParams();
   if (type) query.set("type", type);
   if (staleAbsorbed) query.set("absorbed", "stale");
+  if (tag) query.set("tag", tag);
   const qs = query.toString();
   const res = await call(fetchImpl, `${base(serverUrl)}/api/docs${qs ? `?${qs}` : ""}`, { token });
   if (res.status !== 200) throw fail("list 실패", res);

@@ -1175,6 +1175,70 @@ a.chip:hover {
 .doc-full-edit {
   flex: none;
 }
+/* db-schema 머리 띠 오른쪽: 맨 위 · 맨 아래 */
+.doc-jumps {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+/* 문서 머리 태그 줄: # 칩 · 태그 더하기 */
+.doc-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.dt-k {
+  margin-right: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.chip.tg {
+  font-family: var(--sans);
+}
+.tg-h {
+  color: var(--muted);
+  font-weight: 500;
+}
+.tg-go,
+.tg-x {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.tg-go:hover {
+  color: var(--primary-active);
+}
+.tg-x {
+  margin-right: -3px;
+  color: var(--muted);
+}
+.tg-x:hover {
+  color: var(--error-ink);
+}
+.chipfield.tag-in {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-height: 0;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.chipfield.tag-in input {
+  width: 88px;
+  min-width: 0;
+  padding: 0;
+  font: 11.5px var(--sans);
+}
 .doc-meta-row:not(:empty) {
   display: flex;
   gap: 6px;
@@ -1461,6 +1525,11 @@ a.sql-col:focus-visible {
   margin-bottom: 2px;
   color: var(--ink);
   font: 600 12px/1.4 var(--mono);
+}
+.tip-n {
+  margin-left: 8px;
+  font: 500 11.5px var(--sans);
+  color: var(--muted);
 }
 .sql-tip-t {
   display: -webkit-box;
@@ -1766,6 +1835,74 @@ a.sql-col:focus-visible {
 .main.browse {
   padding-top: 0;
   max-width: none;
+}
+/* 문서 탭: 태그 패널 200 + 밀러 열 */
+.browse-grid {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.tagp .plabel {
+  justify-content: space-between;
+  margin: 0;
+  padding: 14px 16px 0;
+}
+.tagp .psearch-w {
+  height: 34px;
+  margin: 10px 12px 6px;
+}
+.tlist {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+}
+.trow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--body);
+  text-align: left;
+  cursor: pointer;
+}
+.trow:hover {
+  background: var(--hover);
+}
+.trow.on {
+  background: var(--surface-card);
+  color: var(--ink);
+  font-weight: 600;
+}
+.trow-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tg-n {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1099px) {
+  .browse-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tagp {
+    position: static;
+    height: auto;
+    max-height: 240px;
+  }
 }
 .miller {
   display: flex;
@@ -2156,6 +2293,26 @@ a.sql-col:focus-visible {
 }
 .cols-tbl td.nowrap {
   white-space: nowrap;
+}
+/* 슬롯 표: 맨 왼쪽 단추 칸(확정 · 폐기)은 단추 폭만, 설명 칸이 남는 폭을 쓴다. db-schema 의 타입은 맨 오른쪽 */
+.cols-tbl th.th-desc {
+  width: auto;
+  white-space: normal;
+}
+.cols-tbl th.th-type {
+  width: 1%;
+  white-space: nowrap;
+}
+.cols-tbl td.td-act {
+  padding-right: 4px;
+}
+/* 단추 칸이 앞에 선 만큼 설명 칸이 좁아진다: 근거 칩은 줄을 바꾼다 */
+.cols-tbl .cslot .txt3 {
+  min-width: 160px;
+}
+.cols-tbl .cslot .ev {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .doc-title.mono {
   font-family: var(--mono);
@@ -3428,6 +3585,87 @@ a.mrow.draft {
   color: var(--body);
   font: 12px/1.5 var(--mono);
   white-space: pre;
+}
+/* 읽기 화면: 플로우 차트를 누르면 그림 아래에 mermaid 원문 칸이 펼쳐진다(mermaid.mjs withCode) */
+.mmd-fold .mermaid-fig {
+  position: relative;
+  padding: 12px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.mmd-fold .mermaid-fig:hover {
+  background: var(--hover);
+}
+.fig-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--field);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.mmd-fold .mermaid-fig:hover .fig-hint,
+.mmd-fold .mermaid-fig:focus-visible .fig-hint,
+.mmd-fold.open .fig-hint {
+  opacity: 1;
+}
+.mmd-fold.open .mermaid-fig {
+  margin-bottom: 0;
+  border-color: var(--hairline-soft);
+  border-bottom-color: transparent;
+  border-radius: 10px 10px 0 0;
+}
+.mcode {
+  margin: 0 0 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0 0 10px 10px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+.mcode[hidden] {
+  display: none;
+}
+.mcode-h {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+.mcode-b {
+  margin: 0;
+  padding: 10px 14px 12px 0;
+  overflow-x: auto;
+  font: 12.5px/1.6 var(--mono);
+  color: var(--body-strong);
+  white-space: pre;
+}
+.mcode-b .ln {
+  display: inline-block;
+  width: 42px;
+  padding-right: 14px;
+  text-align: right;
+  color: var(--muted-soft);
+  user-select: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fig-hint {
+    transition: none;
+  }
 }
 .mmd-frame {
   position: fixed;

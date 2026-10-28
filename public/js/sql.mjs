@@ -1,11 +1,12 @@
 // SQL drawn for reading: colours (sql-kw · sql-str · sql-num · sql-cmt ·
-// sql-bind), a table name that is a db-schema document as a link, and the
-// columns of the named tables as links with their description in a tooltip.
+// sql-bind), a table name that is a db-schema document as a link with its
+// description and column count in a tooltip, and the columns of the named
+// tables as links with their description in the same tooltip.
 // The index comes once (GET /api/schema-index) and again after a write; until
 // it comes, the colours come alone and the links follow.
 import { api, docsVersion } from "./api.mjs";
 import { el } from "./dom.mjs";
-import { sqlPlan } from "/lib/sql-tokens.mjs";
+import { sqlPlan, tableTip } from "/lib/sql-tokens.mjs";
 
 let index = null;
 let indexVersion = -1;
@@ -25,7 +26,17 @@ const docHref = (id) => `#/doc/db-schema/${encodeURIComponent(id)}`;
 
 function nodesOf(sql, idx) {
   return sqlPlan(sql, idx).map((tok) => {
-    if (tok.table) return el("a", { class: "sql-tbl", href: docHref(tok.table), text: tok.v });
+    if (tok.table) {
+      const tip = tableTip(idx, tok.table);
+      return el("a", {
+        class: "sql-tbl",
+        href: docHref(tok.table),
+        "data-tip-h": tip?.head,
+        "data-tip-n": tip?.count,
+        "data-tip": tip?.text,
+        text: tok.v,
+      });
+    }
     if (tok.column)
       return el("a", {
         class: "sql-col",
@@ -48,7 +59,7 @@ export function sqlCode(sql) {
   return code;
 }
 
-// ---------- column tooltip: one element, 150ms after hover or focus ----------
+// ---------- table · column tooltip: one element, 150ms after hover or focus ----------
 let tip = null;
 let timer = null;
 let owner = null;
@@ -68,7 +79,10 @@ function showTip(a) {
       tip = el("div", { class: "sql-tip", id: "sql-tip", role: "tooltip", hidden: true });
       document.body.append(tip);
     }
-    tip.replaceChildren(el("b", { class: "sql-tip-h", text: a.dataset.tipH }), el("span", { class: "sql-tip-t", text: a.dataset.tip }));
+    tip.replaceChildren(
+      el("b", { class: "sql-tip-h" }, [a.dataset.tipH, a.dataset.tipN ? el("span", { class: "tip-n", text: a.dataset.tipN }) : null]),
+      el("span", { class: "sql-tip-t", text: a.dataset.tip }),
+    );
     tip.hidden = false;
     const r = a.getBoundingClientRect();
     const w = tip.offsetWidth;
@@ -82,7 +96,8 @@ function showTip(a) {
   }, 150);
 }
 
-const colOf = (e) => (e.target instanceof Element ? e.target.closest("a.sql-col") : null);
+// A table the index lacks has no data-tip: no tooltip.
+const colOf = (e) => (e.target instanceof Element ? e.target.closest("a.sql-col, a.sql-tbl[data-tip]") : null);
 document.addEventListener("mouseover", (e) => {
   const a = colOf(e);
   if (a && a !== owner) showTip(a);
