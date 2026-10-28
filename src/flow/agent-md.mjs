@@ -149,6 +149,7 @@ function needs(name, head, under) {
  * - flowErrors: the fence's grammar errors (flow-compiler), line = fence line.
  * - flow: the compiled flow, read as far as it reads.
  * - rejection: BE's reason for not registering the md (its first one), null when it registers.
+ *   A second `## 데이터` section is the first reason checked.
  * @param {string} name the md name — the document id
  */
 export function readAgentMd(name, markdown) {
@@ -162,6 +163,9 @@ export function readAgentMd(name, markdown) {
   const compiled = fence ? compile(fence.text) : { flow: QueryFlow.EMPTY, errors: [] };
   const out = { name, queries: [], fence, flowErrors: compiled.errors, flow: compiled.flow, rejection: null };
   try {
+    const data = secs.filter((s) => s.level === 2 && normalize(s.title) === DATA);
+    if (data.length > 1)
+      throw new Reject(`${name}: ## ${DATA} 절은 하나다, ${data.length} 개다 — ${data.map((s) => s.from).join(" · ")} 번째 줄`);
     secs.forEach((s, i) => {
       if (s.level !== 2 || normalize(s.title) !== DATA) return;
       out.queries.push(...needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2))));
