@@ -306,6 +306,36 @@ test("cli push: --create a .md, edit it, a stale --rev is exit 1 with 'sync 뒤 
   }
 });
 
+test("cli push .md: a bad ```chart fence in an active skill is exit 1, each CHART_* error on its own line, and nothing is written", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  const dir = mkdtempSync(join(tmpdir(), "akg-cli-push-chart-"));
+  try {
+    const chartMd = (chart) =>
+      `# trend\n\n## 데이터\n\n### trend — 트렌드\n\n\`\`\`sql\nselect ts, value from fdc_trace\n\`\`\`\n\n\`\`\`chart\n${chart}\n\`\`\`\n`;
+    const good = chartMd("kind = line\nx = ts\ny = value");
+    const made = await app.inject({
+      method: "POST",
+      url: "/api/docs/domain-skill",
+      headers: as("ed-tok"),
+      payload: { schema: "domain-skill/v1", id: "trend", keywords: [{ kw: "trend", inject: "full" }], status: "active", body: { name: "trend", markdown: good } },
+    });
+    assert.equal(made.statusCode, 201, made.body);
+
+    const md = join(dir, "trend.md");
+    writeFileSync(md, chartMd("kind = pie\nx = ts\ny = nope"));
+    const r = await runCli(["push", "domain-skill/trend", md], { serverUrl });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /^akg push   - \$\.body\.markdown: 그래프 펜스 오류 12 번째 줄 CHART_KIND 모르는 종류 pie — 받는 종류는 line · step/m);
+    assert.match(r.stderr, /^akg push   - \$\.body\.markdown: 그래프 펜스 오류 14 번째 줄 CHART_COLUMN y 열 nope 이 조회 trend 의 출력 열에 없다 — 출력 열은 TS · VALUE$/m);
+
+    const got = await app.inject({ method: "GET", url: "/api/docs/domain-skill/trend", headers: as("ed-tok") });
+    assert.equal(got.json().json.body.markdown, good);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
 test("cli push --dry-run: checks the file with no token and no server", async () => {
   const home = mkdtempSync(join(tmpdir(), "akg-cli-push-dry-"));
   try {

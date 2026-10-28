@@ -3,7 +3,8 @@
 // SkillValidateTool.java — and a set of them checked the way BE loads them
 // (QueryFlowTool.rejections, CheckFlow.check). No node imports: the
 // dashboard runs this file as it is.
-import { errorReport, mdLine } from "./flow-error.mjs";
+import { LANG as CHART, readChart } from "./chart-fence.mjs";
+import { Code, errorReport, flowError, mdLine } from "./flow-error.mjs";
 import { QueryFlow, compile } from "./flow-compiler.mjs";
 import { Kind } from "./flow-grammar.mjs";
 import { mapErrors } from "./flow-maps.mjs";
@@ -31,7 +32,16 @@ const LINE_BREAK = /\r\n|[\n\v\f\r\x85\p{Zl}\p{Zp}]/u;
 // BE Query.varsOf: literals blanked, then every :name once, first-seen order.
 const BIND_VAR = /:([A-Za-z][A-Za-z0-9_]*)/g;
 
-class Reject extends Error {}
+// A reason not to register the md; `errors` the chart fence errors it carries (BE FlowError.Rejected.chart).
+class Reject extends Error {
+  constructor(message, errors = []) {
+    super(message);
+    this.errors = errors;
+  }
+}
+
+/** BE FlowError.Rejected.chart's reason: `이름: 그래프 펜스 오류로 거부 — 오류; 오류`. */
+const chartReject = (name, errors) => new Reject(`${name}: 그래프 펜스 오류로 거부 — ${errors.map(errorReport).join("; ")}`, errors);
 
 const normalize = (title) => title.trim().replace(/[?？:：\s]+$/u, "").trim();
 
@@ -105,8 +115,8 @@ function idAndTitle(name, heading) {
   throw new Reject(`${name}: 데이터 항목에 id 가 없습니다 — \`### id — ${heading}\` 처럼 ascii id 를 제목 앞에 적으세요`);
 }
 
-// The fences of an item's body ({text, line} rows): each one's language and
-// inner rows, and whether the last is left open.
+// The fences of an item's body ({text, line} rows): each one's language,
+// opening md line and inner rows, and whether the last is left open.
 function itemFences(rows) {
   const fences = [];
   let open = null;
@@ -114,7 +124,7 @@ function itemFences(rows) {
     const f = FENCE.exec(row.text);
     if (open === null && f) {
       open = f[1];
-      fences.push({ lang: f[2].toLowerCase(), rows: [] });
+      fences.push({ lang: f[2].toLowerCase(), line: row.line, rows: [] });
     } else if (open !== null && row.text.trim().startsWith(open)) open = null;
     else if (open !== null) fences[fences.length - 1].rows.push(row);
   }
@@ -123,8 +133,11 @@ function itemFences(rows) {
 
 // One data item: a map item when a fence of it is ```map, or when a map node
 // points at it and it has no fence; else an SQL item. An old ASK item
-// (```ask or no fence) and the group mark @이름 are refused.
-function need(name, heading, at, rows, mapNodes) {
+// (```ask or no fence) and the group mark @이름 are refused. Beside its
+// statement an SQL item may have one ```chart fence (chart-fence.mjs): two
+// are CHART_DUPLICATE, its errors refuse the md, an unchecked one's warning
+// goes into `warnings`.
+function need(name, heading, at, rows, mapNodes, warnings) {
   const g = GROUP.exec(heading);
   if (g) throw new Reject(`${name}: 항목 \`${heading}\` 의 묶음 표시 @${g[2]} 는 쓰지 않는다 — ${INPUT_HINT}`);
   const [id, title] = idAndTitle(name, heading);
@@ -134,19 +147,31 @@ function need(name, heading, at, rows, mapNodes) {
     const ok = fences.length === 1;
     return { kind: Kind.MAP, id, title, line: at, ok, rows: ok ? fences[0].rows : [] };
   }
-  if (fences.length > 1) throw new Reject(`${name} needs[${id}]: 펜스가 둘입니다 — 항목 하나에 문장 하나다`);
-  const lang = fences[0]?.lang ?? null;
-  if (!fences.length || lang === "ask")
-    throw new Reject(`${name} needs[${id}]: ${!fences.length ? "sql 펜스가 없다" : "ask 펜스는 쓰지 않는다"} — ${INPUT_HINT}`);
+  const statements = fences.filter((f) => f.lang !== CHART);
+  const charts = fences.filter((f) => f.lang === CHART);
+  if (statements.length > 1) throw new Reject(`${name} needs[${id}]: 펜스가 둘입니다 — 항목 하나에 문장 하나다`);
+  const lang = statements[0]?.lang ?? null;
+  if (!statements.length || lang === "ask")
+    throw new Reject(`${name} needs[${id}]: ${!statements.length ? "sql 펜스가 없다" : "ask 펜스는 쓰지 않는다"} — ${INPUT_HINT}`);
   if (lang !== "sql") throw new Reject(`${name} needs[${id}]: 펜스 언어는 sql 입니다 — \`\`\`${lang}`);
-  const sql = trimBlank(fences[0].rows.map((r) => r.text));
-  return { kind: Kind.QUERY, id, title, sql, vars: varsOf(sql) };
+  if (charts.length > 1)
+    throw chartReject(
+      name,
+      charts.slice(1).map((c) => flowError(c.line, Code.CHART_DUPLICATE, `항목 ${id} 에 chart 펜스가 ${charts.length} 개다 — 하나만 둔다`)),
+    );
+  const sql = trimBlank(statements[0].rows.map((r) => r.text));
+  const query = { kind: Kind.QUERY, id, title, sql, vars: varsOf(sql) };
+  if (!charts.length) return query;
+  const read = readChart(query, charts[0], columnsOf(sql));
+  if (read.warning) warnings.push(read.warning);
+  if (read.errors.length) throw chartReject(name, read.errors);
+  return { ...query, chart: read.chart };
 }
 
 // A section's body as {text, line} rows, line 1-based in the md.
 const rowsOf = (s) => s.body.map((text, j) => ({ text, line: s.from + 1 + j }));
 
-function needs(name, head, under, mapNodes) {
+function needs(name, head, under, mapNodes, warnings) {
   const out = [];
   under.forEach((s, i) => {
     if (s.level !== 3) {
@@ -156,14 +181,15 @@ function needs(name, head, under, mapNodes) {
     const rows = rowsOf(s);
     for (const deeper of under.slice(i + 1, nextAtOrAbove(under, i + 1, 3)))
       rows.push({ text: `${"#".repeat(deeper.level)} ${deeper.title}`, line: deeper.from }, ...rowsOf(deeper));
-    out.push(need(name, s.title, s.from, rows, mapNodes));
+    out.push(need(name, s.title, s.from, rows, mapNodes, warnings));
   });
   return out;
 }
 
 /**
  * An agent md as BE reads it to register it.
- * - queries: the SQL items, written order ({id, title, sql, vars}).
+ * - queries: the SQL items, written order ({id, title, sql, vars}, and `chart`
+ *   — chart-fence readChart's — when the item has a ```chart fence).
  * - maps: the map items, written order ({id, title, line, rows: {line, text}[]}):
  *   line is the `###` line, rows the map fence's lines, md lines.
  * - fence: the flow fence — the first ```mermaid fence under `## 데이터` before
@@ -173,6 +199,9 @@ function needs(name, head, under, mapNodes) {
  * - flow: the compiled flow, read as far as it reads.
  * - rejection: BE's reason for not registering the md (its first one), null when it registers.
  *   A second `## 데이터` section is the first reason checked.
+ * - chartErrors: the CHART_* errors of a chart fence rejection, md lines; [] for another reason.
+ * - warnings: a CHART_COLUMN warning at each chart fence whose columns went
+ *   unchecked (`select *`), md lines, items read so far.
  * @param {string} name the md name — the document id
  */
 export function readAgentMd(name, markdown) {
@@ -184,7 +213,7 @@ export function readAgentMd(name, markdown) {
     if (fences.length) fence = { line: s.from + fences[0].at + 1, text: fences[0].lines.join("\n") };
   }
   const compiled = fence ? compile(fence.text) : { flow: QueryFlow.EMPTY, errors: [] };
-  const out = { name, queries: [], maps: [], fence, flowErrors: compiled.errors, flow: compiled.flow, rejection: null };
+  const out = { name, queries: [], maps: [], fence, flowErrors: compiled.errors, flow: compiled.flow, rejection: null, chartErrors: [], warnings: [] };
   const mapNodes = new Set(compiled.flow.nodes.filter((n) => n.kind === Kind.MAP).map((n) => n.id));
   try {
     const data = secs.filter((s) => s.level === 2 && normalize(s.title) === DATA);
@@ -192,7 +221,7 @@ export function readAgentMd(name, markdown) {
       throw new Reject(`${name}: ## ${DATA} 절은 하나다, ${data.length} 개다 — ${data.map((s) => s.from).join(" · ")} 번째 줄`);
     secs.forEach((s, i) => {
       if (s.level !== 2 || normalize(s.title) !== DATA) return;
-      for (const item of needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2)), mapNodes)) {
+      for (const item of needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2)), mapNodes, out.warnings)) {
         const { kind, ...rest } = item;
         if (kind === Kind.QUERY) out.queries.push(rest);
         else out.maps.push(rest);
@@ -215,6 +244,7 @@ export function readAgentMd(name, markdown) {
   } catch (err) {
     if (!(err instanceof Reject)) throw err;
     out.rejection = err.message;
+    out.chartErrors = err.errors;
   }
   return out;
 }
@@ -289,7 +319,8 @@ export function saveCheck(registry, self) {
 
 /**
  * BE's check-flow over md files (CheckFlow.check): grammar errors at their md
- * line, a reading rejection as `파일:1 MD 사유`, the load's errors at their md
+ * line, chart fence errors at their md line, another reading rejection as
+ * `파일:1 MD 사유`, a chart fence left unchecked as a warning, the load's errors at their md
  * line (the fence's opening line when they have none), a subgraph id another md has as a warning. The common md
  * eqp-scope is always in. The md name is the file name without `.md`.
  * @param {{path: string, text: string}[]} files
@@ -306,9 +337,11 @@ export function checkFiles(files) {
     const mine = { path: f.path, fenceAt: Math.max(open, 1), lines: [] };
     out.set(name, mine);
     for (const e of r.flowErrors) mine.lines.push(`${f.path}:${mdLine(e, open)} ${e.code} ${e.message}`);
+    if (!mine.lines.length) for (const e of r.chartErrors) mine.lines.push(`${f.path}:${e.line} ${e.code} ${e.message}`);
     if (!mine.lines.length && r.rejection) mine.lines.push(`${f.path}:1 MD ${r.rejection}`);
     if (mine.lines.length) ok = false;
     else specs.push(r);
+    for (const w of r.warnings) mine.lines.push(`${f.path}:${w.line} 경고 ${w.code} ${w.message}`);
   }
   if (!specs.some((s) => s.name === COMMON)) specs.push(readAgentMd(COMMON, COMMON_MD));
   for (const [name, errors] of flowRejections(specs)) {

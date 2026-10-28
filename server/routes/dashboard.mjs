@@ -33,6 +33,7 @@ export const SHARED_MODULES = new Set([
   "graph-model.mjs",
   "wikilinks.mjs",
   "flow/agent-md.mjs",
+  "flow/chart-fence.mjs",
   "flow/flow-compiler.mjs",
   "flow/flow-error.mjs",
   "flow/flow-grammar.mjs",
