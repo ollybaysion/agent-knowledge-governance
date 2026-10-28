@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common/asset.v1",
+  "title": "asset",
+  "description": "One entry of the envelope's assets[]: a picture this document carries. The bytes live in the asset store (store/assets/<sha256>, POST /api/assets); a write that names a sha256 the store lacks is refused (unknown_asset). The md body shows one with ![alt](asset:<sha256>), and may only name an attached one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sha256", "width", "height"],
+  "properties": {
+    "sha256": {
+      "type": "string",
+      "description": "sha256 (lowercase hex) of the bytes in the asset store.",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "alt": {
+      "type": "string",
+      "description": "What the picture shows, one line. The screen's caption and the img alt.",
+      "pattern": "^[^\\n]*$"
+    },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 }
+  }
+}
