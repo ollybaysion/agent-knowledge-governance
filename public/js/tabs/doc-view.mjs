@@ -1,12 +1,13 @@
 // The reading view: a sticky doc head (type chip · title · status · role ·
-// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집), then the body as
+// id · rev · 녹임 rev · JSON · 원본 ↗ · 타입 정하기 ▾ · 도메인으로 옮기기 · 원본 넣기 · 삭제 · 전체 편집;
+// a db-schema: 맨 위 · 맨 아래), then the body as
 // boxless sections, in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
-import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
+import { KIND_LABEL, docJumps, jumpTop, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
@@ -237,6 +238,12 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     canEdit && (isSkillType(type) || isMdType(type))
       ? el("button", { type: "button", class: "btn sm doc-full-edit", onclick: () => ctx.editSection(null) }, [icon("pencil", 14), "전체 편집"])
       : null;
+  const jumps = docJumps(type);
+  const jumpBar = jumps.length
+    ? el("span", { class: "doc-jumps", role: "group", "aria-label": "문서 끝으로" }, jumps.map((j) =>
+        el("button", { type: "button", class: "btn sm ghost", onclick: () => jumpTo(j.where) }, [icon(j.icon, 14), j.label]),
+      ))
+    : null;
   return el("header", { class: "doc-head" }, [
     el("p", { class: "doc-eyebrow" }, [
       el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
@@ -252,9 +259,17 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       el("span", { class: "doc-bar-title", text: title, "aria-hidden": "true" }),
       el("div", { class: "doc-chips" }, chips.filter(Boolean)),
       fullEdit,
+      jumpBar,
     ]),
     metaRow,
   ]);
+}
+
+/** Scroll the page to its top or its bottom; smooth unless the reader asks for less motion. */
+function jumpTo(where) {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const top = jumpTop(where, { scrollHeight: document.documentElement.scrollHeight, innerHeight });
+  window.scrollTo({ top, behavior: still ? "auto" : "smooth" });
 }
 
 // The chip row sticks under the head; once the title has scrolled away the

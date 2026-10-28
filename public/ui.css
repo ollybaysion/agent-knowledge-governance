@@ -1175,6 +1175,12 @@ a.chip:hover {
 .doc-full-edit {
   flex: none;
 }
+/* db-schema 머리 띠 오른쪽: 맨 위 · 맨 아래 */
+.doc-jumps {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
 .doc-meta-row:not(:empty) {
   display: flex;
   gap: 6px;

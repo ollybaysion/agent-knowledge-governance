@@ -127,6 +127,8 @@ const ICONS = {
   check: [["path", { d: "M20 6 9 17l-5-5" }]],
   copy: [["rect", { x: 9, y: 9, width: 13, height: 13, rx: 2 }], ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]],
   code: [["path", { d: "m16 18 6-6-6-6" }], ["path", { d: "m8 6-6 6 6 6" }]],
+  "up-line": [["path", { d: "M5 3h14" }], ["path", { d: "m18 13-6-6-6 6" }], ["path", { d: "M12 7v14" }]],
+  "down-line": [["path", { d: "M19 21H5" }], ["path", { d: "m18 11-6 6-6-6" }], ["path", { d: "M12 17V3" }]],
   command: [["path", { d: "M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" }]],
 };
 
