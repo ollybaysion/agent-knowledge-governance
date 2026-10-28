@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildApp } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
+import { pngBytes } from "../fixtures/images.mjs";
 
 const BIN = fileURLToPath(new URL("../../bin/akg.mjs", import.meta.url));
 
@@ -396,6 +398,79 @@ test("cli list --tag: the documents that carry the tag; a,b wants both", async (
     const bad = await runCli(["list", "--tag", "Sensor"], { serverUrl });
     assert.equal(bad.status, 1);
   } finally {
+    await cleanup();
+  }
+});
+
+test("cli asset-push: prints sha256 width height; --alt adds the md line; a file that is no picture is exit 1", async () => {
+  const { serverUrl, cleanup } = await setupServer();
+  const dir = mkdtempSync(join(tmpdir(), "akg-cli-asset-"));
+  try {
+    const png = pngBytes(32, 16);
+    const file = join(dir, "a.png");
+    writeFileSync(file, png);
+    const sha = createHash("sha256").update(png).digest("hex");
+    const r = await runCli(["asset-push", file], { serverUrl });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `${sha} 32 16\n`);
+    const alt = await runCli(["asset-push", file, "--alt", "관리도"], { serverUrl });
+    assert.equal(alt.stdout, `${sha} 32 16\n![관리도](asset:${sha})\n`);
+
+    writeFileSync(join(dir, "b.png"), "text");
+    const bad = await runCli(["asset-push", join(dir, "b.png")], { serverUrl });
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /PNG · JPEG · WebP/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+test("cli push .md: a relative picture path is uploaded, written as asset:<sha>, added to assets[]; list shows 그림 n", async () => {
+  const { app, serverUrl, cleanup } = await setupServer();
+  const dir = mkdtempSync(join(tmpdir(), "akg-cli-push-img-"));
+  try {
+    const png = pngBytes(32, 16);
+    const sha = createHash("sha256").update(png).digest("hex");
+    mkdirSync(join(dir, "img"));
+    writeFileSync(join(dir, "img", "a.png"), png);
+    const md = join(dir, "n.md");
+
+    writeFileSync(md, "# n\n\n![없는 그림](./img/none.png)\n");
+    const unread = await runCli(["push", "unclassified/n", md, "--create"], { serverUrl });
+    assert.equal(unread.status, 1);
+    assert.match(unread.stderr, /아무것도 쓰지 않았습니다/);
+    assert.match(unread.stderr, /none\.png/);
+    assert.equal((await app.inject({ method: "GET", url: "/api/docs/unclassified/n", headers: as("ed-tok") })).statusCode, 404);
+
+    writeFileSync(md, "# n\n\n![관리도](./img/a.png)\n\n글 ![아이콘](./img/a.png) 글\n\n```\n![그대로](./img/a.png)\n```\n");
+    const created = await runCli(["push", "unclassified/n", md, "--create"], { serverUrl });
+    assert.equal(created.status, 0, created.stderr);
+    assert.match(created.stdout, new RegExp(`uploaded \\./img/a\\.png → asset:${sha}`));
+    const doc = (await app.inject({ method: "GET", url: "/api/docs/unclassified/n", headers: as("ed-tok") })).json().json;
+    assert.equal(doc.body.markdown, `# n\n\n![관리도](asset:${sha})\n\n글 ![아이콘](asset:${sha}) 글\n\n\`\`\`\n![그대로](./img/a.png)\n\`\`\`\n`);
+    assert.deepEqual(doc.assets, [{ sha256: sha, alt: "관리도", width: 32, height: 16 }]);
+    assert.equal(readFileSync(md, "utf8").includes("./img/a.png"), true, "the local file stays as written");
+
+    // An edit: an asset: picture already in the store joins assets[] with its stored size.
+    const other = pngBytes(8, 4);
+    const otherSha = createHash("sha256").update(other).digest("hex");
+    const up = await app.inject({ method: "POST", url: "/api/assets", headers: { ...as("agent-tok"), "content-type": "image/png" }, payload: other });
+    assert.equal(up.statusCode, 201);
+    writeFileSync(md, `# n\n\n![관리도](./img/a.png)\n\n![](asset:${otherSha})\n`);
+    const edited = await runCli(["push", "unclassified/n", md], { serverUrl });
+    assert.equal(edited.status, 0, edited.stderr);
+    const after = (await app.inject({ method: "GET", url: "/api/docs/unclassified/n", headers: as("ed-tok") })).json();
+    assert.deepEqual(after.assets, [
+      { sha256: sha, alt: "관리도", width: 32, height: 16 },
+      { sha256: otherSha, width: 8, height: 4 },
+    ]);
+
+    const list = await runCli(["list", "unclassified"], { serverUrl });
+    assert.equal(list.status, 0, list.stderr);
+    assert.match(list.stdout, /^unclassified\/n \w+ - 그림 2$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
     await cleanup();
   }
 });

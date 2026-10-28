@@ -10,6 +10,7 @@ import { validate, validateNode } from "./validate.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
 import { readAgentMd } from "./flow/agent-md.mjs";
 import { checkVerifySet } from "./verify-set.mjs";
+import { mdImages } from "./md-images.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -17,6 +18,7 @@ const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 const SCHEMA_FILES = {
   "common/tiered-value.v1": "common/tiered-value.v1.schema.json",
   "common/link.v1": "common/link.v1.schema.json",
+  "common/asset.v1": "common/asset.v1.schema.json",
   "db-schema/v1": "db-schema/v1.schema.json",
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
@@ -92,6 +94,33 @@ export const TAGS_SCHEMA = {
 };
 
 /**
+ * A document's pictures (common/asset.v1): every type may carry them. 50 at
+ * most, each sha256 once (checkAssets), each in the asset store (unknownAssets,
+ * a store question the write routes ask).
+ */
+export const ASSETS_MAX = 50;
+export const ASSETS_SCHEMA = {
+  type: "array",
+  maxItems: ASSETS_MAX,
+  items: { $ref: "common/asset.v1" },
+};
+
+/**
+ * The assets[] entries the store lacks: `$.assets[i]: … — <sha256>` lines,
+ * for the 400 unknown_asset's details. Empty when every one is there.
+ * @param {object} doc
+ * @param {(sha256: string) => boolean} assetExists
+ */
+export function unknownAssets(doc, assetExists) {
+  if (!Array.isArray(doc?.assets)) return [];
+  const out = [];
+  doc.assets.forEach((a, i) => {
+    if (!assetExists(a?.sha256)) out.push(`$.assets[${i}]: 그림이 저장소에 없습니다 — ${a?.sha256}`);
+  });
+  return out;
+}
+
+/**
  * Where this document's knowledge went into a first-class document
  * (domain-skill · db-schema). Kept in the sidecar store/<type>/<id>.meta.json,
  * so marking it leaves the document's rev as it is; the read routes put it
@@ -110,9 +139,9 @@ export const ABSORBED_SCHEMA = {
   },
 };
 
-// json-spec §2 — the keys fixed for every type. `keywords`, `tags`, `links`,
-// `role`, `origin` and `absorbed` are the optional keys; absent keywords and
-// tags read as [].
+// json-spec §2 — the keys fixed for every type. `keywords`, `tags`, `assets`,
+// `links`, `role`, `origin` and `absorbed` are the optional keys; absent
+// keywords, tags and assets read as [].
 const ENVELOPE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -122,6 +151,7 @@ const ENVELOPE_SCHEMA = {
     id: { type: "string", pattern: "^[a-z0-9._-]+$" },
     keywords: { type: "array", items: KEYWORD_SCHEMA },
     tags: TAGS_SCHEMA,
+    assets: ASSETS_SCHEMA,
     // "inactive": exists and is readable through the API, but is kept out of
     // every derivative — no rendered md, no index entry, so it never reaches a
     // mirror or an injection slot. Bulk imports land here (issue #7).
@@ -234,6 +264,32 @@ function checkLinks(doc, errors) {
       fail(errors, `$.links[${i}]: 같은 연결이 두 번 있습니다 — ${key}`);
     seen.add(key);
   });
+}
+
+/** A picture is attached once. */
+function checkAssets(doc, errors) {
+  if (!Array.isArray(doc.assets)) return;
+  const seen = new Set();
+  doc.assets.forEach((a, i) => {
+    if (seen.has(a.sha256)) fail(errors, `$.assets[${i}]: 같은 그림이 두 번 있습니다 — ${a.sha256}`);
+    seen.add(a.sha256);
+  });
+}
+
+/**
+ * The md body's pictures: each is asset:<sha256> (ASSET_SCHEME) and one of
+ * the document's assets[] (ASSET_NOT_ATTACHED). `N 번째 줄 CODE 사유`, N the md line.
+ */
+function checkMdImages(doc, errors) {
+  const markdown = doc.body?.markdown;
+  if (typeof markdown !== "string") return;
+  const attached = new Set((doc.assets ?? []).map((a) => a.sha256));
+  for (const img of mdImages(markdown)) {
+    if (img.sha256 === null)
+      fail(errors, `$.body.markdown: ${img.line} 번째 줄 ASSET_SCHEME 그림 주소는 asset:<sha256> 입니다 — 저장소 그림만 씁니다 (${img.src || "빈 주소"})`);
+    else if (!attached.has(img.sha256))
+      fail(errors, `$.body.markdown: ${img.line} 번째 줄 ASSET_NOT_ATTACHED 그림 ${img.sha256} 이 문서 assets 에 없습니다`);
+  }
 }
 
 const DATA_ID = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -460,6 +516,8 @@ export function validateDocument(doc, refs, { draft = false, assetExists, mdType
   }
   if (errors.length === 0) {
     checkLinks(doc, errors);
+    checkAssets(doc, errors);
+    checkMdImages(doc, errors);
     checkRole(doc, errors);
     if (draft) {
       // A draft skips the completeness/coherence checks a finished doc must

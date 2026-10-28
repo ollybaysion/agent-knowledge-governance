@@ -10,6 +10,7 @@ import { buildApp } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
 import { push, checkPushFile } from "../../src/client/push.mjs";
 import { AkgApiError } from "../../src/client/errors.mjs";
+import { pngBytes } from "../fixtures/images.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-push-"));
@@ -155,6 +156,25 @@ test("push .json: tags go up as the file has them through PUT …/tags; the same
     assert.equal(created.action, "created");
     assert.deepEqual((await t.admin("GET", "/api/docs/voc/m")).json().json.tags, ["new"]);
     assert.deepEqual(checkPushFile({ type: "voc", id: "n", file: { kind: "json", doc: { ...file, tags: "sensor" } } }), ["tags 는 배열이어야 합니다"]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("push .json: assets go up beside the body in the one PUT; the same assets as the server's ride along unsent", async () => {
+  const t = await setup();
+  try {
+    const png = pngBytes(32, 16);
+    const up = await t.admin("POST", "/api/assets", png, { "content-type": "image/png" });
+    const sha256 = up.json().sha256;
+    await t.admin("POST", "/api/docs/voc", vocDoc("n", "# n\n"));
+    const assets = [{ sha256, alt: "관리도", width: 32, height: 16 }];
+    const file = vocDoc("n", `# n\n\n![관리도](asset:${sha256})\n`, { assets });
+    const r = await push({ ...t.base, type: "voc", id: "n", file: { kind: "json", doc: file } });
+    assert.deepEqual(r.kept, []);
+    assert.equal(t.calls.filter((c) => c.method === "PUT").length, 1);
+    assert.deepEqual((await t.admin("GET", "/api/docs/voc/n")).json().assets, assets);
+    assert.deepEqual(checkPushFile({ type: "voc", id: "n", file: { kind: "json", doc: { ...file, assets: "x" } } }), ["assets 는 배열이어야 합니다"]);
   } finally {
     await t.cleanup();
   }
