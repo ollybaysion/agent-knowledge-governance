@@ -212,8 +212,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     doc.absorbed
       ? el("span", {
           class: "chip rev",
-          text: `녹임 rev ${shortRev(doc.absorbed.rev)}`,
-          title: `${doc.absorbed.by} · ${doc.absorbed.at}${doc.absorbed.rev === rev ? "" : " — 녹인 뒤 문서가 바뀜"}`,
+          text: `녹임 ${shortRev(doc.absorbed.rev)}${doc.absorbed.rev === rev ? "" : " · 뒤에 바뀜"}`,
         })
       : null,
     admin
