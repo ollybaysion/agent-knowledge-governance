@@ -4,6 +4,7 @@
 // boxless sections and, when the doc has assets[], the 그림 section under it,
 // in one 720 column. Left: the agent list (a main skill)
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
+// A long db-schema floats 맨 위 · 맨 아래 at the bottom right.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
@@ -11,6 +12,7 @@ import { assetsSection } from "/lib/doc-assets.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
+import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -172,6 +174,7 @@ export async function renderDocScreen(type, id, opts = {}) {
   }
   panel.setSummary(built);
   stickyHead(head);
+  floatJumpBar(type, layout);
   // ⌘K 의 열 이름 결과(?col=…): that 열 row, when the catalog still has it.
   const colName = type === "db-schema" ? findColumn(doc.body?.catalog?.columns, opts.col) : null;
   const colRow = colName ? bodyHost.querySelector(`tr[data-col="${CSS.escape(colName)}"]`) : null;
@@ -328,6 +331,43 @@ function stickyHead(head) {
   if (!h1 || !bar || typeof IntersectionObserver === "undefined") return;
   const offset = embed ? 44 : 110;
   new IntersectionObserver(([e]) => bar.classList.toggle("stuck", !e.isIntersecting), { rootMargin: `-${offset}px 0px 0px 0px` }).observe(h1);
+}
+
+// A long db-schema floats 맨 위 · 맨 아래 at the bottom right, left of the
+// right panel when it stands beside the body. The listeners go with the screen.
+function floatJumpBar(type, layout) {
+  const jumps = floatJumps(type);
+  if (!jumps.length) return;
+  const buttons = jumps.map((j) =>
+    el("button", { type: "button", class: "btn sm ghost", "aria-label": j.aria, onclick: () => jumpTo(j.where, window) }, [icon(j.icon, 14), j.label]),
+  );
+  const bar = el("div", { class: "float-jumps", role: "group", "aria-label": "문서 끝으로", hidden: true }, buttons);
+  layout.appendChild(bar);
+  const side = layout.querySelector(".panel.right");
+  const main = layout.querySelector(".main");
+  const off = new AbortController();
+  const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => paint());
+  function paint() {
+    if (!bar.isConnected) {
+      off.abort();
+      sizes?.disconnect();
+      return;
+    }
+    const page = document.documentElement;
+    const at = jumpState({ scrollY: window.scrollY, scrollHeight: page.scrollHeight, innerHeight: window.innerHeight });
+    bar.hidden = !at.show;
+    jumps.forEach((j, i) => (buttons[i].disabled = at[j.where]));
+    // A button that turns off under the keyboard hands the focus to the other end's.
+    const lost = buttons.findIndex((b) => b.disabled && document.activeElement === b);
+    if (lost >= 0 && at.show) buttons[1 - lost].focus({ preventScroll: true });
+    const sideBox = side?.getBoundingClientRect();
+    const beside = sideBox && main && sideBox.width > 0 && sideBox.left >= main.getBoundingClientRect().right;
+    bar.style.setProperty("--fj-right", `${floatRight({ viewportWidth: page.clientWidth, panelLeft: beside ? sideBox.left : null })}px`);
+  }
+  window.addEventListener("scroll", paint, { passive: true, signal: off.signal });
+  window.addEventListener("resize", paint, { signal: off.signal });
+  sizes?.observe(layout);
+  requestAnimationFrame(paint);
 }
 
 /** DELETE with If-Match after a confirm, then the type's list (an agent: the 에이전트 tab). */

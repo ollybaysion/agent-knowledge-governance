@@ -516,6 +516,34 @@ body.embed .doc-bar {
 .btn.ghost:hover {
   background: var(--hover);
 }
+/* 긴 db-schema 읽기 화면 오른쪽 아래: 맨 위 · 맨 아래 (right = 오른쪽 패널 왼쪽 24) */
+.float-jumps {
+  position: fixed;
+  right: var(--fj-right, 24px);
+  bottom: 24px;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.float-jumps[hidden] {
+  display: none;
+}
+.float-jumps .btn.ghost {
+  justify-content: flex-start;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+/* 꺼진 단추: 바탕은 그대로 덮고 글씨만 흐리게 — 밑의 표가 비치지 않게 */
+.float-jumps .btn.ghost:disabled {
+  opacity: 1;
+  color: var(--muted-soft);
+}
+.float-jumps .btn.ghost:hover:not(:disabled) {
+  background: linear-gradient(var(--hover), var(--hover)), var(--panel);
+}
 .chip {
   display: inline-flex;
   align-items: center;
