@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "../../public/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "../../public/lib/column-order.mjs";
 
 const cols = (...names) => names.map((name) => ({ name, type: "NUMBER", nullable: true }));
 const names = (list) => list.map((c) => c.name);
@@ -70,4 +70,24 @@ test("slotRowPlan: the buttons sit in the first cell; an open slot empties it, m
   assert.deepEqual(open.cells, ["empty", "use", "order", "name", "nullable", "mark", "type"]);
   assert.equal(open.editColspan, cols.length);
   assert.equal(slotRowPlan(slotTableColumns("msg-format"), { open: true }).editColspan, 6);
+});
+
+test("orderSteps: 맨 위로 · 위로 · 아래로 · 맨 아래로; the ends are off at the first and the last row", () => {
+  assert.deepEqual(orderSteps(2, 5).map((s) => [s.label, s.to, s.off]), [
+    ["맨 위로", 0, false],
+    ["위로", 1, false],
+    ["아래로", 3, false],
+    ["맨 아래로", 4, false],
+  ]);
+  assert.deepEqual(orderSteps(0, 5).map((s) => s.off), [true, true, false, false]);
+  assert.deepEqual(orderSteps(4, 5).map((s) => s.off), [false, false, true, true]);
+  assert.deepEqual(orderSteps(0, 1).map((s) => s.off), [true, true, true, true]);
+  assert.deepEqual(orderSteps(1, 3).map((s) => s.key), ["Home", "ArrowUp", "ArrowDown", "End"]);
+});
+
+test("맨 아래로 then 맨 위로: the row goes to the last place, then the first", () => {
+  const names = ["A", "B", "C", "D"];
+  const end = orderSteps(1, 4).at(-1);
+  assert.deepEqual(moveName(names, 1, end.to), ["A", "C", "D", "B"]);
+  assert.deepEqual(moveName(["A", "C", "D", "B"], 3, orderSteps(3, 4)[0].to), ["B", "A", "C", "D"]);
 });

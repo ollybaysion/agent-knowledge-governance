@@ -8,7 +8,7 @@ import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, wikiResolver } from "../md.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
-import { findColumn, moveName, orderColumns, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
+import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
@@ -1095,8 +1095,9 @@ function slotBody(ctx, host) {
       }),
     );
   }
-  /** The handle cell: drag grip (Alt+↑ · Alt+↓ on focus) and 위 · 아래. */
+  /** The handle cell: drag grip (Alt+↑ · Alt+↓ · Alt+Home · Alt+End on focus) and 맨 위로 · 위로 · 아래로 · 맨 아래로. */
   function orderCell(name, i, n, locked) {
+    const steps = orderSteps(i, n);
     const grip = el(
       "button",
       {
@@ -1104,19 +1105,21 @@ function slotBody(ctx, host) {
         class: "grip",
         draggable: locked ? null : "true",
         disabled: locked,
-        "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓`,
+        "aria-label": `${name} 열 옮기기 — Alt+↑ · Alt+↓ · Alt+Home · Alt+End`,
         title: locked ? "설명을 편집하는 동안은 옮기지 않습니다" : "끌거나 Alt+↑ · Alt+↓ 로 옮깁니다",
         onkeydown: (e) => {
-          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          const s = e.altKey ? steps.find((x) => x.key === e.key) : null;
+          if (!s) return;
           e.preventDefault();
-          moveColumn(name, i + (e.key === "ArrowUp" ? -1 : 1));
+          moveColumn(name, s.to);
         },
       },
       icon("grip", 14),
     );
-    const step = (label, iconName, to, off) =>
-      el("button", { type: "button", class: "ord-btn", "aria-label": `${name} ${label}`, title: label, disabled: locked || off, onclick: () => moveColumn(name, to) }, icon(iconName, 13));
-    return el("td", { class: "td-grip nowrap" }, el("span", { class: "ord" }, [grip, step("위로", "up", i - 1, i === 0), step("아래로", "down", i + 1, i === n - 1)]));
+    // 위로 · 아래로 keep their title; 맨 위로 · 맨 아래로 carry the name in aria-label only.
+    const step = (s) =>
+      el("button", { type: "button", class: "ord-btn", "aria-label": `${name} ${s.label}`, title: s.key.startsWith("Arrow") ? s.label : null, disabled: locked || s.off, onclick: () => moveColumn(name, s.to) }, icon(s.icon, 13));
+    return el("td", { class: "td-grip nowrap" }, el("span", { class: "ord" }, [grip, ...steps.map(step)]));
   }
   function wireDrop(tr, name) {
     const grip = tr.querySelector(".grip");

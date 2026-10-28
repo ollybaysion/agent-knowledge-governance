@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
+import { moveName, orderColumns, orderSteps } from "../../public/lib/column-order.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-column-order-"));
@@ -133,6 +134,25 @@ test("columnOrder: facts-push leaves a table without it without it", async () =>
     });
     assert.equal(facts.statusCode, 200, facts.body);
     assert.equal("columnOrder" in facts.json().json.body, false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("columnOrder: 맨 아래로 is one PUT with the column at the end; 맨 위로 brings it to the front", async () => {
+  const { app, cleanup } = await setup();
+  try {
+    assert.equal((await post(app, table())).statusCode, 201);
+    const before = await read(app);
+    const names = orderColumns(before.json.body.catalog.columns, before.json.body.columnOrder).map((c) => c.name);
+    const down = moveName(names, 0, orderSteps(0, names.length).at(-1).to);
+    const r = await put(app, "edtok", before.rev, { ...before.json.body, columnOrder: down });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual((await read(app)).json.body.columnOrder, ["B", "C", "A"]);
+    const up = moveName(down, 2, orderSteps(2, 3)[0].to);
+    const back = await put(app, "edtok", r.json().rev, { ...r.json().json.body, columnOrder: up });
+    assert.equal(back.statusCode, 200, back.body);
+    assert.deepEqual((await read(app)).json.body.columnOrder, ["A", "B", "C"]);
   } finally {
     await cleanup();
   }
