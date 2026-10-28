@@ -1,5 +1,5 @@
-// GET /api/schema-index: the db-schema documents as {table, columns} for the
-// reading view's SQL links and column tooltips.
+// GET /api/schema-index: the db-schema documents as {table, purpose, columns}
+// for the reading view's SQL links and the table · column tooltips.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -30,6 +30,7 @@ test("the index lists each db-schema doc's table and columns, and is built again
     // EQP_ID's slot is an empty scaffold: the catalog comment stands in.
     assert.equal(doc.body.columnDescs.EQP_ID.text, null);
     assert.equal(index.fdc_equipment.columns.EQP_ID.text, "설비 ID");
+    assert.equal(index.fdc_equipment.purpose, doc.body.purpose.text);
     await app.inject({ method: "POST", url: "/api/docs/db-schema", headers: as("a"), payload: example("fdc_sensor") });
     const again = (await app.inject({ method: "GET", url: "/api/schema-index", headers: as("reader") })).json();
     assert.deepEqual(Object.keys(again).sort(), ["fdc_equipment", "fdc_sensor"]);
@@ -53,6 +54,13 @@ test("schemaIndex: description from columnDescs, else the catalog comment, else 
       { id: "off", status: "inactive", body: body() },
       { id: "gone", status: "archived", body: body() },
     ]),
-    { t: { table: "T", columns: { A: { text: "설명 A" }, B: { text: null }, C: { text: "주석 C" } } } },
+    { t: { table: "T", purpose: null, columns: { A: { text: "설명 A" }, B: { text: null }, C: { text: "주석 C" } } } },
   );
+});
+
+test("schemaIndex: purpose is the 설명 slot's text; an empty slot reads null", () => {
+  const doc = (purpose) => ({ id: "t", status: "active", body: { table: "T", purpose, catalog: { columns: [] } } });
+  assert.equal(schemaIndex([doc({ text: "센서 마스터", tier: "inferred" })]).t.purpose, "센서 마스터");
+  assert.equal(schemaIndex([doc({ text: null, tier: "scaffold" })]).t.purpose, null);
+  assert.equal(schemaIndex([doc(undefined)]).t.purpose, null);
 });
