@@ -3529,6 +3529,13 @@ a.mrow.draft {
 .cols-tbl tr.picked > td {
   background: var(--accent-soft);
 }
+/* 줄의 담기 단추: 담긴 줄은 확정 색으로 눌린 모양 */
+.btn.pick-btn[aria-pressed="true"] {
+  background: rgba(93, 184, 114, 0.22);
+  border-color: rgba(93, 184, 114, 0.6);
+  color: var(--success-ink);
+  font-weight: 600;
+}
 .selbar {
   display: flex;
   align-items: center;

@@ -14,7 +14,7 @@ import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
-import { inferredColumns, slotFailText, TIER_FILTERS, tierCounts, tierShown, togglePick, withObject } from "/lib/column-bulk.mjs";
+import { inferredColumns, pickButton, slotFailText, TIER_FILTERS, tierCounts, tierShown, togglePick, withObject } from "/lib/column-bulk.mjs";
 import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
@@ -767,15 +767,30 @@ function slotBody(ctx, host) {
 
   const slotAction = (verb, address, endpoint) => sendSlots(ctx, { verb, endpoint, addresses: [address], noun });
 
-  // 여러 줄 고르기 (admin): 추정 줄의 이름 칸을 누르면 골라지고, 고른 줄이
-  // 있으면 표 위에 띠가 선다. 띠의 확정 · 폐기는 고른 주소를 한 번에 보낸다.
+  // 여러 줄 고르기 (admin): 추정 줄의 이름 칸이나 담기 단추를 누르면 골라지고,
+  // 고른 줄이 있으면 표 위에 띠가 선다. 띠의 확정 · 폐기는 고른 주소를 한 번에
+  // 보낸다(요청 하나 · 커밋 하나).
   const canPick = canApprove;
   let picked = [];
   const pickable = (slot) => canPick && slot?.tier === "inferred" && !slotOpen(slot);
-  function togglePicked(address) {
+  /** `focusAttr` = the element that gets focus back after the repaint. */
+  function togglePicked(address, focusAttr = "data-pick") {
     picked = togglePick(picked, address);
     paint();
-    host.querySelector(`[data-pick="${CSS.escape(address)}"]`)?.focus();
+    host.querySelector(`[${focusAttr}="${CSS.escape(address)}"]`)?.focus();
+  }
+  /** The 담기 button of a pickable row: toggles the row in `picked`, as the name cell does. */
+  function pickButtonEl(address) {
+    const s = pickButton(picked, address);
+    return el("button", {
+      type: "button",
+      class: "btn sm pick-btn",
+      "data-pick-btn": address,
+      "aria-pressed": String(s.pressed),
+      "aria-label": s.label,
+      onclick: () => togglePicked(address, "data-pick-btn"),
+      text: s.text,
+    });
   }
   /** The name cell of a pickable row: a checkbox by click, Space and Enter. */
   function pickCell(td, address) {
@@ -844,9 +859,11 @@ function slotBody(ctx, host) {
   }
   /** The row standing in for an empty filter. */
   const noRows = (columns) => el("tr", {}, el("td", { colspan: String(columns.length), class: "dim", text: "이 등급인 줄이 없습니다" }));
-  function slotReadActions(slot) {
+  /** `pick` = the row is pickable in a table: 확정 becomes 담기, the band sends. */
+  function slotReadActions(slot, pick = false) {
     const acts = [];
-    if (canApprove && slot.tier === "inferred")
+    if (pick) acts.push(pickButtonEl(slot.address));
+    else if (canApprove && slot.tier === "inferred")
       acts.push(el("button", { type: "button", class: "btn promote sm", onclick: () => slotAction("확정", slot.address, "promote") }, ["확정", el("span", { class: "role", text: "admin" })]));
     if (canEdit && (slot.tier === "inferred" || slot.tier === "confirmed"))
       acts.push(el("button", { type: "button", class: "btn danger sm", onclick: () => slotAction("폐기", slot.address, "deprecate"), text: "폐기" }));
@@ -1107,8 +1124,8 @@ function slotBody(ctx, host) {
    */
   function slotTableRows(columns, cells, slot, cls = "") {
     const plan = slotRowPlan(columns, { open: slotOpen(slot) });
-    const acts = slot ? slotReadActions(slot) : [];
     const pick = pickable(slot) && !!cells.name;
+    const acts = slot ? slotReadActions(slot, pick) : [];
     const on = pick && picked.includes(slot.address);
     const td = (key) => {
       if (key === "name" && pick) return pickCell(cells.name, slot.address);

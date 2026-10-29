@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   inferredColumns,
+  pickButton,
   slotFailText,
   TIER_FILTERS,
   tierCounts,
@@ -103,6 +104,31 @@ test("togglePick: a new address goes to the end, a picked one comes out; the inp
   );
   assert.deepEqual(togglePick(undefined, "columnDescs.A"), ["columnDescs.A"]);
   assert.deepEqual(list, ["columnDescs.A", "columnDescs.B"]);
+});
+
+test("pickButton: 담기 when out, 담김 and pressed when in; the name stays 확정에 담기", () => {
+  assert.deepEqual(pickButton(["columnDescs.A"], "columnDescs.B"), {
+    text: "담기",
+    pressed: false,
+    label: "확정에 담기",
+  });
+  assert.deepEqual(pickButton(["columnDescs.A"], "columnDescs.A"), {
+    text: "담김",
+    pressed: true,
+    label: "확정에 담기",
+  });
+  assert.equal(pickButton(undefined, "columnDescs.A").pressed, false);
+});
+
+test("담기 twice gives two addresses for one request; 담기 again takes one out", () => {
+  let picked = [];
+  picked = togglePick(picked, "columnDescs.A");
+  picked = togglePick(picked, "columnDescs.B");
+  assert.deepEqual(picked, ["columnDescs.A", "columnDescs.B"]);
+  assert.equal(pickButton(picked, "columnDescs.B").text, "담김");
+  picked = togglePick(picked, "columnDescs.A");
+  assert.deepEqual(picked, ["columnDescs.B"]);
+  assert.equal(pickButton(picked, "columnDescs.A").text, "담기");
 });
 
 test("slotFailText: the verb, the status, the server's error and the slots it named", () => {
