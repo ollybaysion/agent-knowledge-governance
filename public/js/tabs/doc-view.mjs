@@ -9,6 +9,7 @@ import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
 import { assetsSection } from "/lib/doc-assets.mjs";
+import { examplesSection, msgFormatSections } from "/lib/msg-examples.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
 import { KIND_LABEL, kindOf } from "/lib/table-class.mjs";
 import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableColumns } from "/lib/column-order.mjs";
@@ -1497,6 +1498,15 @@ function slotBody(ctx, host) {
           ],
         }),
       );
+      const examples = examplesSection(b().examples);
+      if (examples)
+        parts.push(
+          sec({
+            key: examples.key,
+            title: examples.title,
+            children: examples.items.flatMap((ex) => [el("p", {}, el("b", { text: ex.label })), el("pre", { class: "md-code", text: ex.payload })]),
+          }),
+        );
     }
     parts.push(
       el("p", { class: "rnote", text: canEdit ? "설명 글을 누르면 그 자리에서 고칩니다 · 확정을 고치면 추정으로 내려갑니다 · 흐름: 빈칸 → 추정 → 확정" : "확정 · 폐기는 슬롯마다 합니다" }),
@@ -1506,7 +1516,7 @@ function slotBody(ctx, host) {
   paint();
   const sections = type === "db-schema"
     ? [{ key: "설명", title: "설명" }, { key: "열", title: "열" }, ...(b().queries?.length ? [{ key: "쓰는 법", title: "쓰는 법" }] : [])]
-    : [{ key: "설명", title: "설명" }, { key: "필드", title: "필드" }];
+    : msgFormatSections(b());
   return { sections };
 }
 
