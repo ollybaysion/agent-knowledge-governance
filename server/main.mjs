@@ -21,7 +21,8 @@ try {
     `akg server listening on http://${HOST}:${PORT} (store=${STORE_DIR})`,
   );
   console.log(`로그인 길: ${app.akg.auth.path}`);
-  const { revs } = app.akg.boot;
+  const { revs, catalog } = app.akg.boot;
+  console.log(`카탈로그: 문서 ${catalog.docs} · ${catalog.ms} ms · heap +${catalog.heapMB} MB`);
   console.log(
     revs
       ? `rev 표: 커밋 ${revs.commits} · 경로 ${revs.paths} · ${revs.ms} ms`

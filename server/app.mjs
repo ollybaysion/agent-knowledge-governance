@@ -20,6 +20,7 @@ import { openAuth } from "./identity.mjs";
 import { CSRF_HEADER } from "./session.mjs";
 import { createQueue } from "./queue.mjs";
 import { createTypes } from "./types.mjs";
+import { createCatalog } from "./catalog.mjs";
 import { registerTypesRoutes } from "./routes/types.mjs";
 import { registerDocsRoutes } from "./routes/docs.mjs";
 import { registerPromoteRoutes } from "./routes/promote.mjs";
@@ -72,6 +73,16 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   const contracts = loadContractSchemas(schemasDir);
   const queue = createQueue();
   const types = createTypes(storeDir, refs);
+  // The documents as the list routes read them, read once here.
+  const heapBefore = process.memoryUsage().heapUsed;
+  const catalogStart = performance.now();
+  const catalog = createCatalog(storeDir, types);
+  const catalogDocs = catalog.load();
+  const catalogBoot = {
+    docs: catalogDocs,
+    ms: Math.round(performance.now() - catalogStart),
+    heapMB: Math.round((process.memoryUsage().heapUsed - heapBefore) / 1e5) / 10,
+  };
 
   // nginx on the same host forwards every request from 127.0.0.1. The
   // failed-auth rate limit keys on request.ip, so without trusting that
@@ -85,9 +96,10 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   });
 
   // What boot did, for the boot log (server/main.mjs).
-  const boot = { revs };
-  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, boot });
+  const boot = { revs, catalog: catalogBoot };
+  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, catalog, boot });
   app.addHook("onClose", () => auth.close());
+  app.addHook("onClose", async () => catalog.close());
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
   // frame-ancestors: the page opens inside FE's drawer (?embed=1), and
