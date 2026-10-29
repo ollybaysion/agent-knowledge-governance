@@ -31,6 +31,14 @@ export function compileIndex(docs) {
   return entries;
 }
 
+/** Index entries in one fixed order: by path, a doc's full entry before its pointer one. Sorts in place. */
+export function sortIndex(entries) {
+  const pointerLast = (e) => (e.precision === undefined ? 0 : 1);
+  return entries.sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : pointerLast(a) - pointerLast(b),
+  );
+}
+
 // Re-exported for server callers: an inactive doc has no file in rendered/ by
 // design (see docWrites), but the dashboard still has to show it — being
 // readable while staying out of the injection path is the entire point of the
@@ -40,7 +48,7 @@ export { renderDocMd };
 
 /**
  * The file writes one doc's persistence needs: store/<type>/<id>.json + its
- * rendered md + (if indexed) a freshly recompiled rendered/<type>/index.json.
+ * rendered md + (if indexed) rendered/<type>/index.json with its entries updated.
  * Split from persistDoc so callers that need to combine a doc write with
  * OTHER writes in the same commit (proposals adopt/reject move a file too —
  * S8 atomicity) can merge write-lists before calling store.commitFiles once.
@@ -58,8 +66,10 @@ export function docWrites(storeDir, type, doc) {
 }
 
 /**
- * docWrites for several docs of one type in one commit: the index is compiled
- * once, from the store with every one of `docs` in place of its stored copy.
+ * docWrites for several docs of one type in one commit. The index changes only
+ * where `docs` and `drop` are: their entries in the stored index go, and the
+ * entries of `docs` come in. A type with no index file yet gets one compiled
+ * from the store with every one of `docs` in place of its stored copy.
  * `drop` = the id of a doc the same commit deletes: the index leaves it out.
  */
 export function docsWrites(storeDir, type, docs, { drop = null } = {}) {
@@ -87,18 +97,34 @@ export function docsWrites(storeDir, type, docs, { drop = null } = {}) {
   }
 
   if (INDEXED_TYPES.has(type)) {
-    const changed = new Map(docs.map((d) => [d.id, d]));
-    const allDocs = listIds(storeDir, type)
-      .filter((id) => id !== drop)
-      .map((id) => changed.get(id) ?? readJson(storeDir, `${type}/${id}.json`))
-      .filter(Boolean);
-    for (const d of docs) if (!allDocs.includes(d)) allDocs.push(d);
+    const relpath = `rendered/${type}/index.json`;
+    const stored = readJson(storeDir, relpath);
     writes.push({
-      relpath: `rendered/${type}/index.json`,
-      content: stableJson(compileIndex(allDocs)),
+      relpath,
+      content: stableJson(
+        sortIndex(Array.isArray(stored) ? updatedIndex(stored, docs, drop) : compiledIndex(storeDir, type, docs, drop)),
+      ),
     });
   }
   return { writes, removes };
+}
+
+// A write of a few docs reads only the index, not every doc of the type: a
+// db-schema store holds thousands of tables.
+function updatedIndex(stored, docs, drop) {
+  const gone = new Set(docs.map((d) => `docs/${d.id}.md`));
+  if (drop) gone.add(`docs/${drop}.md`);
+  return [...stored.filter((e) => !gone.has(e.path)), ...compileIndex(docs)];
+}
+
+function compiledIndex(storeDir, type, docs, drop) {
+  const changed = new Map(docs.map((d) => [d.id, d]));
+  const allDocs = listIds(storeDir, type)
+    .filter((id) => id !== drop)
+    .map((id) => changed.get(id) ?? readJson(storeDir, `${type}/${id}.json`))
+    .filter(Boolean);
+  for (const d of docs) if (!allDocs.includes(d)) allDocs.push(d);
+  return compileIndex(allDocs);
 }
 
 /** The sidecar beside store/<type>/<id>.json that holds `absorbed` (listIds skips it). */
@@ -121,7 +147,7 @@ export function persistAbsorbed(storeDir, type, id, absorbed, { author, message 
 
 /**
  * Persist one doc: store/<type>/<id>.json + its rendered md + (if indexed)
- * a freshly recompiled rendered/<type>/index.json — all in one commit.
+ * rendered/<type>/index.json with its entries updated — all in one commit.
  * Caller is responsible for schema validation and any If-Match / conflict
  * checks BEFORE calling this (this function just writes what it's given).
  */

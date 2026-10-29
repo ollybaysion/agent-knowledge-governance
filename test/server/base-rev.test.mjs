@@ -33,16 +33,16 @@ function newDbSchemaDoc() {
   };
 }
 
-test("readJsonAtRev answers null for anything but a 40-hex rev", () => {
+test("readJsonAtRev answers null for anything but a 40-hex rev", async () => {
   const dir = mkdtempSync(join(tmpdir(), "akg-base-rev-test-"));
   initStore(dir);
   const p = "db-schema/x.json";
-  const rev1 = commitFiles(dir, {
+  const rev1 = await commitFiles(dir, {
     author: "renoir",
     message: "v1",
     writes: [{ relpath: p, content: '{"a":1}\n' }],
   });
-  commitFiles(dir, {
+  await commitFiles(dir, {
     author: "renoir",
     message: "v2",
     writes: [{ relpath: p, content: '{"a":2}\n' }],

@@ -99,7 +99,7 @@ export function registerScoreRoutes(app) {
           const relpath = recordPath(agent);
           const all = [...(readJson(storeDir, relpath) ?? []), ...lines];
           const human = lines.some((l) => l.human);
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: `score ${agent}: ${human ? "사람 점수" : "기계 판정"} ${lines.length}줄`,
             writes: [{ relpath, content: JSON.stringify(all, null, 2) + "\n" }],

@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { git, isCleanRepo } from "./git.mjs";
+import { git, gitAsync, isCleanRepo } from "./git.mjs";
 
 const ID_RE = /^[a-z0-9._-]+$/;
 const ACTOR_RE = /^[a-zA-Z0-9:_-]+$/;
@@ -116,19 +116,35 @@ function cacheFor(dir) {
 // `git diff --cached --quiet` exits 1 when the index differs from HEAD, 0 when
 // it matches. Asked after `git add`, that is exactly "would this commit be
 // empty?" — asked BEFORE committing, so no empty commit is ever attempted.
-function isIndexEmpty(dir) {
+async function isIndexEmpty(dir) {
   try {
-    git(dir, ["diff", "--cached", "--quiet"]);
+    await gitAsync(dir, ["diff", "--cached", "--quiet"]);
     return true;
   } catch {
     return false;
   }
 }
 
+// commitFiles runs git without blocking, so a read can arrive after the files
+// are written and before the commit ends. Each file a commit changes is held
+// here with what it held before the commit (null: it did not exist). The
+// readers below serve that until the commit ends, when the files and their rev
+// switch together: a read never pairs the new content with the old rev.
+const held = new Map(); // absolute path -> Buffer | null
+
+function heldUnder(absDir) {
+  for (const p of held.keys()) if (p.startsWith(absDir + "/")) return true;
+  return false;
+}
+
 // The last commit that touched a path: its rev and author time, cached together.
 function lastCommitOf(dir, relpath) {
   const cache = cacheFor(dir);
   if (cache.has(relpath)) return cache.get(relpath);
+  // git may hold the new commit already while the readers serve the old
+  // files: a cold read here is left unanswered and uncached.
+  const abs = safeJoin(dir, relpath);
+  if (held.has(abs) || heldUnder(abs)) return { rev: null, at: null };
   const [rev, at] = git(dir, ["log", "-1", "--format=%H%x1f%aI", "--", relpath]).trim().split("\x1f");
   const entry = { rev: rev || null, at: rev ? at : null };
   cache.set(relpath, entry);
@@ -149,13 +165,13 @@ function invalidateCache(dir) {
 }
 
 export function readJson(dir, relpath) {
-  const p = safeJoin(dir, relpath);
-  if (!existsSync(p)) return null;
-  return JSON.parse(readFileSync(p, "utf8"));
+  const text = readText(dir, relpath);
+  return text === null ? null : JSON.parse(text);
 }
 
 export function readText(dir, relpath) {
   const p = safeJoin(dir, relpath);
+  if (held.has(p)) return held.get(p)?.toString("utf8") ?? null;
   if (!existsSync(p)) return null;
   return readFileSync(p, "utf8");
 }
@@ -179,8 +195,16 @@ export function readJsonAtRev(dir, relpath, rev) {
 
 export function listIds(dir, type) {
   const typeDir = safeJoin(dir, type);
-  if (!existsSync(typeDir)) return [];
-  return readdirSync(typeDir)
+  const names = new Set(existsSync(typeDir) ? readdirSync(typeDir) : []);
+  // A file a running commit creates is not there yet, one it removes still is.
+  for (const [p, before] of held) {
+    if (dirname(p) !== typeDir) continue;
+    const name = p.slice(typeDir.length + 1);
+    if (before === null) names.delete(name);
+    else names.add(name);
+  }
+  return [...names]
+    .sort()
     .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
     .map((f) => f.slice(0, -".json".length));
 }
@@ -202,13 +226,13 @@ function authorString(actor) {
 // this a failure after the write left the file on disk and in the index:
 // readJson served uncommitted content, the next commit swept it in under
 // another user's --author, and a restart was refused by assertClean.
-function rollback(dir, touched, created) {
+async function rollback(dir, touched, created) {
   const tracked = touched.filter((rel) => !created.has(rel));
   try {
-    if (touched.length) git(dir, ["reset", "-q", "--", ...touched]);
+    if (touched.length) await gitAsync(dir, ["reset", "-q", "--", ...touched]);
   } catch {}
   try {
-    if (tracked.length) git(dir, ["checkout", "-q", "--", ...tracked]);
+    if (tracked.length) await gitAsync(dir, ["checkout", "-q", "--", ...tracked]);
   } catch {}
   for (const rel of created) {
     try {
@@ -220,11 +244,12 @@ function rollback(dir, touched, created) {
 /**
  * One commit: write/remove a set of files, then `git commit --author`.
  * On any failure the tree and index are put back as they were.
+ * Callers run it inside the write queue: one commit at a time.
  * @param {string} dir store root
  * @param {{author: string, message: string, writes?: {relpath:string, content:string}[], removes?: string[]}} change
- * @returns {string} new HEAD rev
+ * @returns {Promise<string>} new HEAD rev
  */
-export function commitFiles(
+export async function commitFiles(
   dir,
   { author, message, writes = [], removes = [] },
 ) {
@@ -232,9 +257,19 @@ export function commitFiles(
   const authorArg = authorString(author);
   const touched = [];
   const created = new Set();
+  const mine = [];
+  const hold = (p) => {
+    if (held.has(p)) return;
+    held.set(p, existsSync(p) ? readFileSync(p) : null);
+    mine.push(p);
+  };
+  const release = () => {
+    for (const p of mine) held.delete(p);
+  };
   try {
     for (const { relpath, content } of writes) {
       const p = safeJoin(dir, relpath);
+      hold(p);
       if (!existsSync(p)) created.add(relpath);
       touched.push(relpath);
       mkdirSync(dirname(p), { recursive: true });
@@ -247,13 +282,14 @@ export function commitFiles(
     for (const relpath of removes) {
       const p = safeJoin(dir, relpath);
       if (!existsSync(p)) continue;
+      hold(p);
       touched.push(relpath);
       rmSync(p);
     }
     if (touched.length === 0)
       throw new StoreError("커밋할 변경이 없습니다", 400);
 
-    git(dir, ["add", "-A", "--", ...touched]);
+    await gitAsync(dir, ["add", "-A", "--", ...touched]);
 
     // Writing the same bytes back is a no-op, not an error. `git commit` fails
     // on an empty index, which surfaced as a 500 on the most ordinary thing a
@@ -266,18 +302,29 @@ export function commitFiles(
     // straight back as the doc's rev — where If-Match compares it against
     // revOfPath(). Returning HEAD would make the next edit 409 on a rev the
     // client was just told was current.
-    if (isIndexEmpty(dir)) {
+    if (await isIndexEmpty(dir)) {
+      release();
       const primary = writes[0]?.relpath ?? touched[0];
       return revOfPath(dir, primary);
     }
     // S12: 커밋 메시지·author는 항상 spawn argv의 개별 원소로 전달 — shell 경유 금지.
-    git(dir, ["commit", "-q", "--author", authorArg, "-m", message]);
+    await gitAsync(dir, ["commit", "-q", "--author", authorArg, "-m", message]);
   } catch (err) {
-    rollback(dir, touched, created);
+    await rollback(dir, touched, created);
+    release();
     throw err;
   }
-  const [rev, at] = git(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]).trim().split("\x1f");
+  let head;
+  try {
+    head = await gitAsync(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]);
+  } catch (err) {
+    release();
+    throw err;
+  }
+  const [rev, at] = head.trim().split("\x1f");
 
+  // The cache and the files switch in one step: no read sits between them.
+  release();
   const cache = cacheFor(dir);
   for (const relpath of touched) {
     cache.set(relpath, { rev, at });

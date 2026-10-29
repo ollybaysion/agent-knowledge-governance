@@ -369,7 +369,7 @@ export function registerDocsRoutes(app) {
           const currentRev = revOfPath(storeDir, relpath);
           if (rev !== currentRev) return { status: 409, body: { error: "unknown_base_rev", currentRev } };
           const absorbed = { rev, at: new Date().toISOString(), by: request.user.id };
-          persistAbsorbed(storeDir, type, id, absorbed, {
+          await persistAbsorbed(storeDir, type, id, absorbed, {
             author: request.user.id,
             message: `absorbed ${type}/${id} @ ${rev.slice(0, 7)}`,
           });
@@ -481,7 +481,7 @@ export function registerDocsRoutes(app) {
           if (conflict) return conflict;
           const flow = flowRefusal(flowCheck("domain-skill", id, newDoc));
           if (flow) return flow;
-          const rev = persistDoc(storeDir, "domain-skill", newDoc, {
+          const rev = await persistDoc(storeDir, "domain-skill", newDoc, {
             author: request.user.id,
             message: `verification-set domain-skill/${id}`,
           });
@@ -582,7 +582,7 @@ export function registerDocsRoutes(app) {
           const flow = flowCheck(type, doc.id, doc);
           const refused = flowRefusal(flow);
           if (refused) return refused;
-          const rev = persistDoc(storeDir, type, doc, {
+          const rev = await persistDoc(storeDir, type, doc, {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
           });
@@ -709,7 +709,7 @@ export function registerDocsRoutes(app) {
           if (refused) return refused;
 
           const note = commitNote(request.headers["x-akg-note"]);
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: note ? `edit ${type}/${id} · ${note}` : `edit ${type}/${id}`,
           });
@@ -839,7 +839,7 @@ export function registerDocsRoutes(app) {
           }
 
           const { writes, removes } = docsWrites(storeDir, type, docs);
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: `batch create ${docs.length} ${type}${runId ? ` (${runId})` : ""}`,
             writes,
@@ -922,7 +922,7 @@ export function registerDocsRoutes(app) {
           const refused = flowRefusal(flow);
           if (refused) return refused;
 
-          const rev = persistDoc(storeDir, type, doc, {
+          const rev = await persistDoc(storeDir, type, doc, {
             author: request.user.id,
             message: `facts-push ${type}/${id}`,
           });
@@ -985,7 +985,7 @@ export function registerDocsRoutes(app) {
               body: { error: "unknown_link_target", missing },
             };
 
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `links ${type}/${id}`,
           });
@@ -1030,7 +1030,7 @@ export function registerDocsRoutes(app) {
           const newDoc = { schema, id: did, ...(keywords !== undefined ? { keywords } : {}), ...(tags.length ? { tags } : {}), ...rest };
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `tags ${type}/${id}`,
           });
@@ -1076,7 +1076,7 @@ export function registerDocsRoutes(app) {
           if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
           const noAsset = assetRefusal(newDoc);
           if (noAsset) return noAsset;
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `assets ${type}/${id}`,
           });
@@ -1124,7 +1124,7 @@ export function registerDocsRoutes(app) {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `role ${type}/${id} → ${role}`,
           });
@@ -1183,7 +1183,7 @@ export function registerDocsRoutes(app) {
               body: { error: "validation_failed", details: errors },
             };
 
-          const rev = persistDoc(storeDir, "db-schema", newDoc, {
+          const rev = await persistDoc(storeDir, "db-schema", newDoc, {
             author: request.user.id,
             message: `catalog-push db-schema/${id}`,
           });
@@ -1252,7 +1252,7 @@ export function registerDocsRoutes(app) {
             const refused = flowRefusal(flow);
             if (refused) return refused;
 
-            const rev = persistDoc(storeDir, type, newDoc, {
+            const rev = await persistDoc(storeDir, type, newDoc, {
               author: request.user.id,
               message: `${action} ${type}/${id}`,
             });
@@ -1326,7 +1326,7 @@ export function registerDocsRoutes(app) {
           }
           if (docs.length) {
             const { writes, removes } = docsWrites(storeDir, type, docs);
-            commitFiles(storeDir, {
+            await commitFiles(storeDir, {
               author: request.user.id,
               message: `activate ${docs.length} ${type}: ${docs.map((d) => d.id).join(", ")}`,
               writes,
@@ -1371,7 +1371,7 @@ export function registerDocsRoutes(app) {
           const newDoc = {
             schema,
             id: did,
-            keywords,
+            ...(keywords !== undefined ? { keywords } : {}),
             status,
             ...(role !== undefined ? { role } : {}),
             ...(origin !== null ? { origin } : {}),
@@ -1379,7 +1379,7 @@ export function registerDocsRoutes(app) {
           };
           const errors = validateForStore(newDoc, refs, inStore);
           if (errors.length) return { status: 400, body: { error: "validation_failed", details: errors } };
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `origin ${type}/${id}`,
           });
@@ -1455,7 +1455,7 @@ export function registerDocsRoutes(app) {
           writes.push(...moved.writes);
           removes.push(...moved.removes);
 
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: `retype ${type}/${id} → ${to}`,
             writes,
@@ -1523,7 +1523,7 @@ export function registerDocsRoutes(app) {
             removes.push(...w.removes);
           }
 
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: `delete ${type}/${id}`,
             writes,

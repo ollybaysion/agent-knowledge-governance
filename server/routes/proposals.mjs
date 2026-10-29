@@ -81,7 +81,7 @@ export function registerProposalsRoutes(app) {
             createdAt: new Date().toISOString(),
             contentHash,
           };
-          commitFiles(storeDir, {
+          await commitFiles(storeDir, {
             author: request.user.id,
             message: `propose ${type}/${id}`,
             writes: [
@@ -178,7 +178,7 @@ export function registerProposalsRoutes(app) {
                 ) + "\n",
             },
           ];
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: `adopt proposal ${pid} -> ${type}/${docId}`,
             writes,
@@ -226,7 +226,7 @@ export function registerProposalsRoutes(app) {
                 ) + "\n",
             },
           ];
-          const rev = commitFiles(storeDir, {
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
             message: reason
               ? `reject proposal ${pid} — ${reason}`

@@ -46,7 +46,7 @@ test("bundle streams a corpus larger than the old 1MB buffer instead of 500ing",
       content: randomBytes(700 * 1024).toString("base64"),
     });
   }
-  commitFiles(storeDir, { author: "renoir", message: "big corpus", writes });
+  await commitFiles(storeDir, { author: "renoir", message: "big corpus", writes });
 
   const res = await app.inject({
     method: "GET",
@@ -77,7 +77,7 @@ test("bundle streams a corpus larger than the old 1MB buffer instead of 500ing",
 
 test("bundle still answers 304 when the caller already has HEAD", async () => {
   const { app, storeDir, cleanup } = await setup();
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "small corpus",
     writes: [{ relpath: "rendered/db-schema/docs/a.md", content: "# a\n" }],

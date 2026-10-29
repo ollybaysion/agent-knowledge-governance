@@ -172,6 +172,25 @@ test("agent: origin is 200 and null drops it; no If-Match is 428, a stale rev is
   }
 });
 
+test("origin on a document without keywords is 200 and leaves no keywords key", async () => {
+  const t = await setup();
+  try {
+    const { keywords: _keywords, ...doc } = vocDoc("n", "# n\n\n글\n");
+    const created = await t.agent("POST", "/api/docs/voc", doc);
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal("keywords" in created.json().json, false);
+
+    const origin = { url: "https://wiki.example/1" };
+    const set = await t.agent("PUT", "/api/docs/voc/n/origin", { origin }, { "if-match": created.json().rev });
+    assert.equal(set.statusCode, 200, set.body);
+    assert.deepEqual(set.json().json.origin, origin);
+    const stored = JSON.parse(execFileSync("git", ["-C", t.storeDir, "show", "HEAD:voc/n.json"], { encoding: "utf8" }));
+    assert.equal("keywords" in stored, false);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 test("agent: promote · deprecate · activate · delete · role · retype · types stay 403", async () => {
   const t = await setup();
   try {

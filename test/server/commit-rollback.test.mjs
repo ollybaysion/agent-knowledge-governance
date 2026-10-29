@@ -34,9 +34,9 @@ function freshStore() {
 const filesOf = (dir, rev) =>
   git(dir, ["show", "--name-only", "--format=", rev]).trim().split("\n");
 
-test("a bad author is a 400 before anything is written, and the next commit carries only its own file", () => {
+test("a bad author is a 400 before anything is written, and the next commit carries only its own file", async () => {
   const dir = freshStore();
-  assert.throws(
+  await assert.rejects(
     () =>
       commitFiles(dir, {
         author: "kim.minsu",
@@ -49,7 +49,7 @@ test("a bad author is a 400 before anything is written, and the next commit carr
   assert.equal(readJson(dir, "db-schema/a.json"), null);
   assert.doesNotThrow(() => assertClean(dir));
 
-  const rev = commitFiles(dir, {
+  const rev = await commitFiles(dir, {
     author: "renoir",
     message: "add b",
     writes: [{ relpath: "db-schema/b.json", content: '{"b":1}\n' }],
@@ -58,9 +58,9 @@ test("a bad author is a 400 before anything is written, and the next commit carr
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("a git commit that fails puts back changed, created and removed files", () => {
+test("a git commit that fails puts back changed, created and removed files", async () => {
   const dir = freshStore();
-  commitFiles(dir, {
+  await commitFiles(dir, {
     author: "renoir",
     message: "seed",
     writes: [
@@ -72,7 +72,7 @@ test("a git commit that fails puts back changed, created and removed files", () 
   writeFileSync(hook, "#!/bin/sh\nexit 1\n");
   chmodSync(hook, 0o755);
 
-  assert.throws(() =>
+  await assert.rejects(() =>
     commitFiles(dir, {
       author: "renoir",
       message: "refused by hook",
@@ -89,7 +89,7 @@ test("a git commit that fails puts back changed, created and removed files", () 
   assert.doesNotThrow(() => assertClean(dir));
 
   rmSync(hook);
-  const rev = commitFiles(dir, {
+  const rev = await commitFiles(dir, {
     author: "renoir",
     message: "after",
     writes: [{ relpath: "db-schema/other.json", content: '{"o":1}\n' }],
