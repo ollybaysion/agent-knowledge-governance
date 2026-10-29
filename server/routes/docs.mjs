@@ -1371,7 +1371,7 @@ export function registerDocsRoutes(app) {
           const newDoc = {
             schema,
             id: did,
-            keywords,
+            ...(keywords !== undefined ? { keywords } : {}),
             status,
             ...(role !== undefined ? { role } : {}),
             ...(origin !== null ? { origin } : {}),
