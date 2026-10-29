@@ -20,7 +20,6 @@ import {
   revOfPath,
   changedAtOfPath,
   readJsonAtRev,
-  listIds,
   commitFiles,
   isValidId,
   hasAsset,
@@ -44,9 +43,12 @@ import {
   missingLinkTargets,
   resolveLinks,
   resolveWikilinks,
+  resolveWikiTargets,
   withLinks,
 } from "../links.mjs";
-import { activeTableUses, addOwner, agentRegistry, dataIdOwners, tableClassOf } from "../data-ids.mjs";
+import { columnsOf } from "../catalog.mjs";
+import { tableUses } from "../../src/table-class.mjs";
+import { activeTableUses, addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
 import { UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
@@ -67,13 +69,6 @@ function docMd(storeDir, type, doc, md) {
   } catch {
     return null;
   }
-}
-
-// The name people know a document by, for the dashboard's search: a manual's
-// title, a screen's name, a skill's name, a table, a command.
-function titleOf(doc) {
-  const b = doc.body ?? {};
-  return b.title ?? b.name ?? b.table ?? b.command ?? null;
 }
 
 // X-AKG-Note: what the editor saved ("절 저장: 도메인 지식"), URI-encoded since a
@@ -152,7 +147,7 @@ export function splitPutAssets(raw) {
 }
 
 export function registerDocsRoutes(app) {
-  const { storeDir, refs, queue, contracts, types } = app.akg;
+  const { storeDir, refs, queue, contracts, types, catalog } = app.akg;
   // What the validator needs from the store (a manual's captures, the data
   // ids other skills hold, the md types).
   const inStore = {
@@ -215,8 +210,8 @@ export function registerDocsRoutes(app) {
     return details.length ? { status: 400, body: { error: "unknown_asset", details } } : null;
   };
 
-  const wikilinksOf = (type, doc, typeIds) => {
-    const wikilinks = resolveWikilinks(storeDir, typeIds, type, doc).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
+  const wikilinksOf = (wikis, typeIds) => {
+    const wikilinks = resolveWikiTargets(catalog, typeIds, wikis).map(({ text, type: t, id, found }) => ({ text, type: t, id, found }));
     return wikilinks.length ? { wikilinks } : {};
   };
 
@@ -236,9 +231,9 @@ export function registerDocsRoutes(app) {
             ...getSlot(doc.body, address),
           }))
         : [],
-      links: resolveLinks(storeDir, doc.links),
-      backlinks: backlinksOf(storeDir, typeIds, type, id),
-      wikilinks: resolveWikilinks(storeDir, typeIds, type, doc),
+      links: resolveLinks(catalog, doc.links),
+      backlinks: backlinksOf(catalog, typeIds, type, id),
+      wikilinks: resolveWikilinks(catalog, typeIds, type, doc),
       ...warningsOf(type, doc),
       ...(type === "db-schema" ? tableClassOf(doc, activeTableUses(storeDir)) : {}),
     };
@@ -257,30 +252,28 @@ export function registerDocsRoutes(app) {
       if (wanted.error) return reply.code(400).send({ error: "invalid_query", param: "tag", invalid: wanted.error });
       const docs = [];
       const typeIds = types.ids();
-      let uses = null; // read once, at the first db-schema
+      let uses = null; // worked out once, at the first db-schema
       for (const t of type ? [type] : types.ids()) {
-        const bodySchema = types.bodySchema(t);
-        if (!bodySchema) continue;
-        for (const id of listIds(storeDir, t)) {
-          const doc = readJson(storeDir, `${t}/${id}.json`);
-          if (!doc) continue;
+        if (!types.bodySchema(t)) continue;
+        for (const doc of catalog.entries(t)) {
+          const { id } = doc;
           if (q && !id.includes(q)) continue;
-          if (!wanted.tags.every((t) => (doc.tags ?? []).includes(t))) continue;
-          const tiers = tierSummary(bodySchema, doc.body);
+          if (!wanted.tags.every((t) => doc.tags.includes(t))) continue;
+          const { tiers } = doc;
           if (tier && !tiers[tier]) continue;
           const rev = revOfPath(storeDir, `${t}/${id}.json`);
-          const mark = withAbsorbed(storeDir, t, doc).absorbed;
+          const mark = doc.absorbed;
           if (absorbed === "stale" && mark?.rev === rev) continue;
           docs.push({
             type: t,
             id,
             status: doc.status,
             tiers,
-            keywords: doc.keywords ?? [],
-            tags: doc.tags ?? [],
-            assetCount: (doc.assets ?? []).length,
-            links: doc.links ?? [],
-            title: titleOf(doc),
+            keywords: doc.keywords,
+            tags: doc.tags,
+            assetCount: doc.assetCount,
+            links: doc.links,
+            title: doc.title,
             ...originOf(doc),
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
@@ -288,10 +281,10 @@ export function registerDocsRoutes(app) {
             // columns: the catalog's column names, unused ones too — what ⌘K finds a table by.
             ...(t === "db-schema"
               ? {
-                  ...(doc.body?.kind ? { kind: doc.body.kind } : {}),
-                  ...(doc.body?.unusedColumns ? { unusedColumns: doc.body.unusedColumns } : {}),
-                  ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))),
-                  columns: (doc.body?.catalog?.columns ?? []).map((c) => c.name),
+                  ...(doc.kind ? { kind: doc.kind } : {}),
+                  ...(doc.unusedColumns ? { unusedColumns: doc.unusedColumns } : {}),
+                  ...tableClass(doc.table, doc.coverage, (uses ??= tableUses(catalog.agents()))),
+                  columns: columnsOf(doc),
                 }
               : {}),
             rev,
@@ -299,7 +292,7 @@ export function registerDocsRoutes(app) {
             ...(mark ? { absorbed: mark } : {}),
             // The body's [[ ]] with where each points: the graph draws them
             // thin and the unresolved ones as 끊긴 연결.
-            ...wikilinksOf(t, doc, typeIds),
+            ...wikilinksOf(doc.wikis, typeIds),
           });
         }
       }
@@ -313,10 +306,9 @@ export function registerDocsRoutes(app) {
     const tags = {};
     for (const t of types.ids()) {
       if (!types.bodySchema(t)) continue;
-      for (const id of listIds(storeDir, t)) {
-        const doc = readJson(storeDir, `${t}/${id}.json`);
-        if (!doc || doc.status === "archived") continue;
-        for (const tag of doc.tags ?? []) tags[tag] = (tags[tag] ?? 0) + 1;
+      for (const doc of catalog.entries(t)) {
+        if (doc.status === "archived") continue;
+        for (const tag of doc.tags) tags[tag] = (tags[tag] ?? 0) + 1;
       }
     }
     return { tags };
@@ -472,7 +464,7 @@ export function registerDocsRoutes(app) {
             if (err instanceof EditError) return { status: 400, body: { error: "edit_rejected", message: err.message } };
             throw err;
           }
-          const merged = mergeBodyLinks(storeDir, types.ids(), "domain-skill", doc, { ...doc, body });
+          const merged = mergeBodyLinks(catalog, types.ids(), "domain-skill", doc, { ...doc, body });
           if (merged.error) return { status: 400, body: merged.error };
           const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
@@ -553,7 +545,7 @@ export function registerDocsRoutes(app) {
             .send({ error: "edit_rejected", message: err.message });
         throw err;
       }
-      const merged = mergeBodyLinks(storeDir, types.ids(), type, null, {
+      const merged = mergeBodyLinks(catalog, types.ids(), type, null, {
         ...submitted,
         body: resolvedBody,
       });
@@ -564,7 +556,7 @@ export function registerDocsRoutes(app) {
         return reply
           .code(400)
           .send({ error: "validation_failed", details: errors });
-      const missing = missingLinkTargets(storeDir, doc.links);
+      const missing = missingLinkTargets(catalog, doc.links);
       if (missing.length)
         return reply.code(400).send({ error: "unknown_link_target", missing });
       const noAsset = assetRefusal(doc);
@@ -688,7 +680,7 @@ export function registerDocsRoutes(app) {
           }
 
           // [[ ]] the edit added or dropped move links[] with it.
-          const merged = mergeBodyLinks(storeDir, types.ids(), type, currentDoc, {
+          const merged = mergeBodyLinks(catalog, types.ids(), type, currentDoc, {
             ...currentDoc,
             body: mergedBody,
           });
@@ -777,7 +769,7 @@ export function registerDocsRoutes(app) {
           }
           throw err;
         }
-        const merged = mergeBodyLinks(storeDir, types.ids(), type, null, {
+        const merged = mergeBodyLinks(catalog, types.ids(), type, null, {
           ...raw,
           status: "inactive",
           body,
@@ -792,7 +784,7 @@ export function registerDocsRoutes(app) {
           rejected.push({ ...at, error: "validation_failed", details: errors });
           continue;
         }
-        const missing = missingLinkTargets(storeDir, doc.links);
+        const missing = missingLinkTargets(catalog, doc.links);
         if (missing.length) {
           rejected.push({ ...at, error: "unknown_link_target", missing });
           continue;
@@ -969,7 +961,7 @@ export function registerDocsRoutes(app) {
 
           // The body's [[ ]] stay linked whatever the list says: they are
           // removed by editing the body, not here.
-          const merged = mergeBodyLinks(storeDir, types.ids(), type, doc, doc, links);
+          const merged = mergeBodyLinks(catalog, types.ids(), type, doc, doc, links);
           if (merged.error) return { status: 400, body: merged.error };
           const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
@@ -978,7 +970,7 @@ export function registerDocsRoutes(app) {
               status: 400,
               body: { error: "validation_failed", details: errors },
             };
-          const missing = missingLinkTargets(storeDir, newDoc.links);
+          const missing = missingLinkTargets(catalog, newDoc.links);
           if (missing.length)
             return {
               status: 400,
@@ -1438,7 +1430,7 @@ export function registerDocsRoutes(app) {
           const removes = [relpath, absorbedPath(type, id), docMdPath(type, doc, { md: types.isMd(type) })];
           for (const t of types.ids()) {
             const changed = [];
-            for (const sid of listIds(storeDir, t)) {
+            for (const [, sid] of catalog.linkers([t], type, id)) {
               if (t === type && sid === id) continue;
               const d = readJson(storeDir, `${t}/${sid}.json`);
               if (!d?.links?.some(pointsHere)) continue;
@@ -1503,7 +1495,7 @@ export function registerDocsRoutes(app) {
           let ownTypeDone = false;
           for (const t of types.ids()) {
             const changed = [];
-            for (const sid of listIds(storeDir, t)) {
+            for (const [, sid] of catalog.linkers([t], type, id)) {
               if (t === type && sid === id) continue;
               const d = readJson(storeDir, `${t}/${sid}.json`);
               if (!d?.links?.some(pointsHere)) continue;

@@ -40,7 +40,7 @@ function typeFields(body) {
 }
 
 export function registerTypesRoutes(app) {
-  const { storeDir, queue, types } = app.akg;
+  const { storeDir, queue, types, catalog } = app.akg;
 
   // Runs `change(file)` on the current types file inside the queue and commits
   // the {file, message} it returns; `change` answers {status, body} to refuse.
@@ -58,12 +58,12 @@ export function registerTypesRoutes(app) {
           message: next.message,
           writes: typesWrites(next.file),
         });
-        return { status: next.created ? 201 : 200, body: types.list() };
+        return { status: next.created ? 201 : 200, body: types.list(catalog) };
       },
       { priority: priorityOf(request.user) },
     );
 
-  app.get("/api/types", { config: { roles: ["user", "agent"] } }, async () => types.list());
+  app.get("/api/types", { config: { roles: ["user", "agent"] } }, async () => types.list(catalog));
 
   app.put(
     "/api/types/order",
