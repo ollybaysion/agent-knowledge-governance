@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 설계 문서 (v0.4.8 초안)
+# agent-knowledge-governance — 설계 문서 (v0.4.9 초안)
 
 > claude-hooks에 keyword-docs로 들어간 **도메인 지식 코퍼스**(db-schema · msg-format ·
 > domain-aware-skill)를 독립 레포로 분리하고, **서버에 올려 여러 사람이 대시보드에서
@@ -37,6 +37,8 @@
 > db-schema-docs 포맷 소유자를 claude-hooks로 이관한 것과 같은 패턴.
 > v0.4.8 개정(2026-10-26, 사용자 결정): agent 토큰 쓰기에 수정 · 새 문서 · links 를 더함(D6) —
 > 티어는 추정까지, 승격 · 삭제 · 역할 · 타입은 admin. CLI `akg push`.
+> v0.4.9 개정(2026-10-29): D8 — 에이전트 md 는 저장 때 BE 규칙 미러(`src/flow/`)로
+> 검사한다. 흐름 · 선택 분기 · map · chart 펜스.
 
 ---
 
@@ -379,6 +381,17 @@ observability 서버는 개인용(루프백 강제, 인증 OFF, 단일 파일 4,
   외부 노출은 동일 호스트 리버스 프록시가 전담(내부망에서 앱 포트 직접 접속 차단).
 - 기존 obs 대시보드의 keyword-docs 탭은 허브 배포 후 "허브로 가기" 링크로 축소
   (Phase 3에서 정리).
+
+### D8. 에이전트 md 는 저장 때 BE 규칙 미러로 검사한다
+
+- 왜: BE 는 reload 때 규칙에 어긋난 md 를 적재에서 뺀다. 그때 알면 늦다.
+  저장하는 사람이 그 자리에서 사유를 받아야 고친다.
+- 어디: `src/flow/` 가 BE `FlowGrammar` · `FlowCompiler` · `FlowRules` ·
+  `FlowMaps` · `ChartFence` · `FlowError` 를 한 파일씩 옮긴다. 서버 저장 ·
+  활성화와 편집기 화면이 같은 파일을 돌린다. 코드 이름과 사유 글은 BE 와 같다.
+- 무엇: 흐름 펜스(선택 분기의 `선택:` 토막 포함) · 변환 노드 map 펜스 · 조회
+  항목의 chart 펜스.
+- 상세 · 코드 목록 · BE 와 다른 점은 consuming.md 10절.
 
 ---
 
