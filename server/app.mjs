@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadContractSchemas, loadSchemas } from "../src/envelope.mjs";
-import { initStore, isValidId } from "./store.mjs";
+import { initStore, isValidId, warmRevCache } from "./store.mjs";
 import {
   hasGroup,
   isRateLimited,
@@ -63,6 +63,9 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   // Fail-closed checks run BEFORE the app object is even constructed —
   // there is no window where an app exists but auth/store are unverified.
   initStore(storeDir);
+  // Every list answer carries each document's rev: one walk of the history
+  // here instead of one `git log -1` per document on the first list.
+  const revs = warmRevCache(storeDir);
   const auth = await openAuth(authConfig); // throws AuthBootError: no FE address, Keycloak unreachable, bad password file, Redis unreachable
 
   const refs = loadSchemas(schemasDir);
@@ -81,7 +84,9 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     trustProxy: "loopback",
   });
 
-  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types });
+  // What boot did, for the boot log (server/main.mjs).
+  const boot = { revs };
+  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, boot });
   app.addHook("onClose", () => auth.close());
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
