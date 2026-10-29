@@ -53,7 +53,7 @@ export function registerTypesRoutes(app) {
           return { status: 409, body: { error: "unknown_base_rev", currentRev: rev } };
         const next = change(structuredClone(file));
         if (next.status) return next;
-        commitFiles(storeDir, {
+        await commitFiles(storeDir, {
           author: request.user.id,
           message: next.message,
           writes: typesWrites(next.file),

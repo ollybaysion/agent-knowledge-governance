@@ -85,7 +85,7 @@ export function registerAssetsRoutes(app) {
             uploadedBy: request.user.id,
             uploadedAt: new Date().toISOString(),
           };
-          commitFiles(storeDir, {
+          await commitFiles(storeDir, {
             author: request.user.id,
             message: `asset ${sha256.slice(0, 12)} (${mediaType} ${width}x${height})`,
             writes: [

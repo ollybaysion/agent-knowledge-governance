@@ -114,7 +114,7 @@ export function registerPromoteRoutes(app) {
               body: { error: "validation_failed", details: errors },
             };
 
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message: `promote ${type}/${id}: ${targets.join(", ")}`,
           });
@@ -202,7 +202,7 @@ export function registerPromoteRoutes(app) {
           const message = reason
             ? `deprecate ${type}/${id}: ${targets.join(", ")} — ${reason}`
             : `deprecate ${type}/${id}: ${targets.join(", ")}`;
-          const rev = persistDoc(storeDir, type, newDoc, {
+          const rev = await persistDoc(storeDir, type, newDoc, {
             author: request.user.id,
             message,
           });

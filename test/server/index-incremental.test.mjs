@@ -139,7 +139,7 @@ test("an index in the old order is sorted by the next write; the same docs give 
     const sorted = t.indexText();
     // The order the full compile used to leave: a doc created last came last.
     const shuffled = JSON.parse(sorted).reverse();
-    commitFiles(t.storeDir, {
+    await commitFiles(t.storeDir, {
       author: "renoir",
       message: "old order",
       writes: [{ relpath: "rendered/db-schema/index.json", content: JSON.stringify(shuffled, null, 2) + "\n" }],

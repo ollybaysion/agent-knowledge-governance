@@ -20,23 +20,23 @@ function freshDir() {
   return mkdtempSync(join(tmpdir(), "akg-store-test-"));
 }
 
-test("initStore creates a clean git repo; assertClean passes right after", () => {
+test("initStore creates a clean git repo; assertClean passes right after", async () => {
   const dir = freshDir();
   initStore(dir);
   assert.doesNotThrow(() => assertClean(dir));
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("validateId rejects path traversal and non-lowercase ids", () => {
+test("validateId rejects path traversal and non-lowercase ids", async () => {
   assert.throws(() => validateId("../etc/passwd"), StoreError);
   assert.throws(() => validateId("Testuser.FDC"), StoreError);
   assert.doesNotThrow(() => validateId("testuser.fdc_sensor"));
 });
 
-test("commitFiles writes + commits, rev is retrievable, cache is warm without a fresh git log", () => {
+test("commitFiles writes + commits, rev is retrievable, cache is warm without a fresh git log", async () => {
   const dir = freshDir();
   initStore(dir);
-  const rev = commitFiles(dir, {
+  const rev = await commitFiles(dir, {
     author: "renoir",
     message: "add doc",
     writes: [{ relpath: "db-schema/t.x.json", content: '{"a":1}\n' }],
@@ -47,23 +47,23 @@ test("commitFiles writes + commits, rev is retrievable, cache is warm without a 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("revOfPath of a directory follows each commit under it, after a cold read", () => {
+test("revOfPath of a directory follows each commit under it, after a cold read", async () => {
   const dir = freshDir();
   initStore(dir);
-  const rev1 = commitFiles(dir, {
+  const rev1 = await commitFiles(dir, {
     author: "renoir",
     message: "x",
     writes: [{ relpath: "domain-skill/x.json", content: '{"x":1}\n' }],
   });
   assert.equal(revOfPath(dir, "domain-skill"), rev1);
-  const rev2 = commitFiles(dir, {
+  const rev2 = await commitFiles(dir, {
     author: "renoir",
     message: "y",
     writes: [{ relpath: "domain-skill/y.json", content: '{"y":1}\n' }],
   });
   assert.notEqual(rev2, rev1);
   assert.equal(revOfPath(dir, "domain-skill"), rev2);
-  const rev3 = commitFiles(dir, {
+  const rev3 = await commitFiles(dir, {
     author: "renoir",
     message: "nested",
     writes: [{ relpath: "proposals/pending/p.json", content: "{}\n" }],
@@ -74,15 +74,15 @@ test("revOfPath of a directory follows each commit under it, after a cold read",
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("readJsonAtRev reads a historical version after a second commit changes the file", () => {
+test("readJsonAtRev reads a historical version after a second commit changes the file", async () => {
   const dir = freshDir();
   initStore(dir);
-  const rev1 = commitFiles(dir, {
+  const rev1 = await commitFiles(dir, {
     author: "renoir",
     message: "v1",
     writes: [{ relpath: "db-schema/t.x.json", content: '{"a":1}\n' }],
   });
-  commitFiles(dir, {
+  await commitFiles(dir, {
     author: "renoir",
     message: "v2",
     writes: [{ relpath: "db-schema/t.x.json", content: '{"a":2}\n' }],
@@ -92,10 +92,10 @@ test("readJsonAtRev reads a historical version after a second commit changes the
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("listIds lists ids by filename, ignoring .meta.json sidecars", () => {
+test("listIds lists ids by filename, ignoring .meta.json sidecars", async () => {
   const dir = freshDir();
   initStore(dir);
-  commitFiles(dir, {
+  await commitFiles(dir, {
     author: "renoir",
     message: "seed",
     writes: [
@@ -109,10 +109,10 @@ test("listIds lists ids by filename, ignoring .meta.json sidecars", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("assertClean throws when the tree has uncommitted changes (simulated manual git intervention, S9)", () => {
+test("assertClean throws when the tree has uncommitted changes (simulated manual git intervention, S9)", async () => {
   const dir = freshDir();
   initStore(dir);
-  commitFiles(dir, {
+  await commitFiles(dir, {
     author: "renoir",
     message: "seed",
     writes: [{ relpath: "db-schema/t.x.json", content: "{}" }],

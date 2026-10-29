@@ -59,7 +59,7 @@ function fetchImplFromApp(app, token) {
 
 test("an unknown top-level folder is refused with the permanent-failure code", async () => {
   const { app, storeDir, cleanup } = await setupServer();
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "server emits a type this CLI does not know",
     writes: [{ relpath: "rendered/from-the-future/docs/a.md", content: "# a\n" }],
@@ -85,7 +85,7 @@ test("an unknown top-level folder is refused with the permanent-failure code", a
 
 test("unclassified is accepted ahead of the server emitting it — no client release needed first", async () => {
   const { app, storeDir, cleanup } = await setupServer();
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "server starts emitting unclassified",
     writes: [
@@ -111,7 +111,7 @@ test("unclassified is accepted ahead of the server emitting it — no client rel
 // voc renders to rendered/voc/ the same way.
 test("manual and voc — types the server renders — are accepted", async () => {
   const { app, storeDir, cleanup } = await setupServer();
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "an active manual is rendered",
     writes: [
@@ -136,7 +136,7 @@ test("manual and voc — types the server renders — are accepted", async () =>
 
 test("a type the bundle's types.json lists is accepted, and the list lands in the mirror", async () => {
   const { app, storeDir, cleanup } = await setupServer();
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "an admin registered meeting-notes",
     writes: [
@@ -167,7 +167,7 @@ test("a type the bundle's types.json lists is accepted, and the list lands in th
 test("cli sync: a refused bundle exits non-zero instead of reporting success", async (t) => {
   const { app, storeDir, cleanup } = await setupServer();
   t.after(cleanup);
-  commitFiles(storeDir, {
+  await commitFiles(storeDir, {
     author: "renoir",
     message: "server emits a type this CLI does not know",
     writes: [{ relpath: "rendered/from-the-future/docs/a.md", content: "# a\n" }],

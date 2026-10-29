@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { git } from "../git.mjs";
-import { readJson } from "../store.mjs";
+import { readJson, revOfPath } from "../store.mjs";
 
 const VERSION = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -63,18 +63,14 @@ export function registerMiscRoutes(app) {
     "/api/index/:type",
     { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
-      const { type } = request.params;
-      const rev =
-        git(storeDir, [
-          "log",
-          "-1",
-          "--format=%H",
-          "--",
-          `rendered/${type}/index.json`,
-        ]).trim() || null;
+      const relpath = `rendered/${request.params.type}/index.json`;
+      const index = readJson(storeDir, relpath);
+      if (index === null) return [];
+      // revOfPath, not a fresh `git log`: during a commit it gives the rev of
+      // the file readJson serves.
+      const rev = revOfPath(storeDir, relpath);
       if (rev && request.headers["if-none-match"] === rev)
         return reply.code(304).send();
-      const index = readJson(storeDir, `rendered/${type}/index.json`) ?? [];
       if (rev) reply.header("etag", rev);
       return index;
     },
