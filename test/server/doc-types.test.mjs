@@ -452,3 +452,23 @@ test("origin: kept as written by every write, listed on the docs list, and refus
     await t.cleanup();
   }
 });
+
+test("origin.createdAt: PUT origin keeps it, and the docs list and the doc show it as written", async () => {
+  const t = await setup();
+  try {
+    const made = await t.user("POST", "/api/docs/unclassified", mdDoc("unclassified", "c", "글"));
+    assert.equal(made.statusCode, 201, made.body);
+    const origin = { url: "https://wiki.example/page/7", createdAt: "2024-03-12T00:00:00Z" };
+    const set = await t.admin("PUT", "/api/docs/unclassified/c/origin", { origin }, { "if-match": made.json().rev });
+    assert.equal(set.statusCode, 200, set.body);
+    assert.deepEqual(set.json().json.origin, origin);
+    assert.deepEqual((await t.user("GET", "/api/docs/unclassified/c")).json().json.origin, origin);
+    assert.deepEqual((await t.user("GET", "/api/docs?type=unclassified")).json().docs.find((d) => d.id === "c").origin, origin);
+
+    const bad = await t.admin("PUT", "/api/docs/unclassified/c/origin", { origin: { url: origin.url, createdAt: "2024-03-12" } }, { "if-match": set.json().rev });
+    assert.equal(bad.statusCode, 400, bad.body);
+    assert.ok(bad.json().details.some((d) => d.startsWith("$.origin")), bad.body);
+  } finally {
+    await t.cleanup();
+  }
+});

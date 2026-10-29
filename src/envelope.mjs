@@ -172,6 +172,9 @@ const ENVELOPE_SCHEMA = {
       properties: {
         url: { type: "string", pattern: "^https?://[^\\s/?#]+([/?#]\\S*)?$" },
         title: { type: "string", pattern: "\\S" },
+        // When the original document was first made (ISO 8601). The collector
+        // fills it; a document a person wrote leaves it out. BE marks old chunks down by it.
+        createdAt: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}T" },
       },
     },
     absorbed: ABSORBED_SCHEMA,
