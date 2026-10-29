@@ -33,6 +33,15 @@ export function togglePick(list, address) {
 }
 
 /**
+ * 줄의 담기 단추: 담긴 줄은 "담김"(눌림), 아니면 "담기". 접근성 이름은
+ * 늘 "확정에 담기", 상태는 pressed 로 읽힌다.
+ */
+export function pickButton(list, address) {
+  const on = (list ?? []).includes(address);
+  return { text: on ? "담김" : "담기", pressed: on, label: "확정에 담기" };
+}
+
+/**
  * The column slots (columnDescs.<열>) still 추정, as [{name, address}] in
  * the table's order. `order` = the column names in the table's order; a name
  * it lacks (a column the catalog lost) follows, in the slots' order. Other
