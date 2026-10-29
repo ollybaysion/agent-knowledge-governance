@@ -361,7 +361,14 @@ function typeFacts(type, doc, tiers) {
   } else if (isMdType(type) || type === "domain") {
     rows.push(["글자 수", String((b.markdown ?? "").length)]);
   }
-  if (doc.origin?.url) rows.push(["원본", el("a", { href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", text: doc.origin.title || doc.origin.url })]);
+  if (doc.origin?.url)
+    rows.push([
+      "원본",
+      [
+        el("a", { href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", text: doc.origin.title || doc.origin.url }),
+        doc.origin.createdAt ? el("span", { class: "dim", text: ` · ${doc.origin.createdAt.slice(0, 10)}` }) : null,
+      ],
+    ]);
   const tier = tierOf(tiers);
   if (tier) rows.splice(1, 0, ["티어", el("span", { class: `b b-${{ scaffold: "sc", inferred: "inf", confirmed: "conf" }[tier]}`, text: TIER_LABEL[tier] })]);
   if (!rows.length) return null;

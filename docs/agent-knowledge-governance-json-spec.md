@@ -246,6 +246,7 @@ unclassified(§4.5)는 "정형 타입 어디에도 분류되지 않는 md"라는
 | `keywords` | array | 주입 트리거. 아래 키워드 객체의 배열, 최소 1개 |
 | `status` | enum | `active` \| `archived`. archived는 index.json에서 제외(주입 중단), 파일·이력은 보존 |
 | `body` | object | 타입별 스키마(§4) |
+| `origin.createdAt` | string(선택) | 원본 문서가 처음 만들어진 시각(ISO 8601, `2024-03-12T00:00:00Z`). 수집기가 크롤링한 문서에 채운다. 사람이 AKG 에서 쓴 문서는 비운다. BE 가 이 값으로 오래된 조각을 감점한다(비면 감점 0) |
 
 ### 2.1 키워드 객체
 

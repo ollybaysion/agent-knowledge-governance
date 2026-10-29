@@ -486,6 +486,14 @@ test("origin: an http(s) url and an optional non-empty title", () => {
     assert.ok(validateDocument(doc(origin), refs).some((e) => e.startsWith("$.origin")), JSON.stringify(origin));
 });
 
+test("origin.createdAt: an optional ISO time the original was made", () => {
+  const doc = (origin) => ({ ...fabLineDoc(), origin });
+  assert.deepEqual(validateDocument(doc({ url: "https://wiki.example/x", createdAt: "2024-03-12T00:00:00Z" }), refs), []);
+  assert.deepEqual(validateDocument(doc({ url: "https://wiki.example/x", title: "원본", createdAt: "2024-03-12T09:30:00+09:00" }), refs), []);
+  for (const createdAt of ["2024-03-12", "", 1710201600000, null])
+    assert.ok(validateDocument(doc({ url: "https://h", createdAt }), refs).some((e) => e.startsWith("$.origin")), JSON.stringify(createdAt));
+});
+
 // fab-line — reference data a consumer turns into a closed choice. One doc per
 // line, so the id carries the code and a lister knows the codes without
 // fetching every body.

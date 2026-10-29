@@ -234,7 +234,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
       ? el("button", { type: "button", class: "chip json-view", "aria-pressed": "false", title: "원본 store JSON", onclick: toggleJson, text: "JSON" })
       : null,
     doc.origin?.url
-      ? el("a", { class: "chip linkchip", href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", title: doc.origin.title || doc.origin.url }, ["원본 ", icon("external", 12)])
+      ? el("a", { class: "chip linkchip", href: doc.origin.url, target: "_blank", rel: "noopener noreferrer", title: doc.origin.title || doc.origin.url }, [doc.origin.createdAt ? `원본 ${doc.origin.createdAt.slice(0, 10)} ` : "원본 ", icon("external", 12)])
       : null,
     admin && isMdType(type) ? retypeMenu(ctx) : null,
     admin && role === "sub" && doc.status !== "archived"
@@ -531,15 +531,18 @@ function originForm(ctx, row) {
   url.value = doc.origin?.url || "";
   const title = el("input", { type: "text", class: "fld", placeholder: "원본 제목 (선택)", "aria-label": "원본 제목" });
   title.value = doc.origin?.title || "";
+  const created = el("input", { type: "text", class: "fld mono", placeholder: "원본 생성 시각 (선택, 예 2024-03-12T00:00:00Z)", "aria-label": "원본 생성 시각" });
+  created.value = doc.origin?.createdAt || "";
   const save = el("button", { type: "button", class: "btn primary sm", text: "저장" });
   save.addEventListener("click", async () => {
     const u = url.value.trim();
     const t = title.value.trim();
+    const c = created.value.trim();
     save.disabled = true;
     const r = await api(`/api/docs/${type}/${enc(doc.id)}/origin`, {
       method: "PUT",
       headers: { "if-match": ctx.rev },
-      body: { origin: u ? { url: u, ...(t ? { title: t } : {}) } : null },
+      body: { origin: u ? { url: u, ...(t ? { title: t } : {}), ...(c ? { createdAt: c } : {}) } : null },
     });
     if (r.ok) {
       toast("원본을 저장했습니다");
@@ -550,7 +553,7 @@ function originForm(ctx, row) {
     const d = r.data || {};
     toast(r.status === 409 ? "다른 사람이 먼저 고쳤습니다 — 다시 읽은 뒤 저장하세요." : `저장 실패 (${r.status})${d.details ? ` — ${d.details.join(" · ")}` : ""}`, "error");
   });
-  row.replaceChildren(url, title, save, el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: () => row.replaceChildren() }));
+  row.replaceChildren(url, title, created, save, el("button", { type: "button", class: "btn ghost sm", text: "취소", onclick: () => row.replaceChildren() }));
   url.focus();
 }
 
