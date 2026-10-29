@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,11 @@ import {
   listIds,
   validateId,
   StoreError,
+  changedAtOfPath,
+  invalidateCache,
+  warmRevCache,
 } from "../../server/store.mjs";
+import { git } from "../../server/git.mjs";
 
 function freshDir() {
   return mkdtempSync(join(tmpdir(), "akg-store-test-"));
@@ -120,5 +124,64 @@ test("assertClean throws when the tree has uncommitted changes (simulated manual
   // Simulate an out-of-band edit that never got committed.
   writeFileSync(join(dir, "db-schema/t.x.json"), '{"tampered":true}');
   assert.throws(() => assertClean(dir), StoreError);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("warmRevCache fills each path's rev and time from one history walk, as git log -1 answers them", async () => {
+  const dir = freshDir();
+  initStore(dir);
+  const write = (message, writes, removes = []) => commitFiles(dir, { author: "renoir", message, writes, removes });
+  await write("a", [
+    { relpath: "db-schema/a.json", content: '{"a":1}\n' },
+    { relpath: "rendered/db-schema/docs/a.md", content: "a\n" },
+  ]);
+  await write("b", [{ relpath: "db-schema/b.json", content: '{"b":1}\n' }]);
+  await write("a again", [{ relpath: "db-schema/a.json", content: '{"a":2}\n' }]);
+  await write("mark", [{ relpath: "db-schema/a.meta.json", content: '{"absorbed":{}}\n' }]);
+  await write("skill", [{ relpath: "domain-skill/s.json", content: "{}\n" }]);
+  await write("drop b", [], ["db-schema/b.json"]);
+  const paths = [
+    "db-schema/a.json",
+    "db-schema/a.meta.json",
+    "db-schema/b.json",
+    "rendered/db-schema/docs/a.md",
+    "domain-skill/s.json",
+    ".gitkeep",
+    "db-schema",
+    "rendered",
+    "rendered/db-schema",
+    "rendered/db-schema/docs",
+    "domain-skill",
+  ];
+  const expected = paths.map((p) => git(dir, ["log", "-1", "--format=%H %aI", "--", p]).trim());
+
+  invalidateCache(dir);
+  const warmed = warmRevCache(dir);
+  assert.equal(warmed.commits, 7);
+  // With .git away a cold read would throw: every answer below is the cache's.
+  renameSync(join(dir, ".git"), join(dir, ".git-away"));
+  try {
+    assert.deepEqual(
+      paths.map((p) => `${revOfPath(dir, p)} ${changedAtOfPath(dir, p)}`),
+      expected,
+    );
+  } finally {
+    renameSync(join(dir, ".git-away"), join(dir, ".git"));
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("warmRevCache on a history git cannot read leaves the cold reads to answer", async () => {
+  const dir = freshDir();
+  initStore(dir);
+  const rev = await commitFiles(dir, { author: "renoir", message: "a", writes: [{ relpath: "db-schema/a.json", content: "{}\n" }] });
+  invalidateCache(dir);
+  renameSync(join(dir, ".git"), join(dir, ".git-away"));
+  try {
+    assert.equal(warmRevCache(dir), null);
+  } finally {
+    renameSync(join(dir, ".git-away"), join(dir, ".git"));
+  }
+  assert.equal(revOfPath(dir, "db-schema/a.json"), rev);
   rmSync(dir, { recursive: true, force: true });
 });

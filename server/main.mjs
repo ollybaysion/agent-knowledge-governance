@@ -21,6 +21,13 @@ try {
     `akg server listening on http://${HOST}:${PORT} (store=${STORE_DIR})`,
   );
   console.log(`로그인 길: ${app.akg.auth.path}`);
+  const { revs, catalog } = app.akg.boot;
+  console.log(`카탈로그: 문서 ${catalog.docs} · ${catalog.ms} ms · heap +${catalog.heapMB} MB`);
+  console.log(
+    revs
+      ? `rev 표: 커밋 ${revs.commits} · 경로 ${revs.paths} · ${revs.ms} ms`
+      : "rev 표: git 이력을 읽지 못했습니다 — rev 는 경로마다 처음 읽을 때 셉니다",
+  );
 } catch (err) {
   console.error(`akg server 기동 실패: ${err.message}`);
   process.exit(1);

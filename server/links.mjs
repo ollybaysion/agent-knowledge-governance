@@ -1,36 +1,32 @@
 // The envelope's links[] (json-spec §2): only the forward edge is stored. The
-// reverse is derived on read by scanning the store, so there is no second copy
-// that can drift from the first.
+// reverse is derived on read from the catalog (server/catalog.mjs), which
+// holds each document's links[] as stored, so there is no second copy in the
+// store that can drift from the first. `catalog` below is app.akg.catalog.
 import { parseWikilinks, wikiTexts } from "../src/wikilinks.mjs";
-import { listIds, readJson } from "./store.mjs";
-
-const docPath = (link) => `${link.type}/${link.id}.json`;
 
 /** Links whose target document is not in the store. An archived target still counts as present. */
-export function missingLinkTargets(storeDir, links = []) {
+export function missingLinkTargets(catalog, links = []) {
   return links
-    .filter((link) => !readJson(storeDir, docPath(link)))
+    .filter((link) => !catalog.exists(link.type, link.id))
     .map(({ type, id }) => ({ type, id }));
 }
 
 /** The doc's own links, each with the target's current status. */
-export function resolveLinks(storeDir, links = []) {
+export function resolveLinks(catalog, links = []) {
   return links.map((link) => ({
     ...link,
-    status: readJson(storeDir, docPath(link))?.status ?? "missing",
+    status: catalog.statusOf(link.type, link.id) ?? "missing",
   }));
 }
 
 /** Every stored document of `types` that links to type/id, with the linking doc's status. */
-export function backlinksOf(storeDir, types, type, id) {
+export function backlinksOf(catalog, types, type, id) {
   const out = [];
-  for (const t of types) {
-    for (const sid of listIds(storeDir, t)) {
-      const doc = readJson(storeDir, `${t}/${sid}.json`);
-      for (const link of doc?.links ?? []) {
-        if (link.type === type && link.id === id)
-          out.push({ type: t, id: sid, rel: link.rel, status: doc.status });
-      }
+  for (const [t, sid] of catalog.linkers(types, type, id)) {
+    const doc = catalog.get(t, sid);
+    for (const link of doc.links) {
+      if (link.type === type && link.id === id)
+        out.push({ type: t, id: sid, rel: link.rel, status: doc.status });
     }
   }
   return out;
@@ -45,10 +41,15 @@ export function backlinksOf(storeDir, types, type, id) {
  * plus `types` when a bare id is in more than one type (found false then).
  * A `[[ ]]` naming the doc itself is found but never becomes a link.
  */
-export function resolveWikilinks(storeDir, types, type, doc) {
-  return parseWikilinks(wikiTexts(type, doc.body)).map(({ text, type: t, id }) => {
+export function resolveWikilinks(catalog, types, type, doc) {
+  return resolveWikiTargets(catalog, types, parseWikilinks(wikiTexts(type, doc.body)));
+}
+
+/** {@link resolveWikilinks} over `[[ ]]` already parsed: the catalog keeps them so. */
+export function resolveWikiTargets(catalog, types, targets) {
+  return targets.map(({ text, type: t, id }) => {
     if (id === null) return { text, type: null, id: null, found: false };
-    const exists = (tt) => !!readJson(storeDir, docPath({ type: tt, id }));
+    const exists = (tt) => catalog.exists(tt, id);
     if (t !== null) return { text, type: t, id, found: types.includes(t) && exists(t) };
     const hits = types.filter(exists);
     if (hits.length === 1) return { text, type: hits[0], id, found: true };
@@ -81,10 +82,10 @@ export function withLinks(doc, links) {
  * passes the list it received instead. Returns {error} when a bare [[id]] is
  * ambiguous.
  */
-export function mergeBodyLinks(storeDir, types, type, prevDoc, doc, handLinks = doc.links ?? []) {
+export function mergeBodyLinks(catalog, types, type, prevDoc, doc, handLinks = doc.links ?? []) {
   // A links value the validator is about to reject is left for it to report.
   if (!Array.isArray(handLinks)) return { doc };
-  const wikis = resolveWikilinks(storeDir, types, type, doc);
+  const wikis = resolveWikilinks(catalog, types, type, doc);
   const ambiguous = wikis.filter((w) => w.types);
   if (ambiguous.length)
     return {
@@ -97,7 +98,7 @@ export function mergeBodyLinks(storeDir, types, type, prevDoc, doc, handLinks = 
       },
     };
   const before = prevDoc
-    ? new Set(bodyLinks(resolveWikilinks(storeDir, types, type, prevDoc), type, prevDoc.id).map(edgeKey))
+    ? new Set(bodyLinks(resolveWikilinks(catalog, types, type, prevDoc), type, prevDoc.id).map(edgeKey))
     : new Set();
   const kept = handLinks.filter((l) => !before.has(edgeKey(l)));
   const keptKeys = new Set(kept.map(edgeKey));

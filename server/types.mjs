@@ -1,7 +1,7 @@
 // The document type list: code types (a schema and a renderer in this repo)
 // plus md types an admin registers. store/types.json holds the order and the
 // registered types; while it is absent the defaults below are the list.
-import { listIds, readJson, revOfPath } from "./store.mjs";
+import { readJson, revOfPath } from "./store.mjs";
 
 export const TYPES_PATH = "types.json";
 export const RENDERED_TYPES_PATH = "rendered/types.json";
@@ -94,21 +94,15 @@ export function typeEntries(file) {
   return out;
 }
 
-function countOf(storeDir, type) {
-  let n = 0;
-  for (const id of listIds(storeDir, type)) {
-    const doc = readJson(storeDir, `${type}/${id}.json`);
-    if (doc && doc.status !== "archived") n += 1;
-  }
-  return n;
-}
-
-/** GET /api/types: {rev, types[]} with each type's non-archived document count. */
-export function listTypes(storeDir) {
+/**
+ * GET /api/types: {rev, types[]} with each type's non-archived document count.
+ * @param {(type: string) => number} countOf the catalog's count
+ */
+export function listTypes(storeDir, countOf) {
   const { rev, file } = readTypesFile(storeDir);
   return {
     rev,
-    types: typeEntries(file).map((t) => ({ ...t, count: countOf(storeDir, t.id) })),
+    types: typeEntries(file).map((t) => ({ ...t, count: countOf(t.id) })),
   };
 }
 
@@ -131,7 +125,8 @@ export function createTypes(storeDir, refs) {
   const entries = () => typeEntries(readTypesFile(storeDir).file);
   const get = (id) => entries().find((t) => t.id === id) ?? null;
   return {
-    list: () => listTypes(storeDir),
+    /** @param {{count: (type: string) => number}} catalog */
+    list: (catalog) => listTypes(storeDir, catalog.count),
     entries,
     get,
     ids: () => entries().map((t) => t.id),

@@ -74,6 +74,11 @@ export function activeTableUses(storeDir) {
 
 /** A db-schema document's 주요 · 쓰는 조회 · 확정 커버리지, as the list and the doc view carry them. */
 export function tableClassOf(doc, uses) {
-  const usedBy = uses.get(String(doc.body?.table ?? doc.id).toUpperCase()) ?? [];
-  return { major: usedBy.length > 0, usedBy, coverage: coverageOf(doc.body) };
+  return tableClass(doc.body?.table ?? doc.id, coverageOf(doc.body), uses);
+}
+
+/** {@link tableClassOf} from the table name and the coverage, as the catalog keeps them. */
+export function tableClass(table, coverage, uses) {
+  const usedBy = uses.get(String(table).toUpperCase()) ?? [];
+  return { major: usedBy.length > 0, usedBy, coverage };
 }

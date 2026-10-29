@@ -151,6 +151,51 @@ function lastCommitOf(dir, relpath) {
   return entry;
 }
 
+// Each path and the directories above it get the entry of the newest commit
+// that touched them; an entry already there is newer and stays.
+function cacheCommit(cache, relpath, entry, { keep }) {
+  if (!(keep && cache.has(relpath))) cache.set(relpath, entry);
+  // revOfPath(dir, "domain-skill") is "the last commit under this directory".
+  for (let d = dirname(relpath); d !== "." && d !== "/"; d = dirname(d)) {
+    if (keep && cache.has(d)) break;
+    cache.set(d, entry);
+  }
+}
+
+/**
+ * Fills the rev cache from one walk of the history, newest commit first: the
+ * first commit a path shows up in is its last one, the same answer a cold
+ * `git log -1 -- <path>` gives. Run once at boot, before any request; a path
+ * the walk does not see is still read cold. A history git cannot hand over
+ * leaves the cache as it was.
+ * @returns {{commits: number, paths: number, ms: number} | null} null when the walk failed
+ */
+export function warmRevCache(dir) {
+  const start = performance.now();
+  let out;
+  try {
+    out = git(dir, ["log", "--name-only", "--no-renames", "-z", "--format=%x1e%H%x1f%aI"]);
+  } catch {
+    return null;
+  }
+  const cache = cacheFor(dir);
+  let commits = 0;
+  // "\x1e<rev>\x1f<at>\0\n<path>\0<path>\0" per commit.
+  for (const chunk of out.split("\x1e")) {
+    if (!chunk) continue;
+    const end = chunk.indexOf("\0");
+    const [rev, at] = (end < 0 ? chunk : chunk.slice(0, end)).split("\x1f");
+    if (!rev) continue;
+    commits += 1;
+    const entry = { rev, at };
+    if (end < 0) continue;
+    for (const relpath of chunk.slice(end + 1).replace(/^\n/, "").split("\0")) {
+      if (relpath) cacheCommit(cache, relpath, entry, { keep: true });
+    }
+  }
+  return { commits, paths: cache.size, ms: Math.round(performance.now() - start) };
+}
+
 export function revOfPath(dir, relpath) {
   return lastCommitOf(dir, relpath).rev;
 }
@@ -241,6 +286,31 @@ async function rollback(dir, touched, created) {
   }
 }
 
+const commitListeners = new Map(); // dir -> Set<(touched: string[]) => void>
+
+/**
+ * Calls `fn(touched)` after each commit in `dir` with the paths it wrote or
+ * removed, in the same step the files and their revs switch: what `fn` keeps
+ * changes with the files, never before them. A rolled back commit changed
+ * nothing and calls nobody.
+ * @returns {() => void} stops the calls
+ */
+export function onCommit(dir, fn) {
+  let fns = commitListeners.get(dir);
+  if (!fns) commitListeners.set(dir, (fns = new Set()));
+  fns.add(fn);
+  return () => fns.delete(fn);
+}
+
+// The commit is in by now: a listener that throws does not fail it.
+function announce(dir, touched) {
+  for (const fn of commitListeners.get(dir) ?? []) {
+    try {
+      fn(touched);
+    } catch {}
+  }
+}
+
 /**
  * One commit: write/remove a set of files, then `git commit --author`.
  * On any failure the tree and index are put back as they were.
@@ -319,21 +389,19 @@ export async function commitFiles(
     head = await gitAsync(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]);
   } catch (err) {
     release();
+    announce(dir, touched);
     throw err;
   }
   const [rev, at] = head.trim().split("\x1f");
 
-  // The cache and the files switch in one step: no read sits between them.
+  // The cache, the files and what onCommit keeps switch in one step: no read
+  // sits between them.
   release();
   const cache = cacheFor(dir);
-  for (const relpath of touched) {
-    cache.set(relpath, { rev, at });
-    // The directories above too: revOfPath(dir, "domain-skill") is "the last
-    // commit under this directory", and a cache that learned only file paths
-    // kept answering with its first cold read.
-    for (let d = dirname(relpath); d !== "." && d !== "/"; d = dirname(d))
-      cache.set(d, { rev, at });
-  }
+  // The directories above too: a cache that learned only file paths kept
+  // answering a directory with its first cold read.
+  for (const relpath of touched) cacheCommit(cache, relpath, { rev, at }, { keep: false });
+  announce(dir, touched);
   return rev;
 }
 
