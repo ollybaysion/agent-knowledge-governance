@@ -9,6 +9,7 @@ claude-hooks' `keyword-docs` provider at that mirror. claude-hooks itself is
 Phase 3 (design §8.1, section 7 below): push changes back to the hub with
 `akg propose`, `akg catalog-push` and `akg push` — the CLI's write side.
 A program that talks HTTP itself reads section 9.
+에이전트 md 의 저장 검사(BE 규칙 미러)는 10절이 적는다.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
 — present on the server and readable through the API and dashboard, but not
@@ -435,3 +436,149 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/
   -d '{"schema":"voc/v1","id":"line-alarm","status":"inactive","keywords":[{"kw":"line-alarm","inject":"full"}],"body":{"name":"line-alarm","markdown":"# 라인 알람\n\n글\n"}}' \
   "$AKG/api/docs/voc"
 ```
+
+## 10. 에이전트 md 검사
+
+에이전트 md 는 `domain-skill` · `domain` 문서의 `body.markdown` 이다.
+BE(fdc-agent-be-spring)는 이 md 의 `## 데이터` 절을 읽어 조회 흐름을 등재한다.
+BE 는 reload 때 규칙에 어긋난 md 를 적재에서 뺀다. AKG 는 같은 규칙을 저장 때
+먼저 돌린다. 오류 코드 이름과 사유 글은 BE 와 글자까지 같다.
+
+### 미러 파일
+
+`src/flow/` 의 파일마다 BE 의 짝이 있다.
+
+- `flow-grammar.mjs` — `FlowGrammar`. 흐름 펜스의 줄을 토큰으로 읽는다.
+- `flow-compiler.mjs` — `FlowCompiler` · `QueryFlow`. 토큰을 흐름으로 엮는다.
+  노드 모양과 `선택:` 토막을 검사한다.
+- `flow-rules.mjs` — `FlowRules`. 등재된 md 전부를 놓고 흐름의 뜻을 검사한다.
+- `flow-maps.mjs` — `FlowMaps`. 변환 노드와 map 항목을 짝짓고 map 줄을 검사한다.
+- `chart-fence.mjs` — `ChartFence`. 조회 항목의 chart 펜스를 읽고 검사한다.
+- `flow-error.mjs` — `FlowError`. 코드 목록 `CODES` 와 사유 글 꼴
+  `N 번째 줄 CODE 사유` 를 정한다.
+- `agent-md.mjs` — `SkillMarkdownTool` · `QueryFlowTool` · `CheckFlow`.
+  md 하나를 등재 때처럼 읽고, md 묶음을 적재 때처럼 검사한다.
+
+`test/flow/` 는 BE 테스트의 md 와 기대값을 그대로 옮겨 이 미러를 맞춘다.
+
+### 검사 두 단
+
+1. md 하나(`readAgentMd`): 흐름 펜스 문법 · `선택:` 토막 · map 항목 · chart
+   펜스를 본다. 어긋나면 저장이 400 `validation_failed` 다. 문서 상태와 상관없이
+   모든 저장에서 돈다. details 는 `$.body.markdown: 사유` 다. chart 오류는
+   하나마다 `$.body.markdown: 그래프 펜스 오류 N 번째 줄 CODE 사유` 다.
+2. 등재 검사(`saveCheck`): 활성 에이전트 md 전부에 이 저장을 얹는다. 그리고
+   BE 적재(`QueryFlowTool.rejections`)처럼 `flow-rules.mjs` 를 돌린다.
+   - 저장하는 문서가 활성이면 그 문서의 오류가 400 `flow_rejected` 다. 본문은
+     `fenceLine` · `errors` · `details`(`$.body.markdown: 플로우 오류 …`)다.
+   - 비활성 문서는 이 단의 자기 오류를 활성화 때 받는다.
+   - 이 저장으로 BE 가 빼게 되는 다른 md 는 성공 응답의 `flowWarnings`
+     (`[{ md, errors }]`)에 실린다.
+
+### 검사 시점
+
+1. 저장: `POST /api/docs/:type` · `PUT /api/docs/:type/:id` · `PUT …/facts` ·
+   `PUT /api/docs/domain-skill/:id/verification-set`.
+2. 활성화: `POST …/:id/activate` 와 여러 건의 `POST /api/docs/:type/activate`.
+   여러 건은 문서마다 `flow_rejected` 결과를 낸다. 비활성화 · 삭제는 등재 검사로
+   `flowWarnings` 를 낸다.
+3. 편집기: 저장 전에 데이터 절 흐름 그림에 같은 결과를 `N 줄 CODE 사유` 로
+   보인다. 화면은 `/lib/shared/flow/*.mjs` 로 서버와 같은 파일을 돌린다. 등재
+   목록은 `GET /api/flow-facts` 로 받는다.
+4. `akg push`: 서버의 400 을 받아 `details` 를 한 줄씩 stderr 에 찍는다.
+5. `agent-md.mjs` 의 `checkFiles`: md 파일 묶음을 BE `scripts/check-flow` 처럼
+   검사한다. 줄은 `파일:md줄 CODE 사유`, 통과한 파일은 `OK 파일` 이다. 공통 md
+   `eqp-scope` 를 늘 넣는다.
+
+### 선택 분기
+
+입력 노드의 글은 `·` 로 토막을 낸다. 첫 토막 뒤의 `선택:` 토막이 선택지다.
+선택지는 쉼표로 나눈다.
+
+```mermaid
+flowchart TD
+  mode([분석 방식 · 선택: trend, events, compare · 하나를 고른다])
+  mode -->|"mode = 'trend'"| sensor_trace
+  mode -->|"mode = 'events'"| setup_events
+  mode -->|else| peer_compare
+```
+
+- `QueryFlow.optionsOf(id)` 는 선택지를 적은 순서로 낸다. `choiceInput(id)` 는
+  선택지가 있는 입력 노드다.
+- `INPUT_OPTION`(노드 줄): `선택:` 토막이 둘 이상이다 · 선택지가 비었다 ·
+  선택지에 `'` 가 든다 · 같은 선택지가 둘이다.
+- 선택지 있는 입력 노드의 간선은 조건을 단다. 조건의 컬럼은 입력 id 다
+  (`CONDITION_COLUMN`). `=` · `!=` · `in` 의 값은 선택지 가운데 하나다
+  (`CONDITION_OPTION`). `else` 는 caller 마다 하나다(`ELSE_DUPLICATE`).
+- 조건은 조회 · 변환 caller 와 선택지 있는 입력 caller 의 간선에 단다. 다른
+  간선의 조건은 `CONDITION_PLACE` 다. 입력 caller 면 사유 끝에
+  ``입력 mode 에 `선택:` 토막이 없다`` 가 붙는다.
+
+### chart 펜스
+
+조회 항목에는 sql 펜스 옆에 `chart` 펜스를 하나 둔다. 한 줄에 `키 = 값` 하나다.
+
+````md
+### sensor_trace — 센서 추이
+
+```sql
+select ts, value, eqp_id from SENSOR_TRACE where eqp_id = :eqp_id
+```
+
+```chart
+kind = line
+x = ts
+y = value
+series = eqp_id
+```
+````
+
+- 키 여덟: `kind` · `x` · `y` · `series` · `facet` · `value` · `bins` · `title`.
+- 종류 아홉: `line` · `step` · `area` · `bar` · `stacked-bar` · `scatter` ·
+  `histogram` · `heatmap` · `box`. 대소문자는 가리지 않는다.
+- 필수: `kind` · `x`. heatmap · histogram 밖은 `y`, heatmap 은 `value` 도 적는다.
+- `y` · `series` 는 쉼표로 열 여럿을 적는다. `x` · `facet` · `value` 는 열
+  하나다. 쉼표가 들면 그 키 줄에 `CHART_COLUMN x 는 열 하나다: ts, value` 다.
+- `bins` 는 1~200 의 정수다. histogram 은 적지 않으면 20 이다.
+- `title` 이 비면 항목 제목을 쓴다.
+- 열은 sql 문장의 출력 열(`sql-bind.mjs` 의 `columnsOf`)과 대소문자 없이
+  맞춘다. 출력 열을 못 읽으면(`select *` 등) 열 검사를 건너뛴다. 이때
+  `checkFiles` 는 펜스 줄에 `경고 CHART_COLUMN` 을 낸다.
+
+코드:
+
+- `CHART_KEY` — `키 = 값` 꼴이 아닌 줄 · 모르는 키 · 두 번 적은 키.
+- `CHART_KIND` — 모르는 종류.
+- `CHART_REQUIRED` — 필수 키가 없다.
+- `CHART_BINS` — `bins` 가 1~200 의 정수가 아니다.
+- `CHART_COLUMN` — 열이 출력 열에 없다 · 열 하나 키에 쉼표가 든다.
+- `CHART_DUPLICATE` — 한 항목에 chart 펜스가 둘 이상이다. 둘째 펜스부터
+  그 여는 줄에 낸다.
+
+`CHART_*` 의 줄은 md 줄이다. 거부 사유는 BE `FlowError.Rejected.chart` 와 같은
+`이름: 그래프 펜스 오류로 거부 — CODE 사유; …` 다.
+
+읽기 화면은 chart 펜스를 한 줄 `그래프 line · x ts · y value` 로 보인다
+(`chartLine`). 적은 키를 위 키 순서로 잇고, `kind` 는 값만 쓴다.
+
+### 변환 노드 map
+
+흐름 노드 `id{{글}}` 은 같은 md 의 `### id — 제목` map 항목을 가리킨다. map
+항목에는 `map` 펜스가 하나 있고, 한 줄에 `이름 = 식` 하나다.
+
+- `flow-maps.mjs`(md 하나): `MAP_ITEM`(가리킨 항목이 없다) · `MAP_SHAPE`(sql
+  항목을 `{{글}}` 로, map 항목을 `[글]` 로 적었다) · `MAP_NO_SOURCE`(들어오는
+  간선이 없다) · `MAP_ALONE`(나가는 간선이 없다) · `MAP_FENCE`(map 펜스가
+  하나가 아니다) · `MAP_LINE`(`이름 = 식` 꼴이 아니다) · `MAP_DUP`(왼쪽 이름이
+  둘이다) · `MAP_EXPR`(식을 못 읽는다).
+- `flow-rules.mjs`(등재 검사): `MAP_SOURCE`(식의 이름이 변환 노드로 흘러들지
+  않는다) · `MAP_SCOPE`(`$eqp[n].이름` 이 앞 노드가 낸 이름이 아니다). caller
+  조회의 출력 열을 못 읽으면 둘 다 통과한다.
+- map 항목 id 는 조회 id 와 같은 풀이다. 다른 md 의 id 와 겹치면 409
+  `data_id_conflict` 다.
+
+### BE 와 다른 점
+
+BE `FlowError.Code` 는 52 개, AKG `CODES` 는 51 개다. 차이는 `DATA_ID_CLASH`
+하나다. BE 는 `scripts/check-flow` 에서 md 사이의 같은 데이터 항목 id 를 이
+코드로 낸다. AKG 는 같은 겹침을 저장 때 409 `data_id_conflict` 로 거부한다(9절).
