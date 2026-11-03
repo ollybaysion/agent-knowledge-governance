@@ -88,6 +88,26 @@ test("/js/ and /lib/ refuse a path outside their folder", async () => {
   await cleanup();
 });
 
+test("a static file carries its content's etag and no-cache; the same etag back is a 304", async () => {
+  const { app, cleanup } = await setup();
+  for (const url of ["/", "/app.css", "/js/main.mjs", "/js/tabs/overview.mjs", "/lib/search.mjs", "/lib/shared/wikilinks.mjs", "/vendor/mermaid/mermaid.min.js"]) {
+    const first = await app.inject({ method: "GET", url });
+    assert.equal(first.statusCode, 200, url);
+    assert.match(first.headers.etag, /^"[0-9a-f]{16}"$/, url);
+    assert.equal(first.headers["cache-control"], "no-cache", url);
+    const again = await app.inject({ method: "GET", url, headers: { "if-none-match": first.headers.etag } });
+    assert.equal(again.statusCode, 304, url);
+    assert.equal(again.body, "", url);
+    assert.match(again.headers["content-security-policy"], /script-src 'self'/, url);
+    const other = await app.inject({ method: "GET", url, headers: { "if-none-match": '"0000000000000000"' } });
+    assert.equal(other.statusCode, 200, url);
+  }
+  const a = await app.inject({ method: "GET", url: "/js/main.mjs" });
+  const b = await app.inject({ method: "GET", url: "/js/api.mjs" });
+  assert.notEqual(a.headers.etag, b.headers.etag);
+  await cleanup();
+});
+
 test("GET /api/me is BE's {id, group} plus the logout address", async () => {
   const { app, cleanup } = await setup();
   const res = await app.inject({
