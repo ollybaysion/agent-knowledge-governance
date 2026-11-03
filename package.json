@@ -11,7 +11,9 @@
     "akg": "bin/akg.mjs"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "bench:first-access": "node bench/first-access.mjs",
+    "bench:api": "node bench/api.mjs"
   },
   "dependencies": {
     "fastify": "^5.10.0",
