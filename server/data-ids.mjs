@@ -1,6 +1,6 @@
 import { flowSubgraphIds } from "../src/envelope.mjs";
 import { skillDataIds } from "../src/skill-data-ids.mjs";
-import { coverageOf, tableUses } from "../src/table-class.mjs";
+import { coverageOf } from "../src/table-class.mjs";
 import { listIds, readJson } from "./store.mjs";
 
 // The types whose md carries a ## 데이터 section the consumer reads.
@@ -62,14 +62,6 @@ export function agentRegistry(storeDir) {
     }
   }
   return out;
-}
-
-/**
- * Table → the 조회 of the active domain-skill and domain documents that read
- * it ({@link tableUses}). Read on each call, like dataIdOwners.
- */
-export function activeTableUses(storeDir) {
-  return tableUses(agentRegistry(storeDir));
 }
 
 /** A db-schema document's 주요 · 쓰는 조회 · 확정 커버리지, as the list and the doc view carry them. */

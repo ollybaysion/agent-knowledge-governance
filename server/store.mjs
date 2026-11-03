@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { git, gitAsync, isCleanRepo } from "./git.mjs";
 
@@ -221,6 +222,34 @@ export function readText(dir, relpath) {
   return readFileSync(p, "utf8");
 }
 
+/**
+ * The JSON files at `relpaths`, read off the event loop `chunk` at a time; a
+ * missing or broken file is undefined. A file a running commit holds comes back
+ * as it was before that commit, as {@link readJson} serves it.
+ * @returns {Promise<(object | undefined)[]>}
+ */
+export async function readJsonMany(dir, relpaths, { chunk = 64 } = {}) {
+  const parse = (text) => {
+    try {
+      return text == null ? undefined : JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  };
+  const paths = relpaths.map((rel) => safeJoin(dir, rel));
+  const out = new Array(paths.length);
+  for (let i = 0; i < paths.length; i += chunk) {
+    await Promise.all(
+      paths.slice(i, i + chunk).map(async (p, k) => {
+        out[i + k] = parse(await readFile(p, "utf8").catch(() => null));
+      }),
+    );
+  }
+  // A commit may have started while the files were read.
+  for (let i = 0; i < paths.length; i++) if (held.has(paths[i])) out[i] = parse(held.get(paths[i])?.toString("utf8"));
+  return out;
+}
+
 // A base rev comes from the client (If-Match). Only a full commit hash, the
 // form the server hands out, is a base: "-x" would reach git as an option,
 // and "HEAD~3" or a branch name is not a rev the client was ever given.
@@ -286,13 +315,14 @@ async function rollback(dir, touched, created) {
   }
 }
 
-const commitListeners = new Map(); // dir -> Set<(touched: string[]) => void>
+const commitListeners = new Map(); // dir -> Set<(touched: string[], rev: string | null) => void>
 
 /**
- * Calls `fn(touched)` after each commit in `dir` with the paths it wrote or
- * removed, in the same step the files and their revs switch: what `fn` keeps
- * changes with the files, never before them. A rolled back commit changed
- * nothing and calls nobody.
+ * Calls `fn(touched, rev)` after each commit in `dir` with the paths it wrote
+ * or removed and the new HEAD (null when git did not tell it), in the same
+ * step the files and their revs switch: what `fn` keeps changes with the
+ * files, never before them. A rolled back commit changed nothing and calls
+ * nobody.
  * @returns {() => void} stops the calls
  */
 export function onCommit(dir, fn) {
@@ -303,10 +333,10 @@ export function onCommit(dir, fn) {
 }
 
 // The commit is in by now: a listener that throws does not fail it.
-function announce(dir, touched) {
+function announce(dir, touched, rev) {
   for (const fn of commitListeners.get(dir) ?? []) {
     try {
-      fn(touched);
+      fn(touched, rev);
     } catch {}
   }
 }
@@ -389,7 +419,7 @@ export async function commitFiles(
     head = await gitAsync(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]);
   } catch (err) {
     release();
-    announce(dir, touched);
+    announce(dir, touched, null);
     throw err;
   }
   const [rev, at] = head.trim().split("\x1f");
@@ -401,7 +431,7 @@ export async function commitFiles(
   // The directories above too: a cache that learned only file paths kept
   // answering a directory with its first cold read.
   for (const relpath of touched) cacheCommit(cache, relpath, { rev, at }, { keep: false });
-  announce(dir, touched);
+  announce(dir, touched, rev);
   return rev;
 }
 

@@ -1,9 +1,13 @@
 // Serves the static dashboard (design §D7: bundle-free vanilla JS as ES
 // modules, under the strict-CSP `script-src 'self'` regime app.mjs sets).
-// Every route here is a public GET; nothing writes.
-import { existsSync, readFileSync } from "node:fs";
+// Every route here is a public GET; nothing writes. The files are read once
+// per process: each answer carries its content's etag and
+// cache-control: no-cache, and a matching If-None-Match gets a 304.
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { etagOf, noneMatchHits } from "../etag.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "..", "public");
@@ -45,30 +49,47 @@ export const SHARED_MODULES = new Set([
 // A module path below /js/ or /lib/: lower-case words, one level of folder.
 const MODULE_PATH = /^(?:[a-z0-9-]+\/)?[a-z0-9-]+\.mjs$/;
 
-function sendModule(reply, dir, rel) {
-  if (!MODULE_PATH.test(rel)) return reply.code(404).send({ error: "not_found" });
-  const file = join(dir, rel);
-  if (!existsSync(file)) return reply.code(404).send({ error: "not_found" });
-  reply.type(JS);
-  return reply.send(readFileSync(file, "utf8"));
+const loaded = (file, type) => {
+  const body = readFileSync(file, "utf8");
+  return { body, type, etag: etagOf(body) };
+};
+
+/** The modules below `dir` a MODULE_PATH names (`names` limits them), by path. */
+function loadModules(dir, names = null) {
+  const out = new Map();
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir, { recursive: true })) {
+    if (MODULE_PATH.test(name) && (!names || names.has(name))) out.set(name, loaded(join(dir, name), JS));
+  }
+  return out;
 }
 
+function send(request, reply, file) {
+  if (!file) return reply.code(404).send({ error: "not_found" });
+  reply.header("etag", file.etag);
+  reply.header("cache-control", "no-cache");
+  if (noneMatchHits(request.headers["if-none-match"], file.etag)) return reply.code(304).send();
+  reply.type(file.type);
+  return reply.send(file.body);
+}
+
+// Read at the first registration; every app in the process serves the same files.
+let files = null;
+const loadAll = () => ({
+  fixed: new Map(Object.entries(FILES).map(([route, { path, type }]) => [route, loaded(join(PUBLIC_DIR, path), type)])),
+  js: loadModules(join(PUBLIC_DIR, "js")),
+  lib: loadModules(join(PUBLIC_DIR, "lib")),
+  shared: loadModules(SRC_DIR, SHARED_MODULES),
+});
+
 export function registerDashboardRoutes(app) {
-  for (const [route, { path, type }] of Object.entries(FILES)) {
-    app.get(route, { config: { public: true } }, async (request, reply) => {
-      reply.type(type);
-      return reply.send(readFileSync(join(PUBLIC_DIR, path), "utf8"));
-    });
+  const { fixed, js, lib, shared } = (files ??= loadAll());
+  for (const [route, file] of fixed) {
+    app.get(route, { config: { public: true } }, async (request, reply) => send(request, reply, file));
   }
-  app.get("/js/*", { config: { public: true } }, async (request, reply) =>
-    sendModule(reply, join(PUBLIC_DIR, "js"), request.params["*"]),
+  app.get("/js/*", { config: { public: true } }, async (request, reply) => send(request, reply, js.get(request.params["*"])));
+  app.get("/lib/shared/*", { config: { public: true } }, async (request, reply) =>
+    send(request, reply, shared.get(request.params["*"])),
   );
-  app.get("/lib/shared/*", { config: { public: true } }, async (request, reply) => {
-    const file = request.params["*"];
-    if (!SHARED_MODULES.has(file)) return reply.code(404).send({ error: "not_found" });
-    return sendModule(reply, SRC_DIR, file);
-  });
-  app.get("/lib/*", { config: { public: true } }, async (request, reply) =>
-    sendModule(reply, join(PUBLIC_DIR, "lib"), request.params["*"]),
-  );
+  app.get("/lib/*", { config: { public: true } }, async (request, reply) => send(request, reply, lib.get(request.params["*"])));
 }

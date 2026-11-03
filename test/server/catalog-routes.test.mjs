@@ -9,7 +9,8 @@ import { join } from "node:path";
 
 import { parseWikilinks, wikiTexts } from "../../src/wikilinks.mjs";
 import { buildApp } from "../../server/app.mjs";
-import { activeTableUses, tableClassOf } from "../../server/data-ids.mjs";
+import { agentRegistry, tableClassOf } from "../../server/data-ids.mjs";
+import { tableUses } from "../../src/table-class.mjs";
 import { archiveDoc, withAbsorbed } from "../../server/render-store.mjs";
 import { tierSummary } from "../../server/slots.mjs";
 import { changedAtOfPath, listIds, readJson, revOfPath } from "../../server/store.mjs";
@@ -69,7 +70,7 @@ function oldList(storeDir, types, { type, tier, q, absorbed, tag } = {}) {
           ? {
               ...(doc.body?.kind ? { kind: doc.body.kind } : {}),
               ...(doc.body?.unusedColumns ? { unusedColumns: doc.body.unusedColumns } : {}),
-              ...tableClassOf(doc, (uses ??= activeTableUses(storeDir))),
+              ...tableClassOf(doc, (uses ??= tableUses(agentRegistry(storeDir)))),
               columns: (doc.body?.catalog?.columns ?? []).map((c) => c.name),
             }
           : {}),

@@ -7,6 +7,8 @@ import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { gzip as gzipCallback } from "node:zlib";
 
 import { loadContractSchemas, loadSchemas } from "../src/envelope.mjs";
 import { initStore, isValidId, warmRevCache } from "./store.mjs";
@@ -37,6 +39,22 @@ const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 const BODY_LIMIT = 512 * 1024; // S13
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const gzip = promisify(gzipCallback);
+// JSON and text (js · css · md · html) answers over 1 KB go gzipped; captures are already compressed.
+const GZIP_TYPES = /^(?:application\/(?:json|javascript)|text\/)/i;
+const GZIP_MIN_BYTES = 1024;
+
+/** Whether an Accept-Encoding value takes gzip (named, without q=0). */
+export function acceptsGzip(value) {
+  if (typeof value !== "string") return false;
+  return value.split(",").some((part) => {
+    const [name, ...params] = part.split(";").map((x) => x.trim().toLowerCase());
+    if (name !== "gzip") return false;
+    const q = params.find((x) => x.startsWith("q="));
+    return q === undefined || Number(q.slice(2)) > 0;
+  });
+}
 
 function sameToken(given, expected) {
   if (typeof given !== "string" || !expected) return false;
@@ -112,6 +130,21 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     reply.header("content-security-policy", request.routeOptions?.url === MERMAID_FRAME ? frameCsp : csp);
     reply.header("x-content-type-options", "nosniff");
     return payload;
+  });
+  // After the hook above: the answer as it goes out, gzipped when the client takes it.
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (request.method === "HEAD" || reply.statusCode === 304 || reply.statusCode === 204) return payload;
+    if (reply.hasHeader("content-encoding")) return payload;
+    if (typeof payload !== "string" && !Buffer.isBuffer(payload)) return payload;
+    if (!GZIP_TYPES.test(String(reply.getHeader("content-type") ?? ""))) return payload;
+    if (Buffer.byteLength(payload) <= GZIP_MIN_BYTES) return payload;
+    const vary = reply.getHeader("vary");
+    reply.header("vary", vary ? `${vary}, accept-encoding` : "accept-encoding");
+    if (!acceptsGzip(request.headers["accept-encoding"])) return payload;
+    const packed = await gzip(payload);
+    reply.header("content-encoding", "gzip");
+    reply.header("content-length", packed.length);
+    return packed;
   });
 
   // CS7: route params that name a stored object become file path segments.
