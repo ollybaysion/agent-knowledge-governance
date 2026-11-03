@@ -7,6 +7,9 @@ import { coveragePercent, majorCoverage, userCount } from "/lib/table-class.mjs"
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { DOC_TYPES, TYPES, TYPE_LABEL } from "../state.mjs";
 
+// How many rows of the document table one paint adds.
+const PAGE = 200;
+
 // 주요 테이블 확정 커버리지: the sum, then the 주요 tables, the lowest first.
 function coverageBlock(all) {
   const cov = majorCoverage(all);
@@ -69,28 +72,55 @@ export async function renderOverviewScreen() {
     ),
   );
   const open = (d) => (location.hash = `#/doc/${d.type}/${encodeURIComponent(d.id)}`);
+  const rowOf = (d) =>
+    el("tr", { class: "nav-doc", tabindex: "0", onclick: () => open(d), onkeydown: (e) => e.key === "Enter" && open(d) }, [
+      el("td", {}, [el("b", { text: d.id }), " ", el("span", { class: "dim", text: d.type === "domain-skill" ? (d.role === "sub" ? "도메인 지식" : "에이전트") : TYPE_LABEL[d.type] })]),
+      el("td", {}, keywordChips(d.keywords || [])),
+      el("td", {}, tierMeter(d.tiers ?? {})),
+      el("td", {}, statusBadge(d.status)),
+      el("td", {}, el("span", { class: "chip rev", text: shortRev(d.rev) })),
+    ]);
+  // The rows go in PAGE at a time: the next ones when the empty row after the last comes into view.
+  let more = null;
   function paint() {
     for (const c of chips.children) {
       c.setAttribute("aria-pressed", String(c.dataset.type === shown));
       c.classList.toggle("on", c.dataset.type === shown);
     }
+    more?.disconnect();
+    more = null;
     const rows = all.filter((d) => shown === "all" || d.type === shown);
+    if (!rows.length) {
+      tableHost.replaceChildren(el("p", { class: "loading", text: "문서가 없습니다." }));
+      return;
+    }
+    let drawn = Math.min(PAGE, rows.length);
+    const tbody = el("tbody", {}, rows.slice(0, drawn).map(rowOf));
     tableHost.replaceChildren(
-      rows.length
-        ? el("table", {}, [
-            el("thead", {}, el("tr", {}, ["문서", "키워드", "검토 상태", "상태", "rev"].map((t) => el("th", { scope: "col", text: t })))),
-            el("tbody", {}, rows.map((d) =>
-              el("tr", { class: "nav-doc", tabindex: "0", onclick: () => open(d), onkeydown: (e) => e.key === "Enter" && open(d) }, [
-                el("td", {}, [el("b", { text: d.id }), " ", el("span", { class: "dim", text: d.type === "domain-skill" ? (d.role === "sub" ? "도메인 지식" : "에이전트") : TYPE_LABEL[d.type] })]),
-                el("td", {}, keywordChips(d.keywords || [])),
-                el("td", {}, tierMeter(d.tiers ?? {})),
-                el("td", {}, statusBadge(d.status)),
-                el("td", {}, el("span", { class: "chip rev", text: shortRev(d.rev) })),
-              ]),
-            )),
-          ])
-        : el("p", { class: "loading", text: "문서가 없습니다." }),
+      el("table", {}, [
+        el("thead", {}, el("tr", {}, ["문서", "키워드", "검토 상태", "상태", "rev"].map((t) => el("th", { scope: "col", text: t })))),
+        tbody,
+      ]),
     );
+    if (drawn === rows.length || typeof IntersectionObserver === "undefined") {
+      if (drawn < rows.length) tbody.append(...rows.slice(drawn).map(rowOf));
+      return;
+    }
+    const watch = el("tr", { "aria-hidden": "true" });
+    tbody.appendChild(watch);
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      watch.before(...rows.slice(drawn, drawn + PAGE).map(rowOf));
+      drawn = Math.min(drawn + PAGE, rows.length);
+      observer.unobserve(watch);
+      if (drawn < rows.length) observer.observe(watch);
+      else {
+        watch.remove();
+        observer.disconnect();
+      }
+    }, { rootMargin: "0px 0px 800px 0px" });
+    observer.observe(watch);
+    more = observer;
   }
   paint();
 }
