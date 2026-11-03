@@ -49,7 +49,7 @@ import {
 } from "../links.mjs";
 import { columnsOf } from "../catalog.mjs";
 import { tableUses } from "../../src/table-class.mjs";
-import { activeTableUses, addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf } from "../data-ids.mjs";
+import { addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
 import { UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
@@ -246,7 +246,7 @@ export function registerDocsRoutes(app) {
       backlinks: backlinksOf(catalog, typeIds, type, id),
       wikilinks: resolveWikilinks(catalog, typeIds, type, doc),
       ...warningsOf(type, doc),
-      ...(type === "db-schema" ? tableClassOf(doc, activeTableUses(storeDir)) : {}),
+      ...(type === "db-schema" ? tableClassOf(doc, tableUses(catalog.agents())) : {}),
     };
   };
 
