@@ -6,6 +6,7 @@
 import { parseWikilinks, wikiTexts } from "../src/wikilinks.mjs";
 import { coverageOf } from "../src/table-class.mjs";
 import { tierSummary } from "./slots.mjs";
+import { git } from "./git.mjs";
 import { listIds, onCommit, readJson } from "./store.mjs";
 
 // The types whose markdown the list reads (an active one's 조회 make a table 주요).
@@ -81,6 +82,15 @@ export function createCatalog(storeDir, types) {
   const byType = new Map(); // type -> {schema, entries: Map<id, entry>, order: string[] | null}
   const linkedFrom = new Map(); // "type/id" -> Set of "type/id" whose links[] name it
 
+  const readHead = () => {
+    try {
+      return git(storeDir, ["rev-parse", "HEAD"]).trim();
+    } catch {
+      return null;
+    }
+  };
+  let head = readHead(); // the store's HEAD as the entries stand
+
   const unlink = (type, entry) => {
     for (const l of entry.links) linkedFrom.get(`${l.type}/${l.id}`)?.delete(`${type}/${entry.id}`);
   };
@@ -123,7 +133,8 @@ export function createCatalog(storeDir, types) {
   // A type registered after boot is read the first time it is asked for.
   const slotOf = (type) => byType.get(type) ?? loadType(type);
 
-  function refresh(touched) {
+  function refresh(touched, rev) {
+    head = rev ?? readHead();
     const changed = new Map(); // type -> Set<id>
     for (const relpath of touched) {
       const m = DOC_FILE.exec(relpath);
@@ -155,6 +166,8 @@ export function createCatalog(storeDir, types) {
       return n;
     },
     ids,
+    /** The store's HEAD commit the entries stand at; null when git cannot tell. */
+    head: () => head,
     /** The projections of a type's documents in listIds order. */
     entries(type) {
       const slot = slotOf(type);

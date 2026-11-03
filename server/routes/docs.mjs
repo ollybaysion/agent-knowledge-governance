@@ -1,5 +1,6 @@
 // §6 document CRUD: GET list/single, POST create, POST batch (#12), PUT edit
 // (S4/S5/S6), PUT facts (#12), PUT catalog, PUT tags, PUT assets, GET /api/tags.
+import { randomUUID } from "node:crypto";
 import { dataIdConflicts, TAG_PATTERN, unknownAssets, validateForStore } from "../../src/envelope.mjs";
 import { errorReport } from "../../src/flow/flow-error.mjs";
 import { saveCheck } from "../../src/flow/agent-md.mjs";
@@ -51,7 +52,8 @@ import { columnsOf } from "../catalog.mjs";
 import { tableUses } from "../../src/table-class.mjs";
 import { addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf } from "../data-ids.mjs";
 import { hasGroup } from "../auth.mjs";
-import { UNCLASSIFIED } from "../types.mjs";
+import { etagOf, noneMatchHits } from "../etag.mjs";
+import { TYPES_PATH, UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
 
 // Published md if there is one, otherwise rendered on the spot. Only an active
@@ -108,6 +110,14 @@ export function fieldsQuery(raw) {
   if (raw === undefined || raw === "") return { fields: new Set() };
   const names = String(raw).split(",").map((f) => f.trim()).filter(Boolean);
   return names.every((f) => LIST_FIELDS.includes(f)) ? { fields: new Set(names) } : { error: true };
+}
+
+/** A query object as one string: keys sorted, a repeated key's values joined. */
+export function queryKey(query) {
+  return Object.keys(query ?? {})
+    .sort()
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(query[k]))}`)
+    .join("&");
 }
 
 /** Most documents one POST /api/docs/:type/activate takes. */
@@ -226,6 +236,14 @@ export function registerDocsRoutes(app) {
     return wikilinks.length ? { wikilinks } : {};
   };
 
+  // The list's tag: this process (a restart may answer differently), the
+  // store's HEAD, the type list's rev and the query.
+  const bootId = randomUUID();
+  const listEtag = (query) => {
+    const head = catalog.head();
+    return head ? etagOf(`${bootId}\n${head}\n${revOfPath(storeDir, TYPES_PATH) ?? ""}\n${queryKey(query)}`) : null;
+  };
+
   // GET /api/docs/:type/:id's JSON answer.
   const docView = (type, id, doc, rev) => {
     const bodySchema = types.bodySchema(type);
@@ -264,6 +282,12 @@ export function registerDocsRoutes(app) {
       // fields=body: each row also carries `json`, the stored document as GET /api/docs/:type/:id's json.
       const extra = fieldsQuery(fields);
       if (extra.error) return reply.code(400).send({ error: "invalid_query", param: "fields", allowed: LIST_FIELDS });
+      const etag = listEtag(request.query);
+      if (etag) {
+        reply.header("etag", etag);
+        reply.header("cache-control", "no-cache");
+        if (noneMatchHits(request.headers["if-none-match"], etag)) return reply.code(304).send();
+      }
       const docs = [];
       const typeIds = types.ids();
       let uses = null; // worked out once, at the first db-schema

@@ -315,13 +315,14 @@ async function rollback(dir, touched, created) {
   }
 }
 
-const commitListeners = new Map(); // dir -> Set<(touched: string[]) => void>
+const commitListeners = new Map(); // dir -> Set<(touched: string[], rev: string | null) => void>
 
 /**
- * Calls `fn(touched)` after each commit in `dir` with the paths it wrote or
- * removed, in the same step the files and their revs switch: what `fn` keeps
- * changes with the files, never before them. A rolled back commit changed
- * nothing and calls nobody.
+ * Calls `fn(touched, rev)` after each commit in `dir` with the paths it wrote
+ * or removed and the new HEAD (null when git did not tell it), in the same
+ * step the files and their revs switch: what `fn` keeps changes with the
+ * files, never before them. A rolled back commit changed nothing and calls
+ * nobody.
  * @returns {() => void} stops the calls
  */
 export function onCommit(dir, fn) {
@@ -332,10 +333,10 @@ export function onCommit(dir, fn) {
 }
 
 // The commit is in by now: a listener that throws does not fail it.
-function announce(dir, touched) {
+function announce(dir, touched, rev) {
   for (const fn of commitListeners.get(dir) ?? []) {
     try {
-      fn(touched);
+      fn(touched, rev);
     } catch {}
   }
 }
@@ -418,7 +419,7 @@ export async function commitFiles(
     head = await gitAsync(dir, ["show", "-s", "--format=%H%x1f%aI", "HEAD"]);
   } catch (err) {
     release();
-    announce(dir, touched);
+    announce(dir, touched, null);
     throw err;
   }
   const [rev, at] = head.trim().split("\x1f");
@@ -430,7 +431,7 @@ export async function commitFiles(
   // The directories above too: a cache that learned only file paths kept
   // answering a directory with its first cold read.
   for (const relpath of touched) cacheCommit(cache, relpath, { rev, at }, { keep: false });
-  announce(dir, touched);
+  announce(dir, touched, rev);
   return rev;
 }
 
