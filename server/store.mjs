@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { git, gitAsync, isCleanRepo } from "./git.mjs";
 
@@ -219,6 +220,34 @@ export function readText(dir, relpath) {
   if (held.has(p)) return held.get(p)?.toString("utf8") ?? null;
   if (!existsSync(p)) return null;
   return readFileSync(p, "utf8");
+}
+
+/**
+ * The JSON files at `relpaths`, read off the event loop `chunk` at a time; a
+ * missing or broken file is undefined. A file a running commit holds comes back
+ * as it was before that commit, as {@link readJson} serves it.
+ * @returns {Promise<(object | undefined)[]>}
+ */
+export async function readJsonMany(dir, relpaths, { chunk = 64 } = {}) {
+  const parse = (text) => {
+    try {
+      return text == null ? undefined : JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  };
+  const paths = relpaths.map((rel) => safeJoin(dir, rel));
+  const out = new Array(paths.length);
+  for (let i = 0; i < paths.length; i += chunk) {
+    await Promise.all(
+      paths.slice(i, i + chunk).map(async (p, k) => {
+        out[i + k] = parse(await readFile(p, "utf8").catch(() => null));
+      }),
+    );
+  }
+  // A commit may have started while the files were read.
+  for (let i = 0; i < paths.length; i++) if (held.has(paths[i])) out[i] = parse(held.get(paths[i])?.toString("utf8"));
+  return out;
 }
 
 // A base rev comes from the client (If-Match). Only a full commit hash, the

@@ -16,6 +16,7 @@ import { joinSkill, SkillSplitError, splitSkill } from "../../src/skill-sections
 import { validateNode } from "../../src/validate.mjs";
 import {
   readJson,
+  readJsonMany,
   readText,
   revOfPath,
   changedAtOfPath,
@@ -97,6 +98,16 @@ export function tagQuery(raw) {
   const re = new RegExp(TAG_PATTERN);
   const bad = tags.filter((t) => !re.test(t));
   return bad.length ? { error: bad } : { tags };
+}
+
+/** What ?fields= may name: body = each row's stored document. */
+export const LIST_FIELDS = ["body"];
+
+/** ?fields=a,b → {fields} (a Set, empty for no query) or {error} for a name outside LIST_FIELDS. */
+export function fieldsQuery(raw) {
+  if (raw === undefined || raw === "") return { fields: new Set() };
+  const names = String(raw).split(",").map((f) => f.trim()).filter(Boolean);
+  return names.every((f) => LIST_FIELDS.includes(f)) ? { fields: new Set(names) } : { error: true };
 }
 
 /** Most documents one POST /api/docs/:type/activate takes. */
@@ -243,13 +254,16 @@ export function registerDocsRoutes(app) {
     "/api/docs",
     { config: { roles: ["user", "agent"] } },
     async (request, reply) => {
-      const { type, tier, q, absorbed, tag } = request.query ?? {};
+      const { type, tier, q, absorbed, tag, fields } = request.query ?? {};
       // absorbed=stale: the documents whose absorbed.rev is missing or behind their rev.
       if (absorbed !== undefined && absorbed !== "stale")
         return reply.code(400).send({ error: "invalid_query", param: "absorbed", allowed: ["stale"] });
       // tag=a,b: the documents that carry every one of them.
       const wanted = tagQuery(tag);
       if (wanted.error) return reply.code(400).send({ error: "invalid_query", param: "tag", invalid: wanted.error });
+      // fields=body: each row also carries `json`, the stored document as GET /api/docs/:type/:id's json.
+      const extra = fieldsQuery(fields);
+      if (extra.error) return reply.code(400).send({ error: "invalid_query", param: "fields", allowed: LIST_FIELDS });
       const docs = [];
       const typeIds = types.ids();
       let uses = null; // worked out once, at the first db-schema
@@ -295,6 +309,14 @@ export function registerDocsRoutes(app) {
             ...wikilinksOf(doc.wikis, typeIds),
           });
         }
+      }
+      if (extra.fields.has("body")) {
+        const paths = docs.map((d) => `${d.type}/${d.id}.json`);
+        const bodies = await readJsonMany(storeDir, paths);
+        // A row whose document changed during the reads goes without json, like a broken file.
+        docs.forEach((d, i) => {
+          if (bodies[i] !== undefined && revOfPath(storeDir, paths[i]) === d.rev) d.json = bodies[i];
+        });
       }
       return { docs };
     },
