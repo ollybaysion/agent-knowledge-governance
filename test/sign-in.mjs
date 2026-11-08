@@ -10,6 +10,8 @@ import { createClient } from "redis";
 
 export const REDIS_URL = process.env.FDC_AUTH_REDIS_URL || "redis://localhost:6379";
 export const NAMESPACE = "akg-test:session";
+/** The read tokens' key namespace in the test Redis: akg-test:read-token:* · akg-test:read-tokens:*. */
+export const READ_TOKEN_PREFIX = "akg-test";
 export const FDC_URL = "http://fdc.test";
 
 const signed = new Map(); // token -> headers
@@ -89,6 +91,7 @@ export function authConfig(usersFile) {
     redisUrl: REDIS_URL,
     sessionNamespace: NAMESPACE,
     fdcUrl: FDC_URL,
+    readTokenPrefix: READ_TOKEN_PREFIX,
   };
 }
 

@@ -92,6 +92,9 @@ export async function openSessionStore({ url, namespace }) {
   const keyOf = (id) => `${namespace}:sessions:${id}`;
 
   return {
+    /** The connected client, for the read tokens (server/read-tokens.mjs) — one Redis connection for both. */
+    client,
+
     /**
      * The live session behind a SESSION cookie, touched; null when there is
      * none, it expired, or it has no identity (a visit before login).

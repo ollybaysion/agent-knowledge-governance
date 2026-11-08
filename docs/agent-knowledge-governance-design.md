@@ -357,6 +357,15 @@ inferred·confirmed 슬롯의 원천이 catalog에서 사라지는 경우(컬럼
   만료·회수·시도 제한을 가진다(§11 S14). 사내 배포는 HTTPS reverse proxy 뒤,
   SSO 도입 시 `X-Forwarded-User` 신뢰 모드 추가 — 앱이 클라이언트발
   `X-Forwarded-*`를 항상 덮어쓰고 프록시 우회 접속이 불가능한 바인딩(§11 S2)이 전제.
+- **개인 읽기 토큰**(2026-11-08): 사용자 PC 의 앱(WorkBench: `file://` · `localhost`)은 AKG 와
+  다른 사이트라 로그인 쿠키가 실리지 않는다. 그런 앱은 사람이 AKG 화면(`#/read-tokens`, 쿠키
+  세션 + CSRF)에서 발급한 `Authorization: Bearer akgr_…` 로 읽는다. 토큰은 32 바이트 난수이고,
+  AKG 는 그 sha256 만 세션과 같은 Redis 에 둔다(`akg:read-token:<sha256>` hash ·
+  `akg:read-tokens:<owner>` zset). 한 사람에 5 개, 기간 30 · 90 · 365 일(기본 90), 폐기하면 바로
+  401 이다. 토큰 요청의 신원은 `{id: 주인, group: user}` 이고 GET · HEAD 만 한다. 실패는 S14 의
+  인증 실패 레이트리밋에 든다. CORS 헤더(`Access-Control-Allow-Origin: *`)는 `/api/*` 의
+  GET · HEAD 응답에만 실린다. 토큰 발급 · 폐기 경로는 쿠키 세션만 받는다.
+  Keycloak 서버와 비밀번호 파일 서버가 같은 길을 쓴다. 사용법은 consuming.md 11절.
 - "승격 = 사람"의 기술적 강제: agent 토큰에는 promote 권한이 없다. agent 의 PUT · POST
   본문도 사람의 편집과 같이 inferred 로 저장되고, 확정 슬롯을 고치면 inferred 로 내려간다
   — confirmed는 오직 promote 액션.

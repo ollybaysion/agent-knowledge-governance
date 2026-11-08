@@ -20,6 +20,7 @@ import {
 } from "./auth.mjs";
 import { openAuth } from "./identity.mjs";
 import { CSRF_HEADER } from "./session.mjs";
+import { READ_TOKEN_PREFIX } from "./read-tokens.mjs";
 import { createQueue } from "./queue.mjs";
 import { createTypes } from "./types.mjs";
 import { createCatalog } from "./catalog.mjs";
@@ -33,12 +34,30 @@ import { MERMAID_FRAME, registerDashboardRoutes } from "./routes/dashboard.mjs";
 import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
 import { registerScoreRoutes } from "./routes/score.mjs";
 import { registerSchemaIndexRoutes } from "./routes/schema-index.mjs";
+import { registerReadTokensRoutes } from "./routes/read-tokens.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
 const BODY_LIMIT = 512 * 1024; // S13
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/** What a read token may do, and what a cross-origin browser may read. */
+const READ_METHODS = new Set(["GET", "HEAD"]);
+
+// CORS, reads only (consuming.md "다른 앱에서 AKG 문서 읽기"). A local app
+// (WorkBench: file:// · localhost) reads /api/* with a read token. The answer
+// names every origin and carries no Allow-Credentials, so a browser shows an
+// answer to a cookie-borne cross-origin request to nobody.
+const CORS_READ = {
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers": "ETag",
+};
+const CORS_PREFLIGHT = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, HEAD",
+  "access-control-allow-headers": "Authorization, If-None-Match",
+  "access-control-max-age": "600",
+};
 
 const gzip = promisify(gzipCallback);
 
@@ -153,7 +172,14 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     reply.header("x-content-type-options", "nosniff");
     return payload;
   });
-  // After the hook above: the answer as it goes out, gzipped when the client takes it.
+  // Every GET · HEAD answer under /api/ — 401 · 403 · 404 · 429 · 503 too —
+  // so the local app can read why a read failed. Write answers go out as
+  // they are.
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (READ_METHODS.has(request.method) && request.url.startsWith("/api/")) reply.headers(CORS_READ);
+    return payload;
+  });
+  // After the hooks above: the answer as it goes out, gzipped when the client takes it.
   app.addHook("onSend", async (request, reply, payload) => {
     if (request.method === "HEAD" || reply.statusCode === 304 || reply.statusCode === 204) return payload;
     if (reply.hasHeader("content-encoding")) return payload;
@@ -204,7 +230,23 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     }
 
     const authz = request.headers.authorization ?? "";
-    if (authz.startsWith("Bearer ")) {
+    if (authz.startsWith(`Bearer ${READ_TOKEN_PREFIX}`)) {
+      // A person's read token, from a local app. It reads as a `user` — an
+      // admin's token too — and the method check below keeps it to reads.
+      let owner;
+      try {
+        owner = await auth.readTokens.ownerOf(authz.slice(7));
+      } catch (err) {
+        return reply
+          .code(503)
+          .send({ error: "session_store_down", message: `세션 저장소(Redis)에 닿지 않습니다: ${err.message}` });
+      }
+      if (!owner) {
+        recordAuthFailure(ip);
+        return reply.code(401).send({ error: "unauthorized", reason: "read_token_invalid" });
+      }
+      request.user = { id: owner, group: "user", via: "read-token" };
+    } else if (authz.startsWith("Bearer ")) {
       // An agent. A Bearer request carries no cookie-borne ambient authority,
       // so it needs no CSRF token.
       const agent = await auth.agentOf(authz.slice(7));
@@ -232,6 +274,15 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
       request.session = session;
     }
 
+    // The read-token routes manage tokens from the AKG page alone: a token or
+    // an agent cannot issue more tokens.
+    if (cfg.sessionOnly && !request.session) {
+      return reply.code(403).send({ error: "session_only" });
+    }
+    if (request.user.via === "read-token" && !READ_METHODS.has(request.method)) {
+      return reply.code(403).send({ error: "read_only_token" });
+    }
+
     const roles = cfg.roles;
     if (!roles) {
       // A route with no public/roles config is a bug in this codebase, not a
@@ -246,6 +297,16 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     }
   });
 
+  // The browser's preflight before a cross-origin read with Authorization.
+  // Public: the answer is the same for everyone and tells nothing about the
+  // store. A read (GET · HEAD) gets the grant; any other method gets a bare
+  // 204, and the browser stops there.
+  app.options("/api/*", { config: { public: true } }, async (request, reply) => {
+    if (READ_METHODS.has(request.headers["access-control-request-method"]))
+      reply.headers(CORS_PREFLIGHT);
+    return reply.code(204).send();
+  });
+
   registerDashboardRoutes(app);
   registerMiscRoutes(app);
   registerTypesRoutes(app);
@@ -256,6 +317,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   registerAuditRoutes(app);
   registerScoreRoutes(app);
   registerSchemaIndexRoutes(app);
+  registerReadTokensRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

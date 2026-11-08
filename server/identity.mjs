@@ -1,9 +1,12 @@
-// Two ways in, one identity out. A person comes in with the SESSION cookie BE
-// set at login; an agent comes in with a Bearer value. On a Keycloak server
+// Three ways in, one identity out. A person comes in with the SESSION cookie
+// BE set at login; an agent comes in with a Bearer value. On a Keycloak server
 // the Bearer value is a realm access token; on a server without Keycloak it is
-// an agent line's password from the same file BE reads.
+// an agent line's password from the same file BE reads. A local app comes in
+// with a person's read token (Bearer akgr_…, server/read-tokens.mjs) on
+// either kind of server.
 import { AuthBootError, loadUserFile, matchAgent, redactUrl } from "./auth.mjs";
 import { discoverKeycloak } from "./keycloak.mjs";
+import { createReadTokenStore } from "./read-tokens.mjs";
 import { openSessionStore } from "./session.mjs";
 
 const noLog = () => {};
@@ -27,7 +30,8 @@ export function authConfigFromEnv(env) {
  * Boot-time checks, all fail-closed (S1): the FE address, the login path
  * (Keycloak reachable, or the password file valid), and Redis. `log` gets a
  * line as each check starts and ends, for the boot log.
- * @param {ReturnType<typeof authConfigFromEnv> & {fetchImpl?: typeof fetch}} config
+ * @param {ReturnType<typeof authConfigFromEnv> & {fetchImpl?: typeof fetch, readTokenPrefix?: string}} config
+ *   readTokenPrefix: the read tokens' Redis key namespace, "akg" when unset (the tests set their own).
  * @param {(line: string) => void} [log]
  */
 export async function openAuth(config, log = noLog) {
@@ -57,9 +61,11 @@ export async function openAuth(config, log = noLog) {
     namespace: config.sessionNamespace,
   });
   log(`Redis: 접속 · PING · ${elapsed(start)}`);
+  const readTokens = createReadTokenStore({ client: sessions.client, prefix: config.readTokenPrefix || "akg" });
 
   return {
     sessions,
+    readTokens,
     /** The FE address: the page's 채팅 · 관리 links and the one origin that may frame it. */
     feUrl: fdcUrl,
     /** Where a person without a session logs in — BE's two login paths. */

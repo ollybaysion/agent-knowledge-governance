@@ -63,6 +63,7 @@ const screens = {
   review: () => import("./tabs/review.mjs"),
   audit: () => import("./tabs/audit.mjs"),
   types: () => import("./tabs/types.mjs"),
+  "read-tokens": () => import("./tabs/read-tokens.mjs"),
 };
 
 function notAllowed(tab, label) {
@@ -100,6 +101,8 @@ export async function route() {
     if ((m = await load("review"))) m.renderReview();
   } else if (head === "audit") {
     if ((m = await load("audit"))) m.renderAuditScreen();
+  } else if (head === "read-tokens") {
+    if ((m = await load("read-tokens"))) m.renderReadTokensScreen();
   } else if (head === "types") {
     if (!isAdmin()) return notAllowed("types", "타입");
     if ((m = await load("types"))) m.renderTypes();

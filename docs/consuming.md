@@ -10,6 +10,7 @@ Phase 3 (design §8.1, section 7 below): push changes back to the hub with
 `akg propose`, `akg catalog-push` and `akg push` — the CLI's write side.
 A program that talks HTTP itself reads section 9.
 에이전트 md 의 저장 검사(BE 규칙 미러)는 10절이 적는다.
+WorkBench 같은 다른 앱이 브라우저에서 문서를 읽는 길(개인 읽기 토큰)은 11절이 적는다.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
 — present on the server and readable through the API and dashboard, but not
@@ -365,6 +366,7 @@ Bearer 요청은 쿠키를 싣지 않으므로 CSRF 헤더가 없다. `x-csrf-to
   `group: agent` 줄 비밀번호가 그대로 토큰이다. 사람 줄(admin · user)의 비밀번호는 Bearer 로 401 이다.
 - **Keycloak 서버**: realm `fdc-voc-agent` 의 client `fdc-voc-agent-a2a` 로 client_credentials
   토큰을 받는다. 그 client 에 agent 역할이 있어야 한다.
+- `akgr_` 로 시작하는 Bearer 는 사람의 개인 읽기 토큰이다. 두 서버 모두에서 GET · HEAD 만 한다(11절).
 
 ```sh
 curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d client_secret="$A2A_SECRET" \
@@ -582,3 +584,105 @@ series = eqp_id
 BE `FlowError.Code` 는 52 개, AKG `CODES` 는 51 개다. 차이는 `DATA_ID_CLASH`
 하나다. BE 는 `scripts/check-flow` 에서 md 사이의 같은 데이터 항목 id 를 이
 코드로 낸다. AKG 는 같은 겹침을 저장 때 409 `data_id_conflict` 로 거부한다(9절).
+
+## 11. 다른 앱에서 AKG 문서 읽기(개인 읽기 토큰)
+
+WorkBench 같은 앱은 사용자 PC 에서 돈다(`file://` · `http://localhost:5173` · `http://localhost:4173`).
+AKG 는 다른 사이트(`akg.fdc.localhost:8000` 또는 서버 도메인)에 있다. 브라우저는 로그인 쿠키
+`SESSION`(SameSite=Lax)을 다른 사이트의 fetch 에 싣지 않는다. 그래서 앱은 **개인 읽기 토큰**으로
+읽기 API 를 부른다. 사람이 AKG 화면에서 토큰을 발급하고, 앱 설정에 붙여 넣는다. 토큰은 읽기만 한다.
+
+### 발급
+
+1. AKG 화면 머리 오른쪽의 내 이름을 누른다.
+2. 메뉴에서 "읽기 토큰"을 고른다(`#/read-tokens`).
+3. 이름(1~40 자)을 적는다. 어느 앱에 붙였는지 알아볼 이름이면 된다.
+4. 기간을 고른다: 30 · 90 · 365 일(기본 90 일).
+5. "발급"을 누른다.
+6. 화면에 나온 토큰을 "복사"로 복사한다.
+
+- 토큰 꼴은 `akgr_` 뒤에 43 자(32 바이트 난수의 base64url)다.
+- 토큰 원문은 발급 직후 한 번만 보인다. AKG 는 원문의 sha256 만 Redis 에 둔다.
+- 한 사람은 살아 있는 토큰을 5 개까지 둔다. 여섯째 발급은 409 `read_token_limit` 다.
+- 같은 화면의 목록이 이름 · 발급일 · 만료일 · 마지막 사용을 보인다. 마지막 사용은 1 시간에 한 번 적는다.
+- "폐기"를 누르면 그 토큰은 바로 401 이다. 토큰을 잃어버리면 폐기하고 새로 발급한다.
+- 토큰은 주인의 id 로 읽는다. group 은 언제나 `user` 다(주인이 admin 이어도 같다).
+
+### 붙여 넣기
+
+WorkBench 설정에 두 값을 넣는다.
+
+- AKG 주소: 로컬은 `http://akg.fdc.localhost:8000`, 서버는 그 서버의 AKG 주소.
+- 읽기 토큰: 위에서 복사한 `akgr_…`.
+
+앱은 모든 요청에 `Authorization: Bearer akgr_…` 를 싣는다. fetch 의 `credentials` 는 기본값으로 둔다.
+
+### 부를 API
+
+| 순서 | 요청 | 쓰임 |
+| --- | --- | --- |
+| 1 | `GET /api/config` (토큰 없이) | AKG 에 닿는지 본다 |
+| 2 | `GET /api/types` | 토큰이 맞는지 본다. 타입 목록도 받는다 |
+| 3 | `GET /api/docs` | 문서 목록(`type` · `id` · `title` · `status` …) |
+| 4 | `GET /api/docs/:type/:id` | 문서 상세. `md` 는 본문, `assets[]` 는 첨부 그림 목록(`sha256` · `alt` …)이다. 본문 md 만 쓸 때는 `?format=md` 를 붙인다. 그 응답의 `ETag` 를 다음 요청의 `If-None-Match` 로 보내면, 그대로인 본문은 304 다 |
+| 5 | `GET /api/assets/:sha256` | 그림의 바이트 |
+
+- 토큰은 `user` 가 읽는 GET 경로를 모두 읽는다
+  (`/api/tags` · `/api/me` · `/api/docs/:type/:id` 의 JSON …).
+- 토큰은 GET · HEAD 만 한다.
+- `/api/*` 의 GET · HEAD 응답은 오류 응답까지 `Access-Control-Allow-Origin: *` 와
+  `Access-Control-Expose-Headers: ETag` 를 싣는다. 앱은 401 · 403 의 본문도 읽는다.
+- 브라우저는 `Authorization` 헤더 때문에 먼저 `OPTIONS` 를 보낸다. AKG 는 GET · HEAD 를 묻는
+  `OPTIONS /api/*` 에 204 와 다음 헤더로 답한다: `Access-Control-Allow-Methods: GET, HEAD` ·
+  `Access-Control-Allow-Headers: Authorization, If-None-Match` ·
+  `Access-Control-Max-Age: 600`. 그 밖의 메서드를 물으면 허용 헤더 없는 204 로 답한다.
+  브라우저는 그 요청을 멈춘다.
+- 허용 출처가 `*` 이므로 브라우저는 쿠키를 실은 교차 출처 응답을 앱에 넘기지 않는다. 앱이 읽는 길은 토큰 하나다.
+
+```sh
+AKG=http://akg.fdc.localhost:8000
+TOKEN=akgr_...   # #/read-tokens 에서 복사한 값
+
+curl -s -H "Authorization: Bearer $TOKEN" "$AKG/api/docs" | jq -c '.docs[] | {type, id, title}'
+curl -s -H "Authorization: Bearer $TOKEN" "$AKG/api/docs/voc/line-alarm?format=md"
+```
+
+### 그림과 `[[id]]`
+
+- 그림: md 의 그림은 `![글](asset:<sha256>)` 한 줄이다. 앱은 `GET /api/assets/<sha256>` 를 토큰과
+  함께 fetch 로 받고, `URL.createObjectURL(blob)` 로 그린다. 같은 sha256 은 늘 같은 그림이다
+  (`Cache-Control: immutable`). 앱은 sha256 을 키로 캐시한다.
+- 첨부 그림: 상세의 `assets[]` 는 본문에 나오지 않는 그림도 담는다. AKG 화면은 본문 아래 `그림` 절에
+  `assets[]` 의 그림을 순서대로 모두 보인다. WorkBench 도 같은 절을 그린다.
+- 문서 사이 링크: `[[type/id]]` 는 그 문서를 가리킨다. `[[id]]` 는 `GET /api/docs` 목록에서 id 로
+  type 을 찾는다. 한 타입에서 찾으면 링크로 그린다. 못 찾거나 여러 타입에서 찾으면 `[[id]]` 글자를
+  그대로 둔다. 코드 펜스 안의 `[[ ]]` 는 글자다. WorkBench 는 링크를 자기 `/akg?doc=<type>/<id>` 로 연다.
+- AKG 에서 열기: 새 탭으로 `{AKG}/#/doc/<type>/<id>` 를 연다. 새 탭은 AKG 사이트라 로그인 쿠키가 실린다.
+- 토큰 발급 화면: 새 탭으로 `{AKG}/#/read-tokens` 를 연다.
+
+### 토큰 관리 API
+
+AKG 화면이 부르는 경로다. 쿠키 세션으로만 부르고, 쓰기에는 `x-csrf-token` 을 싣는다.
+읽기 토큰 · agent Bearer 로 부르면 403 `session_only` 다.
+
+| 요청 | 답 |
+| --- | --- |
+| `GET /api/read-tokens` | `{tokens: [{id, label, createdAt, expiresAt, lastUsedAt}], limit: 5}` — 자기 토큰, 최근 발급 순 |
+| `POST /api/read-tokens` `{label, days?}` | 201 `{id, label, createdAt, expiresAt, token}` — `token` 은 이 응답에만 있다 |
+| `DELETE /api/read-tokens/:id` | 204. 남의 토큰 · 없는 id 는 404 |
+
+`id` 는 토큰 sha256 의 앞 12 자다. 시각은 ISO 8601 문자열이다. `lastUsedAt` 은 쓴 적이 없으면 `null` 이다.
+
+### 읽기 토큰의 오류
+
+| 코드 | 본문 | 뜻 · 할 일 |
+| --- | --- | --- |
+| 401 | `{error: "unauthorized", reason: "read_token_invalid"}` | 토큰이 틀렸거나, 만료됐거나, 폐기됐다. `#/read-tokens` 에서 새로 발급한다 |
+| 403 | `{error: "read_only_token"}` | GET · HEAD 밖의 메서드다 |
+| 403 | `{error: "forbidden"}` | admin 만 읽는 경로다(토큰은 `user`) |
+| 403 | `{error: "session_only"}` | 토큰 관리 경로다. AKG 화면에서 부른다 |
+| 404 | `{error: "not_found"}` | 문서나 그림이 없다 |
+| 409 | `{error: "read_token_limit", limit: 5}` | (발급) 토큰이 5 개다. 하나를 폐기하고 다시 발급한다 |
+| 400 | `invalid_label` · `invalid_days` | (발급) 이름이 1~40 자 한 줄이 아니거나, 기간이 30 · 90 · 365 가 아니다 |
+| 429 | `{error: "rate_limited"}` | 인증 실패가 5 분에 20 번을 넘었다. 잠시 뒤 다시 부른다 |
+| 503 | `{error: "session_store_down"}` | AKG 가 Redis 에 닿지 않는다 |
