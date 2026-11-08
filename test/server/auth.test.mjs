@@ -9,6 +9,7 @@ import {
   matchAgent,
   hasGroup,
   groupOfClientRoles,
+  redactUrl,
   AuthBootError,
 } from "../../server/auth.mjs";
 
@@ -65,6 +66,14 @@ test("hasGroup: admin satisfies user; agent passes only where named (D6)", () =>
   assert.equal(hasGroup({ group: "agent" }, ["user"]), false);
   assert.equal(hasGroup({ group: "agent" }, ["admin"]), false);
   assert.equal(hasGroup({ group: "agent" }, ["admin", "agent"]), true);
+});
+
+test("redactUrl: the password a URL carries becomes ***; any other value comes back as given", () => {
+  assert.equal(redactUrl("redis://:s3cret@redis.local:6379/0"), "redis://:***@redis.local:6379/0");
+  assert.equal(redactUrl("redis://default:s3cret@redis.local:6379"), "redis://default:***@redis.local:6379");
+  assert.equal(redactUrl("redis://localhost:6379"), "redis://localhost:6379");
+  assert.equal(redactUrl("http://fdc.test"), "http://fdc.test");
+  assert.equal(redactUrl("not a url"), "not a url");
 });
 
 test("groupOfClientRoles: admin > agent > user, same order as BE", () => {

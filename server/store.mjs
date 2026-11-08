@@ -68,7 +68,10 @@ function safeJoin(dir, ...parts) {
   return p;
 }
 
-/** Idempotent: creates+inits an empty store, or verifies an existing one is a clean git repo. */
+/**
+ * Idempotent: creates+inits an empty store, or verifies an existing one is a clean git repo.
+ * @returns {boolean} true when the store was created here
+ */
 export function initStore(dir) {
   if (!existsSync(join(dir, ".git"))) {
     mkdirSync(dir, { recursive: true });
@@ -78,9 +81,10 @@ export function initStore(dir) {
     writeFileSync(join(dir, ".gitkeep"), "");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "init store"]);
-    return;
+    return true;
   }
   assertClean(dir);
+  return false;
 }
 
 // S9: index.lock이나 더티 트리가 있으면 기동 자체를 거부한다 — 관리자 수동 git

@@ -41,6 +41,10 @@ const BODY_LIMIT = 512 * 1024; // S13
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 const gzip = promisify(gzipCallback);
+
+const noLog = () => {};
+const elapsed = (start) => `${Math.round(performance.now() - start)} ms`;
+const typeLabel = (t) => `${t.id}${t.kind === "md" ? "(md)" : ""}${t.status === "archived" ? "(archived)" : ""}`;
 // JSON and text (js · css · md · html) answers over 1 KB go gzipped; captures are already compressed.
 const GZIP_TYPES = /^(?:application\/(?:json|javascript)|text\/)/i;
 const GZIP_MIN_BYTES = 1024;
@@ -75,33 +79,53 @@ export function frameAncestors(feUrl) {
 }
 
 /**
- * @param {{storeDir: string, auth: Parameters<typeof openAuth>[0], schemasDir?: string}} opts
+ * @param {{storeDir: string, auth: Parameters<typeof openAuth>[0], schemasDir?: string, log?: (line: string) => void}} opts
+ *   log gets one line as each boot step starts and ends — server/main.mjs
+ *   prints them; a step that can take long (rev 표 · Keycloak · Redis ·
+ *   카탈로그) logs before it runs, so a boot that hangs shows where.
  * @returns {Promise<import("fastify").FastifyInstance>}
  */
-export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMAS_DIR }) {
+export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMAS_DIR, log = noLog }) {
   // Fail-closed checks run BEFORE the app object is even constructed —
   // there is no window where an app exists but auth/store are unverified.
-  initStore(storeDir);
+  let start = performance.now();
+  log(`store: ${storeDir} 여는 중`);
+  const created = initStore(storeDir);
+  log(
+    created
+      ? `store: 새로 만듦 — git init · "init store" 커밋 · ${elapsed(start)}`
+      : `store: 기존 레포 · 깨끗함 · ${elapsed(start)}`,
+  );
   // Every list answer carries each document's rev: one walk of the history
   // here instead of one `git log -1` per document on the first list.
+  log("rev 표: git 이력 읽는 중");
   const revs = warmRevCache(storeDir);
-  const auth = await openAuth(authConfig); // throws AuthBootError: no FE address, Keycloak unreachable, bad password file, Redis unreachable
+  log(
+    revs
+      ? `rev 표: 커밋 ${revs.commits} · 경로 ${revs.paths} · ${revs.ms} ms`
+      : "rev 표: git 이력을 읽지 못했습니다 — rev 는 경로마다 처음 읽을 때 셉니다",
+  );
+  const auth = await openAuth(authConfig, log); // throws AuthBootError: no FE address, Keycloak unreachable, bad password file, Redis unreachable
 
+  start = performance.now();
   const refs = loadSchemas(schemasDir);
   const contracts = loadContractSchemas(schemasDir);
+  log(`스키마: ${schemasDir} · 문서 ${Object.keys(refs).length} · 계약 ${Object.keys(contracts).length} · ${elapsed(start)}`);
   const queue = createQueue();
   const types = createTypes(storeDir, refs);
+  const typeList = types.entries();
+  log(`타입: ${typeList.length} — ${typeList.map(typeLabel).join(" · ")}`);
   // The documents as the list routes read them, read once here.
+  log("카탈로그: 문서 읽는 중");
   const heapBefore = process.memoryUsage().heapUsed;
-  const catalogStart = performance.now();
+  start = performance.now();
   const catalog = createCatalog(storeDir, types);
-  const catalogDocs = catalog.load();
-  const catalogBoot = {
-    docs: catalogDocs,
-    ms: Math.round(performance.now() - catalogStart),
-    heapMB: Math.round((process.memoryUsage().heapUsed - heapBefore) / 1e5) / 10,
-  };
+  const loaded = catalog.load();
+  for (const t of loaded.types) log(`카탈로그: ${t.type} ${t.docs} · ${t.ms} ms`);
+  const heapMB = Math.round((process.memoryUsage().heapUsed - heapBefore) / 1e5) / 10;
+  log(`카탈로그: 문서 ${loaded.docs} · ${elapsed(start)} · heap ${heapMB >= 0 ? "+" : ""}${heapMB} MB`);
 
+  start = performance.now();
   // nginx on the same host forwards every request from 127.0.0.1. The
   // failed-auth rate limit keys on request.ip, so without trusting that
   // loopback hop's X-Forwarded-For, twenty bad tokens from anyone made every
@@ -113,9 +137,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     trustProxy: "loopback",
   });
 
-  // What boot did, for the boot log (server/main.mjs).
-  const boot = { revs, catalog: catalogBoot };
-  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, catalog, boot });
+  app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, catalog });
   app.addHook("onClose", () => auth.close());
   app.addHook("onClose", async () => catalog.close());
 
@@ -262,6 +284,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
     reply.send(err);
   });
 
+  log(`경로: 등록 · ${elapsed(start)}`);
   return app;
 }
 

@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient } from "redis";
 
-import { AuthBootError, isIdentity } from "./auth.mjs";
+import { AuthBootError, isIdentity, redactUrl } from "./auth.mjs";
 
 export const SESSION_COOKIE = "SESSION";
 export const CSRF_HEADER = "x-csrf-token";
@@ -86,7 +86,7 @@ export async function openSessionStore({ url, namespace }) {
       /* already closed by the failed connect */
     }
     throw new AuthBootError(
-      `Redis(${url})에 닿지 않습니다 — 세션 저장소 없이는 뜨지 않습니다: ${err.message}`,
+      `Redis(${redactUrl(url)})에 닿지 않습니다 — 세션 저장소 없이는 뜨지 않습니다: ${err.message}`,
     );
   }
   const keyOf = (id) => `${namespace}:sessions:${id}`;

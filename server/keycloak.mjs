@@ -78,6 +78,8 @@ export async function discoverKeycloak({ issuer, clientId, fetchImpl = fetch }) 
   }
 
   return {
+    /** How many signing keys the last JWKS fetch gave. */
+    keyCount: () => keys.size,
     /**
      * @returns {Promise<{id: string, group: string} | null>} null when the
      * token is not a valid, current access token of this realm.
