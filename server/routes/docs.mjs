@@ -120,8 +120,19 @@ export function queryKey(query) {
     .join("&");
 }
 
-/** Most documents one POST /api/docs/:type/activate takes. */
-export const ACTIVATE_MAX = 200;
+/**
+ * Most documents one POST /api/docs/:type/activate takes: a tag's few hundred
+ * go in one request, and the screen splits anything larger (doc-bulk.mjs
+ * ACTIVATE_CHUNK, the same number).
+ */
+export const ACTIVATE_MAX = 1000;
+
+/** The ids a bulk commit message lists: the first MESSAGE_IDS, then how many more. */
+const MESSAGE_IDS = 20;
+export const activateMessage = (type, ids) =>
+  `activate ${ids.length} ${type}: ${
+    ids.length > MESSAGE_IDS ? `${ids.slice(0, MESSAGE_IDS).join(", ")} … 외 ${ids.length - MESSAGE_IDS}` : ids.join(", ")
+  }`;
 
 /**
  * POST /api/docs/:type/activate's body → its items [{id, rev}], or null when
@@ -1366,7 +1377,7 @@ export function registerDocsRoutes(app) {
             const { writes, removes } = docsWrites(storeDir, type, docs);
             await commitFiles(storeDir, {
               author: request.user.id,
-              message: `activate ${docs.length} ${type}: ${docs.map((d) => d.id).join(", ")}`,
+              message: activateMessage(type, docs.map((d) => d.id)),
               writes,
               removes,
             });

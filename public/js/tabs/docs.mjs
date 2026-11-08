@@ -14,7 +14,7 @@ import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
 import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, pathGroups, readFilter, tableGroups } from "/lib/table-class.mjs";
-import { activateBody, activateToast, dialogNames, headState, pickable, pickableIds, pickedRows, picksFor, toggleAll, togglePicked } from "/lib/doc-bulk.mjs";
+import { activateRequests, activateToast, dialogNames, headState, pickable, pickableKeys, pickedRows, picksFor, rowKey, toggleAll, togglePicked, typeCounts } from "/lib/doc-bulk.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, canEdit, typeColor } from "../state.mjs";
 
@@ -286,9 +286,10 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
   if (state.col === 2 && !listOf(state.i1).length) state.col = 1;
   // A doc row in column 1 shows its own type's list in column 2, itself picked.
   let picked = null;
-  // 여러 문서 활성화 (admin): the type whose list holds the boxes, and the ids picked in it.
+  // 여러 문서 활성화 (admin): the list that holds the boxes (a type, or "#tag"
+  // for a tag's documents across the types) and the row keys picked in it.
   const admin = canEdit();
-  let bulk = { type: null, ids: new Set() };
+  let bulk = { scope: null, keys: new Set() };
 
   const c1 = el("div", { class: "mcol mcol1", role: "listbox", tabindex: "0", "aria-label": "즐겨찾기 · 최근 · 타입" });
   const c2 = el("div", { class: "mcol mcol2", role: "listbox", tabindex: "0", "aria-label": "문서" });
@@ -363,8 +364,58 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     if (state.i1 >= 0) c1.setAttribute("aria-activedescendant", `m1-${state.i1}`);
     else c1.removeAttribute("aria-activedescendant");
   }
-  // Column 2 with the tag and no type: one group per type.
+  // 여러 문서 활성화 (admin): the box in front of each inactive row, the head
+  // box over the list, and the band with 활성화 — the same in a type's list
+  // and in a tag's. `scope` names the list the picks belong to; `repaint`
+  // redraws column 2 and puts the focus back on the box pressed.
+  function pickUi(scope, list, repaint) {
+    if (!admin) return { box: () => null, has: () => false, headBox: null, bar: document.createTextNode("") };
+    bulk = picksFor(bulk, scope, list);
+    // An inactive row's box; any other row keeps the box's place empty.
+    const box = (d) => {
+      if (!pickable(d)) return el("span", { class: "mrow-pick", "aria-hidden": "true" });
+      const key = rowKey(d);
+      const input = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": `${rowName(d)} 고르기`, "data-pick": key });
+      input.checked = bulk.keys.has(key);
+      // The box picks; the row around it keeps its own press (미리보기 · 열기).
+      input.addEventListener("click", (e) => e.stopPropagation());
+      input.addEventListener("dblclick", (e) => e.stopPropagation());
+      input.addEventListener("change", () => {
+        bulk.keys = togglePicked(bulk.keys, key);
+        repaint(`[data-pick="${CSS.escape(key)}"]`);
+      });
+      return input;
+    };
+    const st = headState(list, bulk.keys);
+    const headBox = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": "보이는 비활성 전부 고르기", "data-pick-all": "" });
+    headBox.checked = st === "all";
+    headBox.indeterminate = st === "some";
+    headBox.disabled = !pickableKeys(list).length;
+    headBox.addEventListener("change", () => {
+      bulk.keys = toggleAll(list, bulk.keys);
+      repaint("[data-pick-all]");
+    });
+    const bar = bulk.keys.size
+      ? el("div", { class: "mcol-sub" }, el("div", { class: "selbar", role: "group", "aria-label": "고른 문서" }, [
+          el("span", {}, [el("b", { text: String(bulk.keys.size) }), " 골라짐"]),
+          el("span", { class: "sp" }),
+          el("button", { type: "button", class: "btn primary sm", "data-bulk-go": "", text: "활성화", onclick: () => confirmActivate(scope, list, bulk.keys) }),
+          el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => {
+            bulk.keys = new Set();
+            repaint("[data-pick-all]");
+          } }),
+        ]))
+      : document.createTextNode("");
+    return { box, has: (d) => bulk.keys.has(rowKey(d)), headBox, bar };
+  }
+  // Column 2 with the tag and no type: one group per type, the boxes across them.
   function paintTag2() {
+    const list = listOf(-1);
+    const repaintTag2 = (focus) => {
+      paintTag2();
+      c2.querySelector(focus)?.focus();
+    };
+    const picks = pickUi(`#${tag}`, list, repaintTag2);
     const items = [];
     let i = 0;
     for (const g of groupsByTag) {
@@ -372,7 +423,7 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       for (const d of g.rows) {
         const n = i++;
         const on = state.i2 === n;
-        const li = docRow(d, { on, id: `m2-${n}` });
+        const li = docRow(d, { on, id: `m2-${n}`, pick: picks.box(d), picked: picks.has(d) });
         if (on && state.col === 2) li.classList.add("cur");
         li.addEventListener("click", () => {
           state = { col: 2, i1: -1, i2: n };
@@ -383,13 +434,15 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       }
     }
     c2.replaceChildren(
-      el("div", { class: "mcol-h" }, [
+      el("div", { class: `mcol-h${admin ? " boxed" : ""}` }, [
+        picks.headBox,
         el("span", { class: "tg-h", text: "#" }),
         el("b", { text: tag }),
         el("span", { class: "dim", text: String(i) }),
         el("span", { class: "sp" }),
         el("span", { class: "dim", text: "타입 순 · 최근 수정 순" }),
       ]),
+      picks.bar,
       el("ul", { class: "mlist" }, items),
     );
     c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
@@ -413,28 +466,14 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       return;
     }
     const t = types.find((x) => x.id === type);
-    bulk = picksFor(bulk, type, list);
     const repaint2 = (focus) => {
       paint2();
       c2.querySelector(focus)?.focus();
     };
-    // An inactive row's box; any other row keeps the box's place empty.
-    const pickBox = (d) => {
-      if (!pickable(d)) return el("span", { class: "mrow-pick", "aria-hidden": "true" });
-      const box = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": `${rowName(d)} 고르기`, "data-pick": d.id });
-      box.checked = bulk.ids.has(d.id);
-      // The box picks; the row around it keeps its own press (미리보기 · 열기).
-      box.addEventListener("click", (e) => e.stopPropagation());
-      box.addEventListener("dblclick", (e) => e.stopPropagation());
-      box.addEventListener("change", () => {
-        bulk.ids = togglePicked(bulk.ids, d.id);
-        repaint2(`[data-pick="${CSS.escape(d.id)}"]`);
-      });
-      return box;
-    };
+    const picks = pickUi(type, list, repaint2);
     const row = (d, i) => {
       const on = picked ? picked.id === d.id : state.i2 === i;
-      const li = docRow(d, { on, id: `m2-${i}`, pick: admin ? pickBox(d) : null, picked: admin && bulk.ids.has(d.id) });
+      const li = docRow(d, { on, id: `m2-${i}`, pick: picks.box(d), picked: picks.has(d) });
       if (on && state.col === 2) li.classList.add("cur");
       li.addEventListener("click", () => {
         if (r?.kind === "doc") return open(d);
@@ -453,45 +492,22 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       }
     } else list.forEach((d, i) => items.push(row(d, i)));
     const filtering = type === "db-schema" && r?.kind === "type";
-    let headBox = null;
-    if (admin) {
-      const st = headState(list, bulk.ids);
-      headBox = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": "보이는 비활성 전부 고르기", "data-pick-all": "" });
-      headBox.checked = st === "all";
-      headBox.indeterminate = st === "some";
-      headBox.disabled = !pickableIds(list).length;
-      headBox.addEventListener("change", () => {
-        bulk.ids = toggleAll(list, bulk.ids);
-        repaint2("[data-pick-all]");
-      });
-    }
-    const bar = admin && bulk.ids.size
-      ? el("div", { class: "mcol-sub" }, el("div", { class: "selbar", role: "group", "aria-label": "고른 문서" }, [
-          el("span", {}, [el("b", { text: String(bulk.ids.size) }), " 골라짐"]),
-          el("span", { class: "sp" }),
-          el("button", { type: "button", class: "btn primary sm", "data-bulk-go": "", text: "활성화", onclick: () => confirmActivate(type, list, bulk.ids) }),
-          el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => {
-            bulk.ids = new Set();
-            repaint2("[data-pick-all]");
-          } }),
-        ]))
-      : document.createTextNode("");
     c2.replaceChildren(
       el("div", { class: `mcol-h${admin ? " boxed" : ""}` }, [
-        headBox,
+        picks.headBox,
         el("span", { class: "tdot", style: { "--c": typeColor(type) }, "aria-hidden": "true" }),
         el("b", { text: t?.label ?? typeLabel(type) }),
         el("span", { class: "dim", text: String(list.length) }),
         el("span", { class: "sp" }),
         el("span", { class: "dim", text: groups ? "주요 → 기타 · 최근 수정 순" : "최근 수정 순" }),
       ]),
-      bar,
+      picks.bar,
       filtering
         ? filterChips(tableFilter, (f) => {
             tableFilter = f;
             saveFilter(f);
             state = { ...state, i2: 0 };
-            bulk.ids = new Set();
+            bulk.keys = new Set();
             paint();
           })
         : document.createTextNode(""),
@@ -502,15 +518,19 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     );
     c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
   }
-  // 활성화 → this dialog: how many, their names, then POST /api/docs/:type/activate with each row's list rev.
-  function confirmActivate(type, list, ids) {
-    const rows = pickedRows(list, ids);
+  // 활성화 → this dialog: how many, their types, their names, then one
+  // POST /api/docs/:type/activate per type (ACTIVATE_CHUNK rows at most each)
+  // with each row's list rev.
+  function confirmActivate(scope, list, keys) {
+    const rows = pickedRows(list, keys);
     const { names, more } = dialogNames(rows);
+    const kinds = typeCounts(rows);
     const cancel = el("button", { type: "button", class: "btn ghost", text: "취소" });
     const go = el("button", { type: "button", class: "btn primary", text: `${rows.length} 개 활성화` });
     const dlg = el("dialog", { class: "dlg bulk-dlg", "aria-labelledby": "bulk-dlg-h" }, [
       el("div", { class: "dlg-h" }, el("h3", { id: "bulk-dlg-h", text: `문서 ${rows.length} 개를 활성화합니다` })),
       el("p", { class: "dlg-p", text: "활성 — 다음 동기화부터 주입됩니다." }),
+      kinds.length > 1 ? el("p", { class: "dlg-p dim", text: kinds.map(({ type, n }) => `${typeLabel(type)} ${n}`).join(" · ") }) : null,
       el("ul", { class: "bulk-dlg-docs", "aria-label": "활성화할 문서" }, [
         ...names.map((n) => el("li", { text: n })),
         more ? el("li", { class: "more", text: `… 외 ${more}` }) : null,
@@ -531,12 +551,17 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     go.addEventListener("click", async () => {
       go.disabled = true;
       cancel.disabled = true;
-      const r = await api(`/api/docs/${enc(type)}/activate`, { method: "POST", body: activateBody(list, ids) });
-      const t = activateToast(r.status, r.data);
+      // One request per type, in turn: the server's write queue is serial anyway.
+      const responses = [];
+      for (const { type, items } of activateRequests(list, keys)) {
+        const r = await api(`/api/docs/${enc(type)}/activate`, { method: "POST", body: { items } });
+        responses.push({ type, status: r.status, data: r.data });
+      }
+      const t = activateToast(responses);
       dlg.close();
       toast(t.text, t.error ? "error" : undefined);
       invalidateDocs();
-      renderBrowse(type);
+      renderBrowse(scope.startsWith("#") ? null : scope);
     });
     document.body.appendChild(dlg);
     dlg.showModal();
