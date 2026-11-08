@@ -1,6 +1,6 @@
 // The frame every screen sits in: the app rail (채팅 · 지식 · 관리 · 테마),
 // the 56px head (app grid · 답으로 돌아가기 · breadcrumbs · pill tabs ·
-// search · who · 로그아웃) and the body columns. ?embed=1 draws none of it:
+// search · person menu: 읽기 토큰 · 로그아웃) and the body columns. ?embed=1 draws none of it:
 // only the body column, for FE's drawer.
 import { $, el, icon } from "./dom.mjs";
 import { acceptFrom, embedCloseMessage, pushRecentAnswer } from "/lib/from-url.mjs";
@@ -171,6 +171,42 @@ function openGrid() {
   pop.querySelector("a")?.focus();
 }
 
+// ---------- person menu (who · 읽기 토큰 · 로그아웃) ----------
+function closeMe() {
+  const pop = $("me-pop");
+  if (!pop) return;
+  pop.remove();
+  $("me-btn")?.setAttribute("aria-expanded", "false");
+  document.removeEventListener("pointerdown", outsideMe, true);
+}
+function outsideMe(e) {
+  if (!$("me-pop")?.contains(e.target) && !$("me-btn")?.contains(e.target)) closeMe();
+}
+function openMe() {
+  if ($("me-pop")) return closeMe();
+  const pop = el("div", { class: "me-pop", id: "me-pop", role: "dialog", "aria-label": "내 메뉴" }, [
+    el("div", { class: "me-who" }, [el("b", { text: currentUser.id }), el("span", { class: "dim", text: currentUser.group })]),
+    el("a", { class: "me-item", href: "#/read-tokens", onclick: closeMe }, [
+      icon("key", 16),
+      el("span", { class: "me-item-t" }, [
+        el("span", { text: "읽기 토큰" }),
+        el("span", { class: "dim", text: "WorkBench 같은 앱에서 문서 읽기" }),
+      ]),
+    ]),
+    el("button", { type: "button", class: "me-item", onclick: logout }, [icon("logout", 16), el("span", { text: "로그아웃" })]),
+  ]);
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeMe();
+      $("me-btn")?.focus();
+    }
+  });
+  $("top").appendChild(pop);
+  $("me-btn").setAttribute("aria-expanded", "true");
+  setTimeout(() => document.addEventListener("pointerdown", outsideMe, true), 0);
+  pop.querySelector("a")?.focus();
+}
+
 // ---------- head ----------
 function head() {
   const tabs = el(
@@ -207,8 +243,15 @@ function head() {
         "aria-keyshortcuts": "Meta+K Control+K",
         onclick: () => document.dispatchEvent(new CustomEvent("akg:cmdk")),
       }, [icon("search", 16), el("kbd", { text: "⌘K" })]),
-      el("span", { class: "whoami" }, [el("b", { text: currentUser.id }), el("span", { class: "dim", text: ` · ${currentUser.group}` })]),
-      el("button", { type: "button", class: "btn ghost sm", text: "로그아웃", onclick: logout }),
+      el("button", {
+        type: "button",
+        class: "whoami",
+        id: "me-btn",
+        "aria-label": `${currentUser.id} · ${currentUser.group} — 내 메뉴`,
+        "aria-haspopup": "dialog",
+        "aria-expanded": "false",
+        onclick: openMe,
+      }, [el("b", { text: currentUser.id }), el("span", { class: "dim", text: ` · ${currentUser.group}` }), icon("down", 14)]),
     ]),
   ]);
 }
