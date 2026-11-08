@@ -68,6 +68,61 @@ test("boot refuses when Redis is not there (S1)", async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+test("boot log: the settings aside, one line as each step starts and ends, in boot order", async () => {
+  const home = freshHome();
+  const storeDir = join(home, "store");
+  const lines = [];
+  const app = await buildApp({
+    storeDir,
+    auth: await signIn(home, [{ id: "kim", group: "admin", token: "admin-pw" }]),
+    log: (line) => lines.push(line),
+  });
+  try {
+    const typeCount = app.akg.types.ids().length;
+    assert.equal(lines[0], `store: ${storeDir} 여는 중`);
+    assert.match(lines[1], /^store: 새로 만듦 — git init · "init store" 커밋 · \d+ ms$/);
+    assert.equal(lines[2], "rev 표: git 이력 읽는 중");
+    assert.match(lines[3], /^rev 표: 커밋 1 · 경로 1 · \d+ ms$/);
+    assert.equal(lines[4], `로그인 길: 비밀번호 파일 ${join(home, "users.yml")} · 사용자 2 (admin 1 · user 1 · agent 0)`);
+    assert.match(lines[5], /^Redis: redis:\/\/\S+ 접속 중 — 세션 키 akg-test:session:sessions:\*$/);
+    assert.match(lines[6], /^Redis: 접속 · PING · \d+ ms$/);
+    assert.match(lines[7], /^스키마: \S+ · 문서 \d+ · 계약 \d+ · \d+ ms$/);
+    // The listed types in order; the md ones carry "(md)".
+    const labels = lines[8].slice(`타입: ${typeCount} — `.length).split(" · ");
+    assert.deepEqual(labels.map((l) => l.replace(/\(.*\)$/, "")), app.akg.types.ids());
+    assert.ok(labels.some((l) => l.endsWith("(md)")));
+    assert.equal(lines[9], "카탈로그: 문서 읽는 중");
+    // One line per listed type, then the total.
+    const perType = lines.slice(10, 10 + typeCount);
+    assert.deepEqual(perType.map((l) => l.split(" ")[1]), app.akg.types.ids());
+    for (const line of perType) assert.match(line, /^카탈로그: [\w-]+ 0 · \d+ ms$/);
+    assert.match(lines[10 + typeCount], /^카탈로그: 문서 0 · \d+ ms · heap [+-]?[\d.]+ MB$/);
+    assert.match(lines[11 + typeCount], /^경로: 등록 · \d+ ms$/);
+    assert.equal(lines.length, 12 + typeCount);
+  } finally {
+    await app.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("boot log: a boot that fails leaves the step it failed in as the last line, and no password in it", async () => {
+  const home = freshHome();
+  const usersFile = join(home, "users.yml");
+  writeFileSync(usersFile, "users:\n  - { id: kim, group: admin, password: pw }\n", { mode: 0o600 });
+  const lines = [];
+  await assert.rejects(
+    buildApp({
+      storeDir: join(home, "store"),
+      auth: { ...authConfig(usersFile), redisUrl: "redis://:s3cret@127.0.0.1:1" },
+      log: (line) => lines.push(line),
+    }),
+    (err) => err.message.includes("Redis(redis://:***@127.0.0.1:1)") && !err.message.includes("s3cret"),
+  );
+  assert.equal(lines.at(-1), "Redis: redis://:***@127.0.0.1:1 접속 중 — 세션 키 akg-test:session:sessions:*");
+  assert.ok(lines.every((l) => !l.includes("s3cret")));
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("no session: 401 with the FE login address, on reads and /health alike", async () => {
   const { app, cleanup } = await setup();
   try {

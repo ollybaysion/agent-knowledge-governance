@@ -159,11 +159,20 @@ export function createCatalog(storeDir, types) {
   const stop = onCommit(storeDir, refresh);
 
   return {
-    /** Reads every listed type's documents; returns how many. */
+    /**
+     * Reads every listed type's documents.
+     * @returns {{docs: number, types: {type: string, docs: number, ms: number}[]}} how many in all, and per type with the time it took
+     */
     load() {
-      let n = 0;
-      for (const t of types.ids()) n += slotOf(t)?.entries.size ?? 0;
-      return n;
+      const perType = [];
+      let docs = 0;
+      for (const t of types.ids()) {
+        const start = performance.now();
+        const n = slotOf(t)?.entries.size ?? 0;
+        perType.push({ type: t, docs: n, ms: Math.round(performance.now() - start) });
+        docs += n;
+      }
+      return { docs, types: perType };
     },
     ids,
     /** The store's HEAD commit the entries stand at; null when git cannot tell. */

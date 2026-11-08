@@ -469,7 +469,7 @@ footer.derived { display: block; }
 
 <div class="page">
   <header class="masthead">
-    <p class="eyebrow"><span class="mark">◆</span> akg · 구동 가이드 · v0.1</p>
+    <p class="eyebrow"><span class="mark">◆</span> akg · 구동 가이드 · v0.2</p>
     <h1>
       node 만 있는 서버에 올리기
       <span class="en">copy the tree, one users.json, set env, node server/main.mjs</span>
@@ -481,7 +481,7 @@ footer.derived { display: block; }
       git 이 없으면 기동 자체가 안 된다. 이 문서는 그 순서 — 설치할 것, 준비, 배치, 계정, 설정, 기동, 확인, 운영 — 를 한 장에 모은다.
     </p>
     <div class="credits">
-      <span>작성 · 2026-09-23</span>
+      <span>작성 · 2026-09-23 · 개정 · 2026-11-08</span>
       <span>소비 절차 · <a href="consuming.md">consuming.md</a></span>
       <span>설계 · <a href="agent-knowledge-governance-design.md">design.md §11 (S1 · S2 · S9 · S14)</a></span>
       <span>문서 규격 · <a href="agent-knowledge-governance-json-spec.md">json-spec.md §4.4</a></span>
@@ -490,6 +490,7 @@ footer.derived { display: block; }
       <summary>개정 로그</summary>
       <ul>
         <li><b>v0.1</b> (2026-09-23) — 최초 작성. consuming.md §6 의 리허설 절차와 design.md §11 의 운영 규율을 서버 구동 관점으로 다시 묶었다. 명령과 출력은 v24 · git 2.x 에서 실측.</li>
+        <li><b>v0.2</b> (2026-11-08) — §07 · §09: 기동 로그가 설정 두 줄과 단계마다 한 줄씩 나온다. 포그라운드 출력 예시를 실측으로 바꾸고 실패 예시를 더했다.</li>
       </ul>
     </details>
   </header>
@@ -703,14 +704,36 @@ AKG_ANON_READ=1</pre>
         <p class="lede">세 가지 길이 있다. 처음은 포그라운드, 리허설은 nohup, 상시 운영은 systemd. 어느 길이든 명령은 <span class="k">node server/main.mjs</span> 하나다.</p>
 
         <h3>포그라운드 — 처음 한 번은 이렇게</h3>
-        <p>기동 실패는 한 줄로 나오고 exit 1 이다(<span class="k">akg server 기동 실패: &lt;이유&gt;</span>). 성공하면 <span class="k">listening</span> 한 줄이 뜨고 그 뒤로는 요청 로그를 찍지 않는다. Ctrl-C 로 내린다.</p>
+        <p>기동은 설정 두 줄을 찍고, 단계마다 한 줄씩 찍는다 — store · rev 표 · 로그인 길 · Redis · 스키마 · 타입 · 카탈로그(타입마다 한 줄) · 경로 · <span class="k">listening</span>.
+          줄 앞 <span class="k">[+N ms]</span> 는 프로세스 시작 뒤 경과 시간이다. 오래 걸릴 수 있는 단계(rev 표 · Keycloak · Redis · 카탈로그)는 시작할 때도 한 줄 찍으므로, 멈추면 마지막 줄이 멈춘 단계다.
+          기동 실패는 <span class="k">akg server 기동 실패: &lt;이유&gt;</span> 한 줄과 exit 1 이고, 바로 위 줄이 실패한 단계다. 뜬 뒤의 기록은 §09 의 git 이력이다. Ctrl-C 로 내린다.</p>
         <pre class="code">cd /opt/akg/app
 set -a; . /opt/akg/akg.env; set +a
 sudo -u akg -E node server/main.mjs
-# akg server listening on http://127.0.0.1:8787 (store=/opt/akg/data/store)
+# [+243 ms] akg 0.1.0 기동 — node v24.12.0 · pid 118717 · /opt/akg/app
+# [+244 ms] 설정: AKG_HOME=/opt/akg/data · AKG_STORE_DIR=/opt/akg/data/store · AKG_HOST=127.0.0.1 · AKG_PORT=8787
+# [+244 ms] 설정: AKG_FDC_URL=https://fdc.example · FDC_AUTH_KEYCLOAK_ISSUER=(없음) · FDC_AUTH_KEYCLOAK_CLIENT_ID=fdc-voc-agent (기본) · FDC_AUTH_USERS_FILE=/opt/fdc/config/env/users.yml · FDC_AUTH_REDIS_URL=redis://127.0.0.1:6379 · FDC_AUTH_SESSION_NAMESPACE=spring:session
+# [+244 ms] store: /opt/akg/data/store 여는 중
+# [+251 ms] store: 기존 레포 · 깨끗함 · 7 ms
+# [+251 ms] rev 표: git 이력 읽는 중
+# [+298 ms] rev 표: 커밋 86 · 경로 103 · 47 ms
+# [+310 ms] 로그인 길: 비밀번호 파일 /opt/fdc/config/env/users.yml · 사용자 4 (admin 1 · user 1 · agent 2)
+# [+310 ms] Redis: redis://127.0.0.1:6379 접속 중 — 세션 키 spring:session:sessions:*
+# [+350 ms] Redis: 접속 · PING · 41 ms
+# [+351 ms] 스키마: /opt/akg/app/schemas · 문서 13 · 계약 2 · 1 ms
+# [+352 ms] 타입: 9 — db-schema · msg-format · domain-skill · domain · screen-map · manual · fab-line · voc(md) · unclassified(md)
+# [+352 ms] 카탈로그: 문서 읽는 중
+# [+365 ms] 카탈로그: db-schema 4 · 4 ms
+# …타입마다 한 줄…
+# [+365 ms] 카탈로그: 문서 17 · 13 ms · heap +1 MB
+# [+424 ms] 경로: 등록 · 60 ms
+# [+435 ms] akg server listening on http://127.0.0.1:8787 (store=/opt/akg/data/store) · listen 7 ms · 기동 435 ms
 # 다른 셸에서
 curl -s localhost:8787/health
 # {"version":"0.1.0","storeRev":"b7a9da14…"}</pre>
+        <p>실패하면 멈춘 단계의 줄 바로 아래에 사유가 온다. Redis 가 없을 때:</p>
+        <pre class="code"># [+886 ms] Redis: redis://127.0.0.1:6379 접속 중 — 세션 키 spring:session:sessions:*
+# [+1741 ms] akg server 기동 실패: Redis(redis://127.0.0.1:6379)에 닿지 않습니다 — 세션 저장소 없이는 뜨지 않습니다: connect ECONNREFUSED 127.0.0.1:6379 (AuthBootError)</pre>
 
         <h3>nohup — 백그라운드 + PID 파일</h3>
         <pre class="code">cd /opt/akg/app
@@ -741,7 +764,7 @@ WantedBy=multi-user.target</pre>
         <pre class="code">sudo systemctl daemon-reload
 sudo systemctl enable --now akg
 systemctl status akg
-journalctl -u akg -f                      # 기동 줄과 기동 실패 사유만 나온다</pre>
+journalctl -u akg -f                      # 기동 단계 줄과 기동 실패 사유가 나온다</pre>
       </section>
 
       <section id="s8">
@@ -789,7 +812,7 @@ git -C /opt/akg/data/store log --format='%h %an %s'
       <section id="s9">
         <div class="sec-head"><span class="num">09</span><h2>운영</h2></div>
         <h3>로그와 감사</h3>
-        <p>서버는 요청 로그를 남기지 않는다(fastify logger 꺼짐). 누가 무엇을 바꿨는지는 <strong>store 의 git 이력</strong>이 답이다 —
+        <p>서버가 찍는 로그는 §07 의 기동 줄이다(fastify logger 꺼짐). 누가 무엇을 바꿨는지는 <strong>store 의 git 이력</strong>이 답이다 —
           커밋 author 가 토큰의 사용자 id 고, 대시보드의 <span class="k">감사</span> 화면과 <span class="k">GET /api/audit</span> 이 같은 이력을 보여 준다.
           <span class="k">git -C /opt/akg/data/store log</span> 로 직접 봐도 된다. 읽기만 한다 — 쓰면 S9 에 걸려 다음 기동이 거부된다.</p>
         <h3>백업 · 복구</h3>
@@ -826,7 +849,7 @@ git -C /opt/akg/data/store log --format='%h %an %s'
       </section>
 
       <footer>
-        <span>akg 구동 가이드 · v0.1</span>
+        <span>akg 구동 가이드 · v0.2</span>
         <span>짝 문서 · <a href="consuming.md">consuming.md</a> · <a href="agent-knowledge-governance-design.md">design.md</a> · <a href="agent-knowledge-governance-json-spec.md">json-spec.md</a></span>
       </footer>
 

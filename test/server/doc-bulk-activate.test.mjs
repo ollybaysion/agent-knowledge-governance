@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { buildApp } from "../../server/app.mjs";
-import { ACTIVATE_MAX, activateItems } from "../../server/routes/docs.mjs";
+import { ACTIVATE_MAX, activateItems, activateMessage } from "../../server/routes/docs.mjs";
+import { ACTIVATE_CHUNK } from "../../public/lib/doc-bulk.mjs";
 import { signIn, as } from "../sign-in.mjs";
 
 async function setup() {
@@ -102,6 +103,17 @@ test("activateItems takes 1 to ACTIVATE_MAX distinct {id, rev}", () => {
     },
   ])
     assert.equal(activateItems(body), null, JSON.stringify(body)?.slice(0, 80));
+});
+
+test("the screen splits at the server's limit; a commit message lists 20 ids, then how many more", () => {
+  assert.equal(ACTIVATE_MAX, ACTIVATE_CHUNK);
+  assert.equal(activateMessage("db-schema", ["a", "b"]), "activate 2 db-schema: a, b");
+  const many = Array.from({ length: 25 }, (_, i) => `d${i}`);
+  assert.equal(
+    activateMessage("voc", many),
+    `activate 25 voc: ${many.slice(0, 20).join(", ")} … 외 5`,
+  );
+  assert.equal(activateMessage("voc", many.slice(0, 20)).includes("외"), false);
 });
 
 test("only an admin turns documents on; a malformed body is 400 invalid_body", async () => {

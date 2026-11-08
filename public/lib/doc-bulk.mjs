@@ -1,96 +1,121 @@
 // 문서 목록(둘째 열)의 여러 문서 활성화: 고를 수 있는 줄 · 머리 상자 ·
-// 확인 창 이름 목록 · 보내는 몸 · 끝난 뒤 토스트. 화면 상태만 다룬다:
+// 확인 창 이름 목록 · 보내는 요청 · 끝난 뒤 토스트. 화면 상태만 다룬다:
 // 고른 것은 저장하지 않고, 타입 · 태그 · 거르기가 바뀌면 처음으로 돌아간다.
+// A pick is a row key "type/id": a tag's list holds documents of several types.
 
 /** 확인 창이 이름을 다 적는 문서 수. 넘으면 "… 외 m" 이다. */
 export const DIALOG_NAMES = 8;
 
+/** Most rows one POST /api/docs/:type/activate carries — the server's ACTIVATE_MAX. More go in turns. */
+export const ACTIVATE_CHUNK = 1000;
+
+/** The key a pick is kept under: the row's type and id. */
+export const rowKey = (d) => `${d.type}/${d.id}`;
+
 /** True for a row the list lets the admin pick: an inactive document. */
 export const pickable = (d) => d?.status === "inactive";
 
-/** The rows' pickable ids, in the list's order. */
-export const pickableIds = (rows) =>
-  (rows ?? []).filter(pickable).map((d) => d.id);
+/** The rows' pickable keys, in the list's order. */
+export const pickableKeys = (rows) => (rows ?? []).filter(pickable).map(rowKey);
 
 /**
- * The head box over `rows` with `picked` (a Set of ids): "none" · "some"
+ * The head box over `rows` with `picked` (a Set of keys): "none" · "some"
  * (indeterminate) · "all" (every pickable row picked). No pickable row = "none".
  */
 export function headState(rows, picked) {
-  const ids = pickableIds(rows);
-  const n = ids.filter((id) => picked.has(id)).length;
+  const keys = pickableKeys(rows);
+  const n = keys.filter((k) => picked.has(k)).length;
   if (!n) return "none";
-  return n === ids.length ? "all" : "some";
+  return n === keys.length ? "all" : "some";
 }
 
 /** A press on the head box: every pickable row, or none when all were picked. */
 export function toggleAll(rows, picked) {
-  return headState(rows, picked) === "all"
-    ? new Set()
-    : new Set(pickableIds(rows));
+  return headState(rows, picked) === "all" ? new Set() : new Set(pickableKeys(rows));
 }
 
-/** `picked` with `id` added, or taken out when it is there; the input is left alone. */
-export function togglePicked(picked, id) {
+/** `picked` with `key` added, or taken out when it is there; the input is left alone. */
+export function togglePicked(picked, key) {
   const next = new Set(picked);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
   return next;
 }
 
 /**
- * `picked` kept to the ids still pickable in `rows` — the selection after
+ * `picked` kept to the keys still pickable in `rows` — the selection after
  * the list changed under it.
  */
 export function keepPicked(rows, picked) {
-  const ids = new Set(pickableIds(rows));
-  return new Set([...picked].filter((id) => ids.has(id)));
+  const keys = new Set(pickableKeys(rows));
+  return new Set([...picked].filter((k) => keys.has(k)));
 }
 
 /**
- * The picks for column 2 now showing `type` with `rows`: {type, ids}. Another
- * type starts empty; the same type keeps the ids still pickable in `rows`.
+ * The picks for column 2 now showing `scope` (a type id, or "#tag" for a
+ * tag's documents across the types) with `rows`: {scope, keys}. Another scope
+ * starts empty; the same scope keeps the keys still pickable in `rows`.
  */
-export const picksFor = (prev, type, rows) =>
-  prev?.type === type
-    ? { type, ids: keepPicked(rows, prev.ids) }
-    : { type, ids: new Set() };
+export const picksFor = (prev, scope, rows) =>
+  prev?.scope === scope ? { scope, keys: keepPicked(rows, prev.keys) } : { scope, keys: new Set() };
 
 /** The picked rows, in the list's order. */
-export const pickedRows = (rows, picked) =>
-  (rows ?? []).filter((d) => pickable(d) && picked.has(d.id));
+export const pickedRows = (rows, picked) => (rows ?? []).filter((d) => pickable(d) && picked.has(rowKey(d)));
 
-/** POST /api/docs/:type/activate's body: each picked row's id and its list rev. */
-export const activateBody = (rows, picked) => ({
-  items: pickedRows(rows, picked).map((d) => ({ id: d.id, rev: d.rev })),
-});
+/**
+ * The requests for the picked rows: one POST /api/docs/:type/activate per
+ * type, in the list's order, each carrying at most `max` items {id, rev}.
+ * @returns {{type: string, items: {id: string, rev: string}[]}[]}
+ */
+export function activateRequests(rows, picked, max = ACTIVATE_CHUNK) {
+  const byType = new Map();
+  for (const d of pickedRows(rows, picked)) {
+    if (!byType.has(d.type)) byType.set(d.type, []);
+    byType.get(d.type).push({ id: d.id, rev: d.rev });
+  }
+  const out = [];
+  for (const [type, items] of byType) {
+    for (let i = 0; i < items.length; i += max) out.push({ type, items: items.slice(i, i + max) });
+  }
+  return out;
+}
+
+/** The rows' types with how many of each, in the list's order: the dialog's line under the title. */
+export function typeCounts(rows) {
+  const counts = new Map();
+  for (const d of rows ?? []) counts.set(d.type, (counts.get(d.type) ?? 0) + 1);
+  return [...counts].map(([type, n]) => ({ type, n }));
+}
 
 /** A row's name in the dialog: the id, then the title when it says more. */
-export const dialogName = (d) =>
-  d.title && d.title !== d.id ? `${d.id} · ${d.title}` : d.id;
+export const dialogName = (d) => (d.title && d.title !== d.id ? `${d.id} · ${d.title}` : d.id);
 
 /** The dialog's name list: the first DIALOG_NAMES names, and how many more. */
 export function dialogNames(rows, cap = DIALOG_NAMES) {
   const names = rows.map(dialogName);
-  return names.length > cap
-    ? { names: names.slice(0, cap), more: names.length - cap }
-    : { names, more: 0 };
+  return names.length > cap ? { names: names.slice(0, cap), more: names.length - cap } : { names, more: 0 };
 }
 
+const answered = (r) => r.status === 200 && Array.isArray(r.data?.results);
+
 /**
- * The toast after POST /api/docs/:type/activate, from its status and answer.
- * → {text, error}
+ * The toast after the requests, from each one's status and answer.
+ * @param {{status: number, data: any}[]} responses
+ * @returns {{text: string, error: boolean}}
  */
-export function activateToast(status, data) {
-  if (status !== 200 || !Array.isArray(data?.results)) {
-    const why = data?.message ?? data?.error;
+export function activateToast(responses) {
+  const list = Array.isArray(responses) ? responses : [responses];
+  const n = list.filter(answered).reduce((sum, r) => sum + (r.data.activated ?? 0), 0);
+  const refused = list.find((r) => !answered(r));
+  if (refused) {
+    const why = refused.data?.message ?? refused.data?.error;
     return {
-      text: `활성화 실패 (${status})${why ? ` — ${why}` : ""}`,
+      text: `활성화 실패 (${refused.status})${why ? ` — ${why}` : ""}${n ? ` · ${n} 개는 활성` : ""}`,
       error: true,
     };
   }
-  const n = data.activated ?? 0;
-  const failed = data.results.filter((r) => r.status === "error");
+  const results = list.flatMap((r) => r.data.results);
+  const failed = results.filter((r) => r.status === "error");
   if (failed.length) {
     const stale = failed.some((r) => r.error === "unknown_base_rev");
     return {
@@ -98,7 +123,7 @@ export function activateToast(status, data) {
       error: true,
     };
   }
-  const skipped = data.results.filter((r) => r.status === "skipped").length;
+  const skipped = results.filter((r) => r.status === "skipped").length;
   return {
     text: `${n} 개 활성${skipped ? ` · ${skipped} 개는 이미 활성` : ""} — 다음 동기화부터 주입됩니다.`,
     error: false,

@@ -8,6 +8,18 @@ import { parse } from "yaml";
 
 export class AuthBootError extends Error {}
 
+/** A URL for a log line or an error message: the password it carries, when it does, becomes "***". */
+export function redactUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!url.password) return value;
+    url.password = "***";
+    return url.href;
+  } catch {
+    return value;
+  }
+}
+
 const GROUPS = ["admin", "user", "agent"];
 const RANK = { user: 1, admin: 2 }; // agent is intentionally not on this ladder (D6)
 
