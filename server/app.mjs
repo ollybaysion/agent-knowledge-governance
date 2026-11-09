@@ -22,7 +22,7 @@ import { openAuth } from "./identity.mjs";
 import { CSRF_HEADER } from "./session.mjs";
 import { READ_TOKEN_PREFIX } from "./read-tokens.mjs";
 import { createQueue } from "./queue.mjs";
-import { createTypes } from "./types.mjs";
+import { createTypes, syncRenderedTypes } from "./types.mjs";
 import { createCatalog } from "./catalog.mjs";
 import { registerTypesRoutes } from "./routes/types.mjs";
 import { registerDocsRoutes } from "./routes/docs.mjs";
@@ -134,6 +134,8 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   const types = createTypes(storeDir, refs);
   const typeList = types.entries();
   log(`타입: ${typeList.length} — ${typeList.map(typeLabel).join(" · ")}`);
+  const typesCommit = await syncRenderedTypes(storeDir);
+  log(typesCommit ? `타입 목록 파일: rendered/types.json 을 다시 씀 (${typesCommit.slice(0, 7)})` : "타입 목록 파일: 그대로");
   // The documents as the list routes read them, read once here.
   log("카탈로그: 문서 읽는 중");
   const heapBefore = process.memoryUsage().heapUsed;

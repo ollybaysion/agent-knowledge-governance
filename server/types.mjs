@@ -1,7 +1,7 @@
 // The document type list: code types (a schema and a renderer in this repo)
 // plus md types an admin registers. store/types.json holds the order and the
 // registered types; while it is absent the defaults below are the list.
-import { readJson, revOfPath } from "./store.mjs";
+import { commitFiles, readJson, readText, revOfPath } from "./store.mjs";
 
 export const TYPES_PATH = "types.json";
 export const RENDERED_TYPES_PATH = "rendered/types.json";
@@ -115,6 +115,25 @@ export function typesWrites(file) {
     { relpath: TYPES_PATH, content: stableJson(file) },
     { relpath: RENDERED_TYPES_PATH, content: stableJson({ types: typeEntries(file) }) },
   ];
+}
+
+/**
+ * At boot: rendered/types.json as the type list makes it now. A release can
+ * add a code type while store/types.json stays as it was, and a mirror CLI
+ * older than that release takes a bundle's type folder only when its own
+ * list or this file names it. So the file is written again when it differs —
+ * the stored list's types, or the defaults when there is no store/types.json.
+ * store/types.json is left as it is.
+ * @returns {Promise<string|null>} the new commit, or null when the file already says it
+ */
+export async function syncRenderedTypes(storeDir) {
+  const content = stableJson({ types: typeEntries(readTypesFile(storeDir).file) });
+  if (readText(storeDir, RENDERED_TYPES_PATH) === content) return null;
+  return commitFiles(storeDir, {
+    author: "akg-server",
+    message: "타입 목록 파일 맞춤 — 이 릴리스의 타입 목록을 미러가 받게 rendered/types.json 을 다시 쓴다",
+    writes: [{ relpath: RENDERED_TYPES_PATH, content }],
+  });
 }
 
 export function isMdType(storeDir, type) {
