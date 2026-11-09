@@ -9,9 +9,9 @@ import { mdNodes, wikiResolver } from "../md.mjs";
 import { setLeaveGuard } from "../router.mjs";
 import { VERIFY_KEY, dataIdConflictText, flowLib, shortRev, skillSectionsLib } from "../shared.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
-import { TYPE_LABEL, canEdit, isMdType, typeColor } from "../state.mjs";
+import { TYPE_LABEL, canEdit, typeColor } from "../state.mjs";
 import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock } from "/lib/sections.mjs";
-import { docTitle, isSkillType } from "./doc-view.mjs";
+import { docTitle, isMdBodyType, isSkillType } from "./doc-view.mjs";
 import { typeLabel } from "./docs.mjs";
 
 const enc = encodeURIComponent;
@@ -38,7 +38,7 @@ let editorTicket = 0;
 export async function renderEditor(type, id, focusKey) {
   const ticket = ++editorTicket;
   const back = `#/doc/${type}/${enc(id)}`;
-  if (!isSkillType(type) && !isMdType(type)) return location.replace(back);
+  if (!isMdBodyType(type)) return location.replace(back);
   if (!canEdit()) {
     toast("admin 만 고칠 수 있습니다.", "error");
     return location.replace(back);
@@ -107,9 +107,14 @@ export async function renderEditor(type, id, focusKey) {
       .saveCheck(registry, { type, id, markdown: md, active: true })
       .errors.map((e) => `${e.line > 0 ? `${flow.mdLine(e, mine.fence.line)} 줄 ` : ""}${e.code} ${e.message}`);
   }
-  // The other agent mds the last save broke (the server's flowWarnings), for the save toast.
+  // The other agent mds the last save broke (the server's flowWarnings) and
+  // the 조회 warnings of the saved md (queryWarnings), for the save toast.
   let flowWarn = null;
-  const savedToast = (message) => toast(flowWarn ? `${message} — ${flowWarn}` : message, flowWarn ? "error" : undefined);
+  let queryWarn = null;
+  const savedToast = (message) => {
+    const notes = [flowWarn, queryWarn].filter(Boolean);
+    toast(notes.length ? `${message} — ${notes.join(" — ")}` : message, notes.length ? "error" : undefined);
+  };
   const dirtyKeys = () => changedKeys(saved.blocks, blocksNow());
   const headDirty = () => saved.mode === "plain" && editedHead !== saved.head;
   const anyDirty = () => dirtyKeys().length > 0 || headDirty();
@@ -137,6 +142,8 @@ export async function renderEditor(type, id, focusKey) {
       rev = r.data.rev;
       const broken = r.data.flowWarnings ?? [];
       flowWarn = broken.length ? `이 저장으로 플로우가 깨진 md: ${broken.map((b) => b.md).join(" · ")}` : null;
+      const warned = r.data.queryWarnings ?? [];
+      queryWarn = warned.length ? `조회 경고 ${warned.length}: ${warned.join(" · ")}` : null;
       invalidateDocs();
       return true;
     }

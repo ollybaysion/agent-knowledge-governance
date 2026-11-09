@@ -50,7 +50,8 @@ import {
 } from "../links.mjs";
 import { columnsOf } from "../catalog.mjs";
 import { tableUses } from "../../src/table-class.mjs";
-import { addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf } from "../data-ids.mjs";
+import { addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf, tableKinds } from "../data-ids.mjs";
+import { queryWarnings, STARTER, starterView } from "../../src/starter.mjs";
 import { hasGroup } from "../auth.mjs";
 import { etagOf, noneMatchHits } from "../etag.mjs";
 import { TYPES_PATH, UNCLASSIFIED } from "../types.mjs";
@@ -203,6 +204,18 @@ export function registerDocsRoutes(app) {
     const { present, warnings } = checkVerifySet(doc.body.markdown, { agent: doc.id, known: knownPieces(doc.id, doc) });
     return present ? { warnings } : {};
   };
+  // The 조회 warnings (src/starter.mjs): saved anyway, shown beside the
+  // document. The kinds are the active db-schema documents' as they stand.
+  const queryWarningsOf = (type, doc) => {
+    const list = queryWarnings(type, doc.body?.markdown, tableKinds(catalog));
+    return list.length ? { queryWarnings: list } : {};
+  };
+  // A starter document's items and presets for its doc view.
+  const starterOf = (doc) => {
+    if (typeof doc.body?.markdown !== "string") return {};
+    const { items, presets } = starterView(doc.body.markdown, tableKinds(catalog));
+    return { starter: { items, presets } };
+  };
   // The piece ids a 정답 can name: this skill's and its linked skills' (LINK1 · LINK2).
   const knownPieces = (id, doc) =>
     pieceIds(pieceChoices({ id, markdown: doc.body?.markdown ?? "" }, linkedSkills(storeDir, id, doc)));
@@ -275,6 +288,8 @@ export function registerDocsRoutes(app) {
       backlinks: backlinksOf(catalog, typeIds, type, id),
       wikilinks: resolveWikilinks(catalog, typeIds, type, doc),
       ...warningsOf(type, doc),
+      ...queryWarningsOf(type, doc),
+      ...(type === STARTER ? starterOf(doc) : {}),
       ...(type === "db-schema" ? tableClassOf(doc, tableUses(catalog.agents())) : {}),
     };
   };
@@ -635,7 +650,7 @@ export function registerDocsRoutes(app) {
             author: request.user.id,
             message: `create ${type}/${doc.id}`,
           });
-          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc), ...flowWarnings(flow) } };
+          return { status: 201, body: { rev, json: doc, ...warningsOf(type, doc), ...queryWarningsOf(type, doc), ...flowWarnings(flow) } };
         },
         { priority: priorityOf(request.user) },
       );
@@ -764,7 +779,7 @@ export function registerDocsRoutes(app) {
           });
           return {
             status: 200,
-            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc), ...flowWarnings(flow) },
+            body: { rev, json: newDoc, rebased: outcome.rebased, ...warningsOf(type, newDoc), ...queryWarningsOf(type, newDoc), ...flowWarnings(flow) },
           };
         },
         { priority: priorityOf(request.user) },
@@ -872,13 +887,13 @@ export function registerDocsRoutes(app) {
               body: { error: "already_exists", ids: existing },
             };
           // Against the store and against the batch entries before it.
-          if (type === "domain-skill" || type === "domain") {
+          if (type === "domain-skill" || type === "domain" || type === STARTER) {
             const taken = inStore.dataIdOwners(null);
             const conflicts = [];
             for (const doc of docs) {
               for (const c of dataIdConflicts(doc, () => taken))
                 conflicts.push({ ...c, source: doc.id });
-              addOwner(taken, doc.id, doc.body.markdown);
+              addOwner(taken, doc.id, doc.body.markdown, type);
             }
             if (conflicts.length)
               return {

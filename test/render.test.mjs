@@ -272,6 +272,15 @@ test("domain: SKILL.md under rendered/domain/<name>/, as domain-skill under its 
   assert.equal(docMdPath("domain-skill", { ...doc, schema: "domain-skill/v1" }), "rendered/domain-skill/k/SKILL.md");
 });
 
+// A starter document renders to its text as written, under its own folder.
+test("starter: STARTER.md under rendered/starter/<name>/ is the md as written", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "starter", "eqp-basics.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs), []);
+  assert.equal(rendersToMd("starter", doc), true);
+  assert.equal(docMdPath("starter", doc), "rendered/starter/eqp-basics/STARTER.md");
+  assert.equal(renderDocMd("starter", doc), doc.body.markdown);
+});
+
 // A VOC renders to its text as written — no frontmatter, nothing added.
 test("voc: the example renders byte-identically to its golden", () => {
   const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "voc", "line-a-rf-power-drift.json"), "utf8"));

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "starter/v1",
+  "title": "starter/v1 body",
+  "description": "agent-knowledge-governance-json-spec.md §4.7 — a 첫 선택 데이터 document: the list the chat's first screen offers before the agent is picked. Same body as domain-skill/v1: the author's md, stored verbatim. Each `### <id> — <title>` item of `## 데이터` with its first ```sql fence is one query, written in the agent document's grammar; the item id is a query id, unique across domain-skill, domain and starter. `## 프리셋` holds `- <name>: <id>, <id>` list lines. The consumer (fdc-agent-be-spring) reads the md; akg checks the item ids and warns on the rest (src/starter.mjs).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "markdown"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Document id = rendered/starter/<name>/STARTER.md."
+    },
+    "markdown": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The whole document as the author wrote it. Stored, rendered and served byte-for-byte."
+    }
+  }
+}

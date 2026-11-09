@@ -81,7 +81,7 @@ export function deriveDraftId(type, body) {
     return body.command
       ? String(body.command).toLowerCase().replace(/_/g, "-")
       : "";
-  if (type === "domain-skill" || type === "domain")
+  if (type === "domain-skill" || type === "domain" || type === "starter")
     return body.name ? String(body.name).toLowerCase() : "";
   if (type === "manual") return body.id ? String(body.id).toLowerCase() : "";
   if (isMdType(type)) return body.name ? String(body.name).toLowerCase() : "";
@@ -92,7 +92,7 @@ export function deriveDraftId(type, body) {
 // ---- 새 문서 단추 + 플라이아웃 ----
 // Structured types with a draft form, in the type list's order; every open md
 // type; last, 타입 없이 올리기 for anyone who writes.
-const FORM_TYPES = { "db-schema": "테이블 · 컬럼", "msg-format": "설비 커맨드", "domain-skill": "스킬 문서(md)", domain: "도메인 지식(md)", manual: "화면 매뉴얼(캡처)" };
+const FORM_TYPES = { "db-schema": "테이블 · 컬럼", "msg-format": "설비 커맨드", "domain-skill": "스킬 문서(md)", domain: "도메인 지식(md)", starter: "첫 화면에서 고를 조회(md)", manual: "화면 매뉴얼(캡처)" };
 export function newDocOpts() {
   if (!canCreate()) return [];
   return TYPES.filter((t) => t.status === "active" && t.id !== "unclassified" && (FORM_TYPES[t.id] || t.kind === "md")).map((t) => ({
@@ -205,7 +205,9 @@ export function idSourceField(type, body, onIdChange) {
       ? `${TYPE_LABEL[type] ?? type} 이름 클릭해서 입력 (예: line-a-rf-power-drift)`
       : type === "domain"
         ? "도메인 문서 이름 클릭해서 입력 (예: fdc-virtual-sensor-formula)"
-        : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
+        : type === "starter"
+          ? "첫 선택 데이터 문서 이름 클릭해서 입력 (예: eqp-basics)"
+          : "스킬명 클릭해서 입력 (예: fdc-explain-sensor)",
     onChange: onIdChange,
   });
 }
@@ -286,7 +288,9 @@ function paintDraft(section, type, localId, body) {
             ? draftVoc(body, persist)
             : type === "domain"
               ? draftDomain(body, persist)
-              : draftDomainSkill(body, persist);
+              : type === "starter"
+                ? draftStarter(body, persist)
+                : draftDomainSkill(body, persist);
   section.replaceChildren(head, note, fields);
   updateSave();
 }
@@ -523,6 +527,25 @@ export function draftDomain(body, persist) {
       }),
     ),
     el("p", { class: "fhint", text: "본문은 저장 후 문서 화면에서도 고칠 수 있습니다. BE 가 읽는 절은 넷입니다(## 한 줄 설명 · ## 언제 호출되는가? · ## 도메인 지식 · ## 데이터). 다른 ## 절이 있는 문서는 BE 가 오류로 건너뜁니다. ## 도메인 지식 아래 ### 소제목마다 BE 가 조각 하나로 읽습니다." }),
+  );
+  return wrap;
+}
+
+// ---- starter 드래프트 폼 — 첫 화면에서 고를 조회 목록, md 한 장 ----
+export function draftStarter(body, persist) {
+  const wrap = el("div", { class: "dfwrap" });
+  wrap.append(
+    dfRow(
+      "markdown",
+      false,
+      eField(() => body.markdown, (v) => (body.markdown = v), {
+        area: true,
+        mono: true,
+        placeholder: "md 를 여기에 — # 이름 / ## 데이터 (### id — 제목 + ```sql) / ## 프리셋 (- 이름: id, id)",
+        onChange: persist,
+      }),
+    ),
+    el("p", { class: "fhint", text: "## 데이터 의 ### 항목 하나가 첫 화면의 고를 거리 하나입니다. 항목은 에이전트 문서와 같은 문법으로 쓰고, 항목 id 는 모든 에이전트 · 도메인 · 첫 선택 데이터 문서를 통틀어 하나뿐입니다. ## 프리셋 의 줄은 - 프리셋 이름: id, id 입니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }

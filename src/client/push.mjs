@@ -6,7 +6,7 @@
 //
 // The file is either the whole document (.json: envelope + body) or, for a
 // type whose body is { name, markdown } (every md type, domain-skill,
-// domain), the markdown text (.md): the body's markdown is replaced and the
+// domain, starter), the markdown text (.md): the body's markdown is replaced and the
 // envelope and links stay as the server has them. An .md's ![글](./경로.png)
 // is uploaded (POST /api/assets) and written as ![글](asset:<sha256>), and
 // every asset: picture the md shows joins the envelope's assets[].

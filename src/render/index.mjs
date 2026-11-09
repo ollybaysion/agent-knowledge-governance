@@ -11,7 +11,8 @@ import { renderMdDoc } from "./md.mjs";
 // §4.4) and is distributed via `akg sync --skills`, not the keyword-docs
 // injection index — it deliberately has no index.json entry, which is why it
 // is dispatched by type rather than sitting in this map. A domain document
-// renders the same way to rendered/domain/<name>/SKILL.md. An md type (voc,
+// renders the same way to rendered/domain/<name>/SKILL.md. A starter document
+// is its md as written, at rendered/starter/<name>/STARTER.md. An md type (voc,
 // unclassified, a registered type) is named by the caller's `md` flag.
 const RENDERERS = {
   "db-schema/v1": renderDbSchemaMd,
@@ -22,7 +23,7 @@ const RENDERERS = {
 const SKILL_TYPES = new Set(["domain-skill", "domain"]);
 
 function rendererFor(type, doc, md) {
-  if (md) return renderMdDoc;
+  if (md || type === "starter") return renderMdDoc;
   return (
     RENDERERS[doc.schema] ??
     (SKILL_TYPES.has(type) ? renderDomainSkillMd : null)
@@ -47,11 +48,12 @@ export function rendersToMd(type, doc, { md = false } = {}) {
 }
 
 /**
- * Where a rendered doc lands under rendered/ — the skill trees, voc's
- * <name>/VOC.md, an md type's <id>.md, or docs/<id>.md.
+ * Where a rendered doc lands under rendered/ — the skill trees, a starter's
+ * <name>/STARTER.md, voc's <name>/VOC.md, an md type's <id>.md, or docs/<id>.md.
  */
 export function docMdPath(type, doc, { md = false } = {}) {
   if (SKILL_TYPES.has(type)) return `rendered/${type}/${doc.body.name}/SKILL.md`;
+  if (type === "starter") return `rendered/starter/${doc.body.name}/STARTER.md`;
   if (type === "voc") return `rendered/voc/${doc.body.name}/VOC.md`;
   if (md) return `rendered/${type}/${doc.id}.md`;
   return `rendered/${type}/docs/${doc.id}.md`;

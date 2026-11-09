@@ -3,26 +3,31 @@ import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { coverageOf } from "../src/table-class.mjs";
 import { listIds, readJson } from "./store.mjs";
 
-// The types whose md carries a ## 데이터 section the consumer reads.
-const DATA_ID_TYPES = ["domain-skill", "domain"];
+// The agent mds: the documents whose 조회 count for 주요 · 쓰는 조회 and the flow check.
+const AGENT_TYPES = ["domain-skill", "domain"];
+// The types whose md carries a ## 데이터 section the consumer reads: one query
+// id across all of them.
+const DATA_ID_TYPES = [...AGENT_TYPES, "starter"];
 
 /**
- * Add one skill's names to `owners`: its data ids, its flow fence's subgraph
- * ids and its own name ({@link dataIdOwners}).
+ * Add one document's names to `owners`: its data ids, and for an agent md its
+ * flow fence's subgraph ids and its own name ({@link dataIdOwners}). A
+ * starter document holds data ids only.
  */
-export function addOwner(owners, id, markdown) {
+export function addOwner(owners, id, markdown, type = "domain-skill") {
   const add = (name, kind) => owners.set(name, [...(owners.get(name) ?? []), { doc: id, kind }]);
   for (const item of skillDataIds(markdown)) add(item.id, "data");
+  if (!AGENT_TYPES.includes(type)) return owners;
   for (const sub of new Set(flowSubgraphIds(markdown))) add(sub, "subgraph");
   add(id, "md");
   return owners;
 }
 
 /**
- * Name → the stored domain-skill and domain documents that hold it and as
- * what (a data id, a subgraph id, the document's own name), over every such
- * document except `selfType/selfId` (any type when `selfType` is absent) and
- * the archived ones. Read on each call: skills are few.
+ * Name → the stored domain-skill, domain and starter documents that hold it
+ * and as what (a data id, a subgraph id, the document's own name), over every
+ * such document except `selfType/selfId` (any type when `selfType` is absent)
+ * and the archived ones. Read on each call: skills are few.
  * @returns {Map<string, {doc: string, kind: "data"|"subgraph"|"md"}[]>}
  */
 export function dataIdOwners(storeDir, selfId, selfType = null) {
@@ -37,7 +42,7 @@ export function dataIdOwners(storeDir, selfId, selfType = null) {
         continue;
       }
       if (!doc || doc.status === "archived" || typeof doc.body?.markdown !== "string") continue;
-      addOwner(owners, id, doc.body.markdown);
+      addOwner(owners, id, doc.body.markdown, type);
     }
   }
   return owners;
@@ -50,7 +55,7 @@ export function dataIdOwners(storeDir, selfId, selfType = null) {
  */
 export function agentRegistry(storeDir) {
   const out = [];
-  for (const type of DATA_ID_TYPES) {
+  for (const type of AGENT_TYPES) {
     for (const id of listIds(storeDir, type)) {
       let doc;
       try {
@@ -73,4 +78,17 @@ export function tableClassOf(doc, uses) {
 export function tableClass(table, coverage, uses) {
   const usedBy = uses.get(String(table).toUpperCase()) ?? [];
   return { major: usedBy.length > 0, usedBy, coverage };
+}
+
+/**
+ * Table (upper case) → the `kind` of its active db-schema document, undefined
+ * when the document has none. A table missing from the map has no active
+ * document. The consumer reads the active db-schema documents only.
+ * @param {{entries: (type: string) => {status: string, table: string, kind?: string}[]}} catalog
+ * @returns {Map<string, string|undefined>}
+ */
+export function tableKinds(catalog) {
+  const out = new Map();
+  for (const e of catalog.entries("db-schema")) if (e.status === "active") out.set(String(e.table).toUpperCase(), e.kind);
+  return out;
 }

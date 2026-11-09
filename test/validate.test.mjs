@@ -726,6 +726,38 @@ test("the shipped skill examples validate — a main domain-skill (role absent) 
   }
 });
 
+function starterDoc(markdown, extra = {}) {
+  return {
+    schema: "starter/v1",
+    id: "s",
+    keywords: [{ kw: "s", inject: "full" }],
+    status: "active",
+    ...extra,
+    body: { name: "s", markdown },
+  };
+}
+
+test("starter/v1: the body is { name, markdown }, the id is body.name, the item ids are ascii and once", () => {
+  const md = "# s\n\n## 데이터\n\n### eqp_info — 설비 정보\n\n```sql\nSELECT * FROM T WHERE EQP_ID = :eqp_id\n```\n\n## 프리셋\n\n- 기본: eqp_info\n";
+  assert.deepEqual(validateDocument(starterDoc(md), refs), []);
+  assert.ok(validateDocument(starterDoc(md, { id: "t" }), refs).some((e) => e.includes('$.id: expected "s"')));
+  const extra = starterDoc(md);
+  extra.body.items = [];
+  assert.ok(validateDocument(extra, refs).some((e) => e.includes("items")), "an unknown body key is refused");
+  assert.ok(validateDocument(starterDoc("  "), refs).length > 0, "an empty markdown is refused");
+  const twice = md.replace("## 프리셋", "### eqp_info — 또\n\n## 프리셋");
+  assert.ok(validateDocument(starterDoc(twice), refs).some((e) => e.includes("데이터 항목 id 가 겹칩니다 — eqp_info")));
+  const hangul = md.replace("### eqp_info", "### 설비");
+  assert.ok(validateDocument(starterDoc(hangul, { status: "inactive" }), refs, { draft: true }).some((e) => e.includes("ascii 식별자")), "a draft too");
+  // ## 프리셋 and any other ## section are the author's.
+  assert.deepEqual(validateDocument(starterDoc(`${md}\n## 메모\n\n글\n`), refs), []);
+});
+
+test("starter/v1: the shipped example validates", () => {
+  const doc = JSON.parse(readFileSync(join(__dirname, "..", "examples", "starter", "eqp-basics.json"), "utf8"));
+  assert.deepEqual(validateDocument(doc, refs), []);
+});
+
 function domainDoc(markdown, extra = {}) {
   return {
     schema: "domain/v1",

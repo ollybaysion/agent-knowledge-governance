@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 문서 JSON 스펙 (v0.10.0)
+# agent-knowledge-governance — 문서 JSON 스펙 (v0.11.0)
 
 > 허브 문서의 **JSON 포맷 정의서**. 모체 설계도
 > [`agent-knowledge-governance-design.md`](agent-knowledge-governance-design.md) §5(데이터 모델)를 구현
@@ -114,6 +114,10 @@
 > 그대로. 봉투는 `domain-skill/v1` 유지(v2·v3 개정 때와 같은 이유 — 저장 문서가
 > 예시 한 건, 설계도 §5.3). CLI `akg push domain-skill <skill.md>` 가 .md 파일을
 > 그대로 올린다(파일명 = name).
+> v0.11.0 개정(2026-11-10, 사용자 결정): **문서 타입 `starter/v1`(첫 선택 데이터) 신설**(§4.7) —
+> 채팅 첫 화면에서 먼저 고를 조회의 목록. body 는 domain-skill 과 같은 `{ name, markdown }` 이고,
+> 항목은 `## 데이터` 의 에이전트 문법, 프리셋은 `## 프리셋` 의 목록 줄이다. 조회 id 는 세 타입을
+> 통틀어 하나다. 항목의 kind 는 읽는 표의 db-schema `kind` 에서 셈한다.
 
 ---
 
@@ -146,6 +150,7 @@ store/unclassified/<id>.meta.json    unclassified 사이드카 메타
 rendered/<type>/index.json        프로바이더 계약 인덱스        (§5.1)
 rendered/<type>/docs/<id>.md      주입용 md                    (§5.2)
 rendered/domain-skill/<name>/SKILL.md   설치형 스킬            (§4.4)
+rendered/starter/<name>/STARTER.md      첫 선택 데이터 md      (§4.7)
 ```
 
 원칙: **진실원과 파생물은 항상 같은 git 커밋 안에서 갱신**된다(어긋난 상태가
@@ -386,7 +391,7 @@ inferred/confirmed 슬롯은 서버가 **deprecated로 자동 전이**(= 고아 
 - **중요도** 주요 · 기타 — 저장 칸이 아니라 서버가 셈하는 값이다. 활성 domain-skill ·
   domain 문서의 `## 데이터` 조회(```sql 펜스, `src/skill-data-ids.mjs`) 가운데 하나라도
   FROM · JOIN 대상에 이 표(`table`, 대소문자 무시, `OWNER.` 접두 뗌)를 두면 주요, 아니면
-  기타다(`src/table-class.mjs` `tablesOfSql`). `GET /api/docs` 의 db-schema 항목과
+  기타다(`src/table-class.mjs` `tablesOfSql`). starter 문서(§4.7)의 조회는 이 셈에 들어가지 않는다. `GET /api/docs` 의 db-schema 항목과
   `GET /api/docs/db-schema/:id` 가 `major` · `usedBy[]{type, id, query}` 로 싣는다.
 - **확정 커버리지** — 슬롯(`purpose` · `columnDescs.*` · `queries[].note`) 가운데
   confirmed 수 / (scaffold + inferred + confirmed) 수. deprecated 슬롯과 `unusedColumns`
@@ -560,6 +565,63 @@ push 와 archive 로 끝난다. `id = lower(code)` 라서 **소비자는 문서 
 소비 형태는 md 가 아니라 JSON 이다. 첫 소비자는 demo-fe 의 설비 등록 폼으로,
 FE → BE(`GET /api/fdc/v1/lines`) → akg 로 읽어 간다.
 
+### 4.7 `starter/v1` — 첫 선택 데이터 문서(md)
+
+채팅 첫 화면은 에이전트를 고르기 전에 "먼저 조회할 데이터"를 항목마다 고르게 한다
+(설비 정보 · 챔버 정보 · 센서 목록, 끝에는 Interlock 이력 같은 것). 이 목록의 원천이
+`starter` 문서다. 사람이 쓰고, 소비자는 fdc-agent-be-spring 이다(`docs/consuming.md` 12절).
+에이전트 문서와 다른 타입이라 에이전트와 목록이 한 문서에 묶이지 않는다.
+
+body 는 domain-skill 과 같은 꼴 `{ name, markdown }` 이다. akg 는 원문을 `markdown` 에 그대로 둔다.
+
+```jsonc
+"body": {
+  "name": "eqp-basics",          // = 문서 id = STARTER.md 가 놓이는 디렉터리
+  "markdown": "# 설비 바탕 데이터\n\n…\n\n## 데이터\n\n### eqp_info — 설비 정보\n\n```sql\n…\n```\n\n## 프리셋\n\n- 기본 점검: eqp_info, chamber_info\n"
+}
+```
+
+**md 의 문법.**
+
+```text
+# 제목
+## 데이터
+  ### id — 제목               → 항목 하나 (id 는 ascii — 조회 id)
+    산문                      →   설명
+    ```sql … ```              →   그 항목의 첫 sql 펜스가 조회 (:var 가 받는 값)
+## 프리셋
+  - 이름: id, id, …           → 프리셋 하나. 첫 `:` 앞이 이름. 절이 없으면 프리셋이 없다
+```
+
+`## 데이터` 의 항목 문법은 에이전트 문서(§4.4)와 같다(`src/skill-data-ids.mjs`).
+조회 id 는 domain-skill · domain · starter 문서를 통틀어 하나뿐이다.
+그 밖의 `##` 절은 저작자의 것이다.
+
+**항목의 kind.** 문서에 적지 않는다. 조회가 읽는 표(FROM · JOIN, `src/table-class.mjs`
+`tablesOfSql`)의 활성 db-schema 문서 `kind`(§4.1)에서 나온다. 읽는 표 가운데 `data` 가
+하나라도 있으면 data, 그 밖은 info 다. `kind` 가 빈 표와 문서가 없는 표는 info 로 본다
+(사용자 결정 2026-11-10). 소비자는 info 조회를 설비마다 한 번만 돌리고, data 조회는
+인자가 바뀌면 다시 돌린다. 설비 바인드는 `eqp_id` · `equipment` · `eqp`, 라인 바인드는 `line` 이다.
+
+**akg 의 검증.** 스키마: `name` kebab-case, `markdown` 비공백, 다른 키 거절. 의미 검사는
+id(`== body.name`)와 항목 id(ascii 식별자, 문서 안에서 한 번)다. 다른 문서와 겹치는 항목 id 는
+409 `data_id_conflict` 다. 아래 넷은 저장 경고다(`src/starter.mjs`). 저장은 되고, 쓰기 답과
+문서 GET 이 `queryWarnings[]` 로 싣는다.
+
+- 항목에 ```` ```sql ```` 펜스가 없다.
+- 항목이 읽는 표에 활성 db-schema 문서가 없다.
+- 프리셋이 없는 항목 id 를 가리킨다.
+- info 조회가 설비 · 라인 밖의 바인드를 받는다. 이 경고는 domain-skill · domain 문서의 조회에도 낸다.
+
+**주요 · 쓰는 조회.** db-schema 의 주요 · `usedBy`(§4.1)는 활성 domain-skill · domain 문서의 조회로
+센다. starter 문서의 조회는 이 셈에 들어가지 않는다.
+
+**렌더.** `rendered/starter/<name>/STARTER.md` = `markdown` 그대로다. index.json 항목은 없다.
+`akg sync` 는 이 폴더를 미러의 `starter/` 에 받는다.
+
+**대시보드.** 읽기 화면은 md 절을 그리고, 끝에 "조회 항목" 절을 둔다. 항목마다 읽는 표 ·
+kind · 바인드 · 경고를 보이고, 그 밑에 프리셋을 보인다. 편집은 md 편집기(절 편집 · 전체 편집)다.
+
 ---
 
 ## 5. 파생물 스펙
@@ -614,6 +676,7 @@ schemas/
   domain-doc/v1.schema.json           # §4.3
   domain-skill/v1.schema.json         # §4.4 (md 문서 { name, markdown })
   unclassified/v1.schema.json         # §4.5 (사이드카 메타)
+  starter/v1.schema.json              # §4.7 (md 문서 { name, markdown })
 ```
 
 - 전 층위 `additionalProperties: false` — 모르는 키는 검증 실패(오타로 필드가

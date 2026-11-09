@@ -11,6 +11,7 @@ export const CODE_TYPES = [
   { id: "msg-format", label: "설비 커맨드", color: "#e8a55a" },
   { id: "domain-skill", label: "에이전트", color: "#4657cf" },
   { id: "domain", label: "도메인", color: "#4f6d8a" },
+  { id: "starter", label: "첫 선택 데이터", color: "#c0623b" },
   { id: "screen-map", label: "화면", color: "#b05a8a" },
   { id: "manual", label: "매뉴얼", color: "#8a5fbf" },
   { id: "fab-line", label: "라인", color: "#7a6a4f" },
