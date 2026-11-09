@@ -15,7 +15,11 @@ export const EQP_BINDS = ["eqp_id", "equipment", "eqp"];
 export const START_TIME = "start_time";
 export const END_TIME = "end_time";
 
+/** The bind name the consumer fills from the agent input's 라인 (Source.LINE), any case. */
+export const LINE_BIND = "line";
+
 export const isEqpBind = (name) => EQP_BINDS.includes(String(name).trim().toLowerCase());
+export const isLineBind = (name) => String(name).trim().toLowerCase() === LINE_BIND;
 export const isTimeBind = (name) => [START_TIME, END_TIME].includes(String(name).trim().toLowerCase());
 
 /**

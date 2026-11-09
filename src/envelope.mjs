@@ -24,6 +24,7 @@ const SCHEMA_FILES = {
   "msg-format/v1": "msg-format/v1.schema.json",
   "domain-skill/v1": "domain-skill/v1.schema.json",
   "domain/v1": "domain/v1.schema.json",
+  "starter/v1": "starter/v1.schema.json",
   "fab-line/v1": "fab-line/v1.schema.json",
   "screen-map/v1": "screen-map/v1.schema.json",
   "manual/v1": "manual/v1.schema.json",
@@ -38,6 +39,10 @@ const BUILTIN_MD_SCHEMAS = new Set(["voc/v1", "unclassified/v1", "md/v1"]);
 // A domain-skill and a domain document share the body, the section rule and
 // the data ids.
 const SKILL_SCHEMAS = new Set(["domain-skill/v1", "domain/v1"]);
+
+// A starter document writes its ## 데이터 items in the skill md's grammar, and
+// its item ids are query ids too: one name across all three types.
+const DATA_ID_SCHEMAS = new Set([...SKILL_SCHEMAS, "starter/v1"]);
 
 // Contracts that are not document types: what the store hands out and takes
 // in besides documents. Kept out of loadSchemas so no document route accepts
@@ -207,6 +212,7 @@ export function deriveId(schema, body, { md = BUILTIN_MD_SCHEMAS.has(schema) } =
         : null;
     case "domain-skill/v1":
     case "domain/v1":
+    case "starter/v1":
       return body.name ?? null;
     case "fab-line/v1":
       // Lowercased so the id keeps the store's one-case rule while the body
@@ -233,6 +239,7 @@ const ID_SOURCE = {
   "msg-format/v1": () => "kebab(command)",
   "domain-skill/v1": () => "== body.name",
   "domain/v1": () => "== body.name",
+  "starter/v1": () => "== body.name",
   "fab-line/v1": () => "lower(code)",
   "screen-map/v1": () => "== body.id",
 };
@@ -344,11 +351,14 @@ export const flowSubgraphIds = (markdown) => readAgentMd("", markdown ?? "").flo
  * @returns {{id: string, doc: string, kind: string}[]} kind: what the other side holds the name as
  */
 export function dataIdConflicts(doc, dataIdOwners) {
-  if (!SKILL_SCHEMAS.has(doc?.schema) || !dataIdOwners) return [];
+  if (!DATA_ID_SCHEMAS.has(doc?.schema) || !dataIdOwners) return [];
   const markdown = doc.body?.markdown;
   const mine = [...new Set(skillDataIds(markdown).map((d) => d.id))].map((id) => ({ id, against: ["data", "subgraph"] }));
-  for (const id of new Set(flowSubgraphIds(markdown))) mine.push({ id, against: ["data", "subgraph", "md"] });
-  mine.push({ id: doc.id, against: ["subgraph"] });
+  // A starter document holds query ids only: no flow fence, and its name is no agent's.
+  if (SKILL_SCHEMAS.has(doc.schema)) {
+    for (const id of new Set(flowSubgraphIds(markdown))) mine.push({ id, against: ["data", "subgraph", "md"] });
+    mine.push({ id: doc.id, against: ["subgraph"] });
+  }
   const owners = dataIdOwners(doc.id, doc.schema.split("/")[0]);
   const out = [];
   for (const { id, against } of mine) {
@@ -444,6 +454,13 @@ const SEMANTIC_CHECKS = {
   "domain/v1"(doc, errors) {
     checkSkillMarkdown(doc, errors);
   },
+  // The id and the item ids. The rest of a starter document — a missing
+  // ```sql fence, a table without a db-schema document, a preset's unknown
+  // id, an info query's bind — is a save warning (src/starter.mjs).
+  "starter/v1"(doc, errors) {
+    checkDerivedId(doc, errors);
+    checkSkillDataIds(doc, errors);
+  },
 };
 
 // A draft — an inactive document being built up in the dashboard — is validated
@@ -534,7 +551,7 @@ export function validateDocument(doc, refs, { draft = false, assetExists, mdType
       // reason). An authored id has nothing to be compared against.
       const want = deriveId(doc.schema, doc.body, { md });
       // A data id is a key the moment the skill exists, draft or not.
-      if (SKILL_SCHEMAS.has(doc.schema)) checkSkillDataIds(doc, errors);
+      if (DATA_ID_SCHEMAS.has(doc.schema)) checkSkillDataIds(doc, errors);
       if (AUTHORED_ID.has(doc.schema)) return errors;
       if (want === null)
         fail(

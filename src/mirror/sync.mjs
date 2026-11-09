@@ -45,12 +45,14 @@ export const REJECTED = "bundle_rejected";
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 // §5.6 mirror layout's known type folders. "domain" holds a domain
-// document's rendered/domain/<name>/SKILL.md.
+// document's rendered/domain/<name>/SKILL.md, "starter" a starter document's
+// rendered/starter/<name>/STARTER.md.
 const ALLOWED_TYPE_DIRS = new Set([
   "db-schema",
   "msg-format",
   "domain",
   "domain-skill",
+  "starter",
   "manual",
   "voc",
   // Listed before the server emits it, so that turning it on server-side does

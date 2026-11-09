@@ -25,6 +25,7 @@ export function kindTag(type, role) {
       "screen-map": "화면",
       voc: "VOC",
       "fab-line": "라인",
+      starter: "첫 선택",
       unclassified: "미분류",
     }[type] ?? TYPE_LABEL[type] ?? type
   );

@@ -57,11 +57,15 @@ export function openDocWithPanel(type, id, tab) {
 
 /** domain-skill and domain: the skill md body, editor and reading view. */
 export const isSkillType = (type) => type === "domain-skill" || type === "domain";
+/** starter (첫 선택 데이터): an md body like an md type's, with its 조회 items listed. */
+export const isStarterType = (type) => type === "starter";
+/** The types whose body is { name, markdown }: the md editor opens them. */
+export const isMdBodyType = (type) => isSkillType(type) || isStarterType(type) || isMdType(type);
 
 /** The name a document is shown by. */
 export function docTitle(type, doc) {
   const b = doc.body ?? {};
-  if (isSkillType(type) || isMdType(type)) return titleOf(b.markdown) ?? b.name ?? doc.id;
+  if (isMdBodyType(type)) return titleOf(b.markdown) ?? b.name ?? doc.id;
   if (type === "db-schema" || type === "msg-format") return doc.id;
   return b.title ?? b.name ?? doc.id;
 }
@@ -193,9 +197,10 @@ async function buildBody(ctx, host) {
   const { type, doc } = ctx;
   if (isSkillType(type)) {
     const r = await skillBody(ctx);
-    host.replaceChildren(...r.nodes);
+    host.replaceChildren(...[queryWarnBox(ctx.data.queryWarnings)].filter(Boolean), ...r.nodes);
     return r;
   }
+  if (isStarterType(type)) return starterBody(ctx, host);
   if (isMdType(type)) return mdBody(ctx, host);
   if (type === "manual") return manualBody(ctx, host);
   if (type === "screen-map") return screenBody(ctx, host);
@@ -250,7 +255,7 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     ...keywordChips((doc.keywords || []).filter((k) => k.kw !== doc.id)),
   ];
   const fullEdit =
-    canEdit && (isSkillType(type) || isMdType(type))
+    canEdit && isMdBodyType(type)
       ? el("button", { type: "button", class: "btn sm doc-full-edit", onclick: () => ctx.editSection(null) }, [icon("pencil", 14), "전체 편집"])
       : null;
   return el("header", { class: "doc-head" }, [
@@ -637,6 +642,58 @@ async function mdBody(ctx, host) {
   }
   host.replaceChildren(...nodes);
   return { sections, nodes };
+}
+
+/** The server's 조회 warnings (queryWarnings) as one box, or null when there are none. */
+function queryWarnBox(list, title = "조회 경고") {
+  if (!list?.length) return null;
+  return el("div", { class: "verify-warn query-warn", role: "note" }, [
+    el("b", { text: `${title} ${list.length}` }),
+    el("ul", {}, list.map((w) => el("li", { text: w }))),
+  ]);
+}
+
+// ---------- starter(첫 선택 데이터): md 본문 + 조회 항목 표 ----------
+async function starterBody(ctx, host) {
+  const built = await mdBody(ctx, host);
+  const { items = [], presets = [] } = ctx.data.starter ?? {};
+  const tables = new Set(ctx.docs.filter((d) => d.type === "db-schema").map((d) => d.id));
+  const tableChip = (t) =>
+    tables.has(t.toLowerCase())
+      ? el("a", { class: "chip mono", href: `#/doc/db-schema/${enc(t.toLowerCase())}`, text: t })
+      : el("span", { class: "chip mono dim", title: "DB 스키마 문서가 없는 표", text: t });
+  const kindBadge = (kind) => (kind ? el("span", { class: `b b-kind k-${kind}`, text: KIND_LABEL[kind] }) : el("span", { class: "dim", text: "—" }));
+  const warnList = (list) => (list.length ? el("ul", { class: "starter-warn" }, list.map((w) => el("li", { text: w }))) : el("span", { class: "dim", text: "없음" }));
+  const rows = items.map((it) =>
+    el("tr", {}, [
+      el("td", {}, [el("code", { text: it.id }), it.title ? el("span", { text: ` ${it.title}` }) : null]),
+      el("td", {}, it.tables.length ? it.tables.map(tableChip) : [el("span", { class: "dim", text: "—" })]),
+      el("td", {}, kindBadge(it.kind)),
+      el("td", {}, it.binds.length ? it.binds.map((b) => el("code", { class: "starter-bind", text: `:${b}` })) : [el("span", { class: "dim", text: "—" })]),
+      el("td", {}, warnList(it.warnings)),
+    ]),
+  );
+  const presetWarnings = presets.flatMap((p) => p.warnings);
+  const section = sec({
+    key: "조회 항목",
+    title: "조회 항목",
+    extra: el("span", { class: "count-pill", text: String(items.length) }),
+    children: [
+      el("p", { class: "dim small", text: "## 데이터 의 항목마다 읽는 표와 kind 입니다. kind 는 읽는 표의 DB 스키마 문서 성격에서 나옵니다. data 표가 하나라도 있으면 data, 그 밖은 info 입니다." }),
+      items.length
+        ? el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl starter-tbl" }, [
+            el("thead", {}, el("tr", {}, ["항목", "읽는 표", "kind", "바인드", "경고"].map((t) => el("th", { text: t })))),
+            el("tbody", {}, rows),
+          ]))
+        : el("p", { class: "dim", text: "## 데이터 에 ### 항목이 아직 없습니다." }),
+      presets.length
+        ? el("dl", { class: "kv" }, presets.flatMap((p) => [el("dt", { text: `프리셋 ${p.name}` }), el("dd", { class: "mono", text: p.items.join(", ") || "—" })]))
+        : null,
+      queryWarnBox(presetWarnings, "프리셋 경고"),
+    ],
+  });
+  host.append(section);
+  return { ...built, sections: [...built.sections, { key: "조회 항목", title: "조회 항목" }], nodes: [...built.nodes, section] };
 }
 
 // ---------- screen-map ----------

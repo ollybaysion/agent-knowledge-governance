@@ -32,7 +32,7 @@ const USAGE = `usage:
   akg asset-push <file.png|.jpg|.webp> [--alt <글>] [--server <url>] [--mirror <dir>]
 
 push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
-  .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain)의 본문 글.
+  .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain · starter)의 본문 글.
   .json 의 links · tags · assets 는 서버와 다를 때만 올린다.
   .md 의 ![글](./경로.png) 는 그 파일을 올리고 ![글](asset:<sha256>) 로 바꿔 쓴다.
   md 가 보이는 asset: 그림은 문서 assets[] 에 더한다(alt = ![글] 의 글).
@@ -55,6 +55,7 @@ const BUILTIN_TYPES = [
   "msg-format",
   "domain-skill",
   "domain",
+  "starter",
   "screen-map",
   "manual",
   "fab-line",

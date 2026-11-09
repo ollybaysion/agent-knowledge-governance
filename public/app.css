@@ -2908,6 +2908,24 @@ a.wiki {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+/* ---- 조회 경고 · 첫 선택 데이터의 조회 항목 표 ---- */
+.query-warn {
+  margin: 0 0 16px;
+}
+.starter-tbl td {
+  vertical-align: top;
+}
+.starter-tbl .chip,
+.starter-bind {
+  margin: 0 4px 2px 0;
+}
+.starter-warn {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--warning-ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
 /* ---- 답변 품질 검증 Set — 설정 카드 · 종류 묶음 · 질문 카드 · 기록 이력 ---- */
 /* 리듬: 묶음 사이 24px, 카드 사이 10px, 카드 안 줄 사이 8px */
 .verify-set .verify-group {

@@ -28,6 +28,7 @@ const CODE_DESC = {
   "msg-format": "설비 커맨드",
   "domain-skill": "스킬 문서(md)",
   domain: "도메인 지식(md) — main 이 가리키는 지식",
+  starter: "첫 선택 데이터(md) — 첫 화면에서 먼저 고를 조회",
   "screen-map": "화면 지도",
   manual: "화면 매뉴얼(캡처)",
   "fab-line": "라인",

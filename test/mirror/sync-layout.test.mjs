@@ -134,6 +134,28 @@ test("manual and voc — types the server renders — are accepted", async () =>
   await cleanup();
 });
 
+// A store without types.json ships no list: the starter folder is known to the CLI itself.
+test("starter — rendered/starter/<name>/STARTER.md — is accepted without a types.json", async () => {
+  const { app, storeDir, cleanup } = await setupServer();
+  await commitFiles(storeDir, {
+    author: "renoir",
+    message: "an active starter is rendered",
+    writes: [{ relpath: "rendered/starter/eqp-basics/STARTER.md", content: "# 설비 바탕 데이터\n" }],
+  });
+  const mirrorDir = join(mkdtempSync(join(tmpdir(), "akg-layout-mirror-")), "akg");
+
+  const result = await syncMirror({
+    serverUrl: "http://x",
+    token: "vtok",
+    mirrorDir,
+    fetchImpl: fetchImplFromApp(app, "vtok"),
+  });
+  assert.equal(result.changed, true);
+  assert.ok(existsSync(join(mirrorDir, "starter", "eqp-basics", "STARTER.md")));
+  assert.equal(existsSync(join(mirrorDir, "types.json")), false);
+  await cleanup();
+});
+
 test("a type the bundle's types.json lists is accepted, and the list lands in the mirror", async () => {
   const { app, storeDir, cleanup } = await setupServer();
   await commitFiles(storeDir, {

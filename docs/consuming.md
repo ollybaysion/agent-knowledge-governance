@@ -11,6 +11,7 @@ Phase 3 (design §8.1, section 7 below): push changes back to the hub with
 A program that talks HTTP itself reads section 9.
 에이전트 md 의 저장 검사(BE 규칙 미러)는 10절이 적는다.
 WorkBench 같은 다른 앱이 브라우저에서 문서를 읽는 길(개인 읽기 토큰)은 11절이 적는다.
+BE 가 첫 선택 데이터(`starter`) 문서를 읽는 길은 12절이 적는다.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
 — present on the server and readable through the API and dashboard, but not
@@ -686,3 +687,80 @@ AKG 화면이 부르는 경로다. 쿠키 세션으로만 부르고, 쓰기에�
 | 400 | `invalid_label` · `invalid_days` | (발급) 이름이 1~40 자 한 줄이 아니거나, 기간이 30 · 90 · 365 가 아니다 |
 | 429 | `{error: "rate_limited"}` | 인증 실패가 5 분에 20 번을 넘었다. 잠시 뒤 다시 부른다 |
 | 503 | `{error: "session_store_down"}` | AKG 가 Redis 에 닿지 않는다 |
+
+## 12. 첫 선택 데이터(`starter`) 읽기
+
+채팅 첫 화면은 에이전트를 고르기 전에 "먼저 조회할 데이터"를 항목마다 고르게 한다.
+그 목록의 원천이 `starter` 문서다. 사람이 AKG 에서 쓰고, BE(fdc-agent-be-spring)가 읽는다.
+본문은 에이전트 문서와 같은 꼴 `{ name, markdown }` 이다(json-spec §4.7).
+
+### 목록과 본문
+
+BE 는 에이전트 문서를 읽는 길과 같은 길로 읽는다.
+
+1. `GET /api/docs?type=starter&fields=body` 를 부른다. agent 토큰이면 된다.
+2. 답의 `docs[]` 에서 `status` 가 `active` 인 줄만 쓴다.
+3. 줄의 `rev` 가 앞 판과 같으면 앞 판을 그대로 쓴다.
+4. 본문은 줄의 `json.body.markdown` 이다. `json` 이 없는 줄은 `GET /api/docs/starter/:id` 의 `json.body.markdown` 으로 받는다.
+
+줄의 칸 가운데 BE 가 쓰는 것은 `type` · `id` · `status` · `rev` · `json` 이다. `title` 은 `body.name` 이다.
+
+```jsonc
+// GET /api/docs?type=starter&fields=body 의 한 토막
+{
+  "docs": [
+    {
+      "type": "starter",
+      "id": "eqp-basics",
+      "status": "active",
+      "rev": "4c1e…",
+      "title": "eqp-basics",
+      "updatedAt": "2026-11-10T03:10:00.000Z",
+      "json": {
+        "schema": "starter/v1",
+        "id": "eqp-basics",
+        "keywords": [{ "kw": "eqp-basics", "inject": "full" }],
+        "status": "active",
+        "body": {
+          "name": "eqp-basics",
+          "markdown": "# 설비 바탕 데이터\n\n…\n\n## 데이터\n\n### eqp_info — 설비 정보\n\n```sql\nSELECT * FROM FDC_EQUIPMENT WHERE EQP_ID = :eqp_id\n```\n\n…\n\n## 프리셋\n\n- 기본 점검: eqp_info, chamber_info\n"
+        }
+      }
+    }
+  ]
+}
+```
+
+### md 를 읽는 법
+
+- 항목은 `## 데이터` 절의 `### <id> — <제목>` 줄과 그 항목의 첫 ```` ```sql ```` 펜스다.
+  에이전트 문서의 `## 데이터` 와 문법이 같다. 항목 id 가 조회 id 다.
+- 조회 id 는 에이전트 · 도메인 · starter 문서를 통틀어 하나뿐이다. AKG 는 겹치는 저장을
+  409 `data_id_conflict` 로 거부한다.
+- 프리셋은 `## 프리셋` 절의 목록 줄 `- <프리셋 이름>: <id>, <id>, …` 이다. 첫 `:` 앞이 이름이다.
+  절이 없으면 프리셋이 없다.
+- 항목의 kind 는 md 에 없다. 조회가 읽는 표(FROM · JOIN)의 활성 DB 스키마 문서 `body.kind`
+  에서 셈한다. 읽는 표 가운데 `data` 가 하나라도 있으면 data, 그 밖은 info 다.
+  `kind` 가 빈 표와 스키마 문서가 없는 표는 info 로 센다.
+- 설비 바인드는 `eqp_id` · `equipment` · `eqp`, 라인 바인드는 `line` 이다(BE `Source.EQP_BINDS` · `Source.LINE`).
+
+### 미러
+
+활성 문서는 `rendered/starter/<name>/STARTER.md` 로 렌더된다. 내용은 `markdown` 그대로다.
+`akg sync` 는 이 폴더를 미러의 `starter/` 에 받는다.
+
+### AKG 의 저장 검사
+
+AKG 는 항목 id 만 오류로 막는다(ascii 식별자, 문서 안에서 한 번, 다른 문서와 겹치지 않음).
+아래 넷은 경고다. 저장은 되고, `POST` · `PUT` 의 답과 `GET /api/docs/starter/:id` 의 답이
+`queryWarnings: string[]` 로 싣는다. 보기 화면은 "조회 항목" 절에 항목마다 보인다.
+
+- 항목에 ```` ```sql ```` 펜스가 없다.
+- 항목이 읽는 표에 활성 DB 스키마 문서가 없다.
+- 프리셋이 없는 항목 id 를 가리킨다.
+- info 조회가 설비 · 라인 밖의 바인드를 받는다. BE 는 info 조회를 설비마다 한 번만 돌리고,
+  그 뒤에는 바인드 값이 달라도 첫 표를 다시 쓴다. 이 경고는 에이전트 · 도메인 문서의 조회에도 같은 칸으로 온다.
+
+`GET /api/docs/starter/:id` 는 보기 화면이 쓰는 `starter{items[], presets[]}` 도 싣는다.
+`items[]` 는 `id` · `title` · `line` · `tables[]` · `kind` · `binds[]` · `warnings[]`, `presets[]` 는
+`name` · `items[]` · `line` · `warnings[]` 다. kind 는 AKG 가 그 시각의 DB 스키마 문서로 셈한 값이다.

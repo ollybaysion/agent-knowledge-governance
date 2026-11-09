@@ -15,6 +15,7 @@ const DEFAULT_ORDER = [
   "msg-format",
   "domain-skill",
   "domain",
+  "starter",
   "screen-map",
   "manual",
   "fab-line",
@@ -86,6 +87,7 @@ test("GET /api/types: a user reads the default list — code types, voc, unclass
     const byId = Object.fromEntries(empty.json().types.map((x) => [x.id, x]));
     assert.deepEqual(byId["db-schema"], { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", builtin: true, status: "active", count: 0 });
     assert.deepEqual(byId.domain, { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", builtin: true, status: "active", count: 0 });
+    assert.deepEqual(byId.starter, { id: "starter", label: "첫 선택 데이터", color: "#c0623b", kind: "structured", builtin: true, status: "active", count: 0 });
     assert.deepEqual(byId.voc, { id: "voc", label: "VOC", color: "#4e9a5a", kind: "md", builtin: false, status: "active", count: 0 });
     assert.deepEqual(byId.unclassified, { id: "unclassified", label: "미분류", color: "#8a8f98", kind: "md", builtin: true, status: "active", count: 0 });
 
@@ -228,7 +230,7 @@ test("PUT /api/types/order: every type once, unclassified pinned last, code type
   const t = await setup();
   try {
     await register(t, "meeting-notes");
-    const order = ["unclassified", "domain-skill", "domain", "meeting-notes", "voc", "db-schema", "msg-format", "screen-map", "manual", "fab-line"];
+    const order = ["unclassified", "domain-skill", "domain", "starter", "meeting-notes", "voc", "db-schema", "msg-format", "screen-map", "manual", "fab-line"];
     const r = await t.admin("PUT", "/api/types/order", { order });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json().types.map((x) => x.id), [...order.slice(1), "unclassified"]);
