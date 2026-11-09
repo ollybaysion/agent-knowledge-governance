@@ -820,7 +820,8 @@ git -C /opt/akg/data/store log --format='%h %an %s'
           복구는 서버를 내리고 디렉터리를 되돌린 뒤 <span class="k">git status</span> 가 깨끗한지 보고 다시 띄운다.</p>
         <h3>판 올리기 · 되돌리기</h3>
         <p><span class="k">app/</span> 을 새 아카이브로 갈고 재기동한다. <span class="k">data/</span> 는 그대로다. 이전 아카이브를 옆에 두면 되돌리기도 디렉터리 하나 바꾸고 재기동이다.
-          문서 스키마가 바뀌는 판(예: domain-skill 의 md 전환)은 옛 문서가 새 서버에서 거절될 수 있다 — 그 판의 changelog(json-spec.md 첫머리)를 먼저 본다.</p>
+          문서 스키마가 바뀌는 판(예: domain-skill 의 md 전환)은 옛 문서가 새 서버에서 거절될 수 있다 — 그 판의 changelog(json-spec.md 첫머리)를 먼저 본다.
+          새 코드 타입이 든 판(예: starter)을 올리면 서버가 뜰 때 타입 목록 파일 <span class="k">rendered/types.json</span> 을 그 판의 목록에 맞춰 다시 쓴다(store 커밋 하나). 옛 <span class="k">akg</span> CLI 도 이 파일로 새 타입 폴더를 받는다.</p>
         <h3>설정 변경</h3>
         <p>환경 변수는 기동 때 한 번 읽는다 — 바꾸면 재기동이다. 예외는 계정 — <span class="k">users.json</span> 은 요청마다 읽어 add · revoke 가 바로 먹는다. 문서는 API 로만 바뀌고 재기동과 무관하다.</p>
         <h3>보안 — 있는 것과 없는 것</h3>

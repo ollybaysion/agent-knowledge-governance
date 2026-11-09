@@ -134,13 +134,15 @@ test("manual and voc — types the server renders — are accepted", async () =>
   await cleanup();
 });
 
-// A store without types.json ships no list: the starter folder is known to the CLI itself.
+// A bundle without types.json: the starter folder is known to the CLI itself.
+// (The server writes the list at boot; the test takes it out again.)
 test("starter — rendered/starter/<name>/STARTER.md — is accepted without a types.json", async () => {
   const { app, storeDir, cleanup } = await setupServer();
   await commitFiles(storeDir, {
     author: "renoir",
     message: "an active starter is rendered",
     writes: [{ relpath: "rendered/starter/eqp-basics/STARTER.md", content: "# 설비 바탕 데이터\n" }],
+    removes: ["rendered/types.json"],
   });
   const mirrorDir = join(mkdtempSync(join(tmpdir(), "akg-layout-mirror-")), "akg");
 

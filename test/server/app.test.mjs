@@ -91,14 +91,16 @@ test("boot log: the settings aside, one line as each step starts and ends, in bo
     const labels = lines[8].slice(`타입: ${typeCount} — `.length).split(" · ");
     assert.deepEqual(labels.map((l) => l.replace(/\(.*\)$/, "")), app.akg.types.ids());
     assert.ok(labels.some((l) => l.endsWith("(md)")));
-    assert.equal(lines[9], "카탈로그: 문서 읽는 중");
+    // A new store has no rendered/types.json: boot writes it.
+    assert.match(lines[9], /^타입 목록 파일: rendered\/types\.json 을 다시 씀 \([0-9a-f]{7}\)$/);
+    assert.equal(lines[10], "카탈로그: 문서 읽는 중");
     // One line per listed type, then the total.
-    const perType = lines.slice(10, 10 + typeCount);
+    const perType = lines.slice(11, 11 + typeCount);
     assert.deepEqual(perType.map((l) => l.split(" ")[1]), app.akg.types.ids());
     for (const line of perType) assert.match(line, /^카탈로그: [\w-]+ 0 · \d+ ms$/);
-    assert.match(lines[10 + typeCount], /^카탈로그: 문서 0 · \d+ ms · heap [+-]?[\d.]+ MB$/);
-    assert.match(lines[11 + typeCount], /^경로: 등록 · \d+ ms$/);
-    assert.equal(lines.length, 12 + typeCount);
+    assert.match(lines[11 + typeCount], /^카탈로그: 문서 0 · \d+ ms · heap [+-]?[\d.]+ MB$/);
+    assert.match(lines[12 + typeCount], /^경로: 등록 · \d+ ms$/);
+    assert.equal(lines.length, 13 + typeCount);
   } finally {
     await app.close();
     rmSync(home, { recursive: true, force: true });
