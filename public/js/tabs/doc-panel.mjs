@@ -252,8 +252,8 @@ export function docPanel(ctx) {
         el("div", { class: "plabel prow" }, [el("span", {}, [el("b", { text: "이 문서 둘레 " }), el("span", { class: "dim", text: `${depth}단 고리` })]), seg]),
         el("div", { class: "ring-box" }, ring(docs, type, id, depth)),
       ]),
-      group("가리키는", links.map((l) => row(l, `${l.rel === "screen" ? "screen" : "links"}${fromBody.has(`${l.type}/${l.id}`) ? " · 본문" : ""}`)), "없음"),
-      group("가리켜지는", back.map((l) => row(l, l.rel === "screen" ? "screen" : "links")), "없음"),
+      group("가리키는", links.map((l) => row(l, `${l.rel === "screen" ? "screen" : "links"}${fromBody.has(`${l.type}/${l.id}`) ? " · 본문" : ""}${l.by === "curator" ? " · 정리기" : ""}`)), "없음"),
+      group("가리켜지는", back.map((l) => row(l, `${l.rel === "screen" ? "screen" : "links"}${l.by === "curator" ? " · 정리기" : ""}`)), "없음"),
       group("본문 링크", found.map((w) => row(w, sectionOfWiki(md, w.text) ?? "")), "없음"),
       group("끊긴 연결", broken.map((w) =>
         el("li", { class: "plink broken" }, [docChip({ id: w.text, found: false }), el("span", { class: "plink-note", text: sectionOfWiki(md, w.text) ?? "" })])), "없음"),

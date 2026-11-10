@@ -816,7 +816,8 @@ schemas/
 
 1. 파일이 없으면 `open` 으로 만든다.
 2. `open` 이면 `a` · `b` · `score` · `model` · `runId` · `seenAt` 을 고친다.
-3. `dismissed` · `resolved` 이고 두 rev 가 `decision.revs` 와 같으면 파일을 그대로 둔다.
+3. `dismissed` · `resolved` 이고 두 문서의 본문이 `decision.revs` 때의 본문과 같으면 파일을 그대로 둔다.
+   rev 가 같으면 본문도 같다. links · 태그 · 상태만 바뀐 문서는 rev 가 달라도 본문이 같다.
 4. 그 밖이면 `open` 으로 다시 연다. `decision` 은 걷는다. 앞 처리는 git 이력에 있다.
 
 한쪽 문서가 그 주소를 떠나면(삭제 · 재분류) 서버가 같은 커밋에서 쌍을 `resolved` 로 닫는다.
@@ -854,6 +855,35 @@ schemas/
 
 - 같은 `source`(type · id · rev)에서 같은 `target`(type · id · `toRev`)으로 가는 기록은 하나만 둔다.
 - 되돌리기는 대상 문서 본문을 `fromRev` 의 body 로 쓰는 새 개정이다. 봉투(상태 · 태그 · links …)는 지금 것을 둔다.
+  다만 원래 문서로 가는 정리기 링크(`by: "curator"`)는 걷는다. 대상 본문이 `toRev` 의 본문과 같아야 되돌린다.
   같은 커밋에서 기록을 `reverted` 로 고친다. 원래 문서의 흡수 표시가 아직 `source.rev` 이면 그 사이드카도 걷는다.
 - 기록은 문서가 지워지거나 재분류돼도 그대로 남는다. 그때 되돌리기는 409 `target_missing` 이다.
 
+### 8.3 지운 정리기 링크 `store/curation/unlinks/<key>.json`
+
+정리기는 문서의 `links[]` 에 링크를 단다. 그 링크 항목에는 `by: "curator"` 가 붙는다(`common/link.v1` 의 선택 칸).
+사람이 `PUT /api/docs/:type/:id/links` 로 그 링크를 걷으면 서버가 같은 커밋에 이 기록을 쓴다. 파일 하나가 쌍 하나다.
+키는 §8.1 의 쌍 키다. 같은 쌍을 다시 걷으면 파일을 고쳐 쓴다.
+
+```json
+{
+  "key": "voc~alarm-guide~voc~pump-guide",
+  "from": { "type": "voc", "id": "alarm-guide" },
+  "to": { "type": "voc", "id": "pump-guide" },
+  "rel": "related",
+  "by": "curator",
+  "removedBy": "renoir",
+  "removedAt": "2026-11-11T09:12:00.000Z",
+  "bodies": { "from": "<sha-256 hex>", "to": "<sha-256 hex>" }
+}
+```
+
+| 칸 | 뜻 |
+| --- | --- |
+| `from` · `to` | 링크를 지닌 문서 · 링크가 가리킨 문서 |
+| `rel` · `by` | 걷은 링크 항목의 값 |
+| `removedBy` · `removedAt` | 걷은 토큰 id 와 서버 시각 |
+| `bodies` | 걷을 때 두 문서 body 의 SHA-256(`JSON.stringify`) |
+
+`GET /api/curation/unlinks` 의 줄은 기록에 `changed` 를 더한다. 한쪽 문서가 그 주소에 없거나 body 가 `bodies` 와 다르면 `true` 다.
+정리기는 `changed` 가 `false` 인 쌍을 다시 잇지 않는다.

@@ -26,7 +26,7 @@ export function backlinksOf(catalog, types, type, id) {
     const doc = catalog.get(t, sid);
     for (const link of doc.links) {
       if (link.type === type && link.id === id)
-        out.push({ type: t, id: sid, rel: link.rel, status: doc.status });
+        out.push({ type: t, id: sid, rel: link.rel, ...(link.by ? { by: link.by } : {}), status: doc.status });
     }
   }
   return out;
@@ -73,6 +73,23 @@ function bodyLinks(wikis, type, id) {
 export function withLinks(doc, links) {
   const { links: _old, body, ...head } = doc;
   return links.length ? { ...head, links, body } : { ...head, body };
+}
+
+/**
+ * PUT …/links's list with `by` carried over: an edge the stored doc has with
+ * `by` keeps it when the list names the same edge without one. The links
+ * dialog sends {type, id, rel} only, so saving it leaves the curator's edges
+ * the curator's.
+ */
+export function keepBy(stored = [], links) {
+  const byOf = new Map(stored.filter((l) => l.by).map((l) => [edgeKey(l), l.by]));
+  return links.map((l) => (l && typeof l === "object" && l.by === undefined && byOf.has(edgeKey(l)) ? { ...l, by: byOf.get(edgeKey(l)) } : l));
+}
+
+/** The stored edges with `by` that `links` no longer has: what a person took out. */
+export function droppedBy(stored = [], links = []) {
+  const kept = new Set(links.map(edgeKey));
+  return stored.filter((l) => l.by && !kept.has(edgeKey(l)));
 }
 
 /**

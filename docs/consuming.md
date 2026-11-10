@@ -398,7 +398,7 @@ curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d clien
 | 배치 | `POST /api/docs/:type/batch`(8절, 비활성으로 들어감) |
 | 점수 | `POST /api/score/:agent` |
 | 흡수 표시 | `PUT /api/docs/:type/:id/absorbed` — `{ "rev": "<읽은 rev>" }`(13절) |
-| 정리 기록 | `POST /api/curation/duplicates` · `POST /api/curation/absorptions`(13절) |
+| 정리 기록 | `POST /api/curation/duplicates` · `POST /api/curation/absorptions` · `GET /api/curation/unlinks`(13절) |
 
 `GET /api/docs` 의 db-schema 항목에는 `columns`(catalog 의 열 이름 목록, 미사용 열 포함)가 있다.
 
@@ -769,13 +769,14 @@ AKG 는 항목 id 만 오류로 막는다(ascii 식별자, 문서 안에서 한 
 `items[]` 는 `id` · `title` · `line` · `tables[]` · `kind` · `binds[]` · `warnings[]`, `presets[]` 는
 `name` · `items[]` · `line` · `warnings[]` 다. kind 는 AKG 가 그 시각의 DB 스키마 문서로 셈한 값이다.
 
-## 13. 정리기(curator): 중복 후보와 흡수
+## 13. 정리기(curator): 중복 후보 · 흡수 · 문서 연결
 
 정리기는 fdc-agent-be-spring 의 `curator` 역할이다. 따로 된 프로세스로 뜨고 크론으로 돈다.
-agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
+agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 세 일을 한다.
 
 - **중복 후보**: 임베딩 유사도가 문턱을 넘는 문서 쌍을 AKG 에 남긴다. 문서는 그대로 둔다.
 - **흡수**: 미분류 문서를 가장 맞는 1급 문서에 합쳐 바로 반영한다. 반영한 일을 기록으로 남긴다.
+- **문서 연결**: 흡수한 대상 문서에 원래 문서로 가는 링크를 단다. 유사도가 중간인 1급 문서 쌍도 링크로 잇는다.
 
 사람은 AKG 정리 탭(`#/curation`)에서 기록을 본다. admin 이 쌍을 처리하고 흡수를 되돌린다.
 저장 꼴은 json-spec §8 이 적는다.
@@ -796,6 +797,24 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 - 되돌린 기록(`status: "reverted"`)의 원래 문서는 흡수 표시가 없어 3 의 목록에 다시 나온다.
   정리기는 `GET /api/curation/absorptions?status=reverted` 를 읽고, 같은 `source`(type · id · rev)를 같은 대상에 다시 흡수하지 않는다.
 
+### 문서 연결
+
+정리기는 `PUT /api/docs/:type/:id/links`(9절)로 링크를 단다. 정리기가 단 링크에는 `by: "curator"` 가 붙는다.
+
+```json
+{ "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rel": "related", "by": "curator" }
+```
+
+- `by` 는 링크 꼴(`common/link.v1`)의 선택 칸이다. 값은 `curator` 하나다. 사람 링크와 본문 `[[ ]]` 링크에는 없다.
+- links PUT 의 목록이 같은 링크(type · id · rel)를 `by` 없이 다시 실으면 서버가 저장된 `by` 를 둔다.
+  그래서 연결 고치기 창에서 저장해도 정리기 링크는 정리기 링크로 남는다.
+- 사람이 정리기 링크를 지우면 서버가 같은 커밋에 지운 기록(json-spec §8.3)을 남긴다.
+  정리기는 `GET /api/curation/unlinks` 를 읽는다. `changed` 가 `false` 인 쌍에는 링크를 다시 달지 않는다.
+- 문서 화면의 연결 칸과 연결 고치기 창은 정리기 링크에 `정리기` 를 붙인다.
+- links PUT 은 rev 를 옮기고 본문은 그대로 둔다. 그래서 두 판정은 rev 대신 본문을 본다.
+  - 중복 후보의 `kept`: 두 rev 가 `decision.revs` 와 다르더라도 두 본문이 그 rev 의 본문과 같으면 그대로 둔다.
+  - 흡수 되돌리기: 대상 문서 rev 가 `toRev` 와 다르더라도 본문이 `toRev` 의 본문과 같으면 되돌린다.
+
 ### 경로
 
 | 요청 | 누가 | 답 |
@@ -808,6 +827,7 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 | `GET /api/curation/absorptions?status=applied\|reverted` | user 이상 · agent | `{absorptions[]}` — 새 것 먼저 |
 | `GET /api/curation/absorptions/:id` | user 이상 · agent | `{absorption, before, after}` — 대상 문서의 `fromRev` · `toRev` body |
 | `POST /api/curation/absorptions/:id/revert` | admin | `{rev, unmarked, absorption}` |
+| `GET /api/curation/unlinks` | user 이상 · agent | `{unlinks[]}` — 사람이 지운 정리기 링크, 새 것 먼저. 줄마다 `changed` |
 
 `POST /api/curation/duplicates` 의 몸:
 
@@ -830,7 +850,7 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 - 쌍 하나라도 꼴이 틀리면 400 `pairs_rejected` 이고 아무것도 쓰지 않는다. `rejected[]` 가 `{index, error}` 를 싣는다:
   `invalid_doc` · `same_doc` · `invalid_score` · `duplicate_in_request`.
 - 한쪽 문서가 AKG 에 없으면 그 쌍만 건너뛴다. `skipped[]` 가 `{index, key, error: "not_found", doc}` 를 싣는다.
-- `opened` 는 새로 열거나 다시 연 쌍, `updated` 는 열린 채 다시 본 쌍, `kept` 는 사람이 처리한 뒤 두 rev 가 그대로인 쌍이다.
+- `opened` 는 새로 열거나 다시 연 쌍, `updated` 는 열린 채 다시 본 쌍, `kept` 는 사람이 처리한 뒤 두 본문이 그대로인 쌍이다.
 
 `GET /api/curation/duplicates` 의 한 줄:
 
@@ -871,7 +891,7 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 `GET /api/curation/absorptions` 의 줄은 저장한 기록에 지금 상태를 더한다.
 
 - `source.marked`: 원래 문서의 흡수 표시가 이 기록의 `source.rev` 이면 `true`.
-- `target.currentRev`: 대상 문서의 지금 rev. `revertable` 은 `status` 가 `applied` 이고 `currentRev` 가 `toRev` 일 때만 `true` 다.
+- `target.currentRev`: 대상 문서의 지금 rev. `revertable` 은 `status` 가 `applied` 이고 대상 본문이 `toRev` 의 본문일 때만 `true` 다.
 
 ### 되돌리기
 
@@ -883,11 +903,12 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 | 200 | `{rev, unmarked, absorption}` | 되돌렸다. `unmarked` 는 원래 문서의 흡수 표시를 걷었는지다 |
 | 404 | `not_found` | 기록이 없다 |
 | 409 | `already_reverted` | 이미 되돌렸다 |
-| 409 | `target_changed` (`currentRev` · `toRev`) | 흡수 뒤 사람이 대상 문서를 고쳤다. 대상 문서 이력을 보고 손으로 고친다 |
+| 409 | `target_changed` (`currentRev` · `toRev`) | 흡수 뒤 사람이 대상 문서 본문을 고쳤다. 대상 문서 이력을 보고 손으로 고친다 |
 | 409 | `target_missing` | 대상 문서가 그 주소에 없다(삭제 · 재분류) |
 | 409 | `type_archived` | 대상 타입이 닫혔다 |
 
 - 흡수 표시는 그 표시가 이 기록의 `source.rev` 일 때만 걷는다. 원래 문서가 뒤에 다시 흡수됐으면 새 표시를 둔다.
+- 대상 문서에서 원래 문서로 가는 정리기 링크(`by: "curator"`)를 같은 개정에서 걷는다.
 - 기록은 `status: "reverted"` 와 `revert: {by, at}` 를 얻는다. 되돌린 커밋은 감사 로그와 대상 문서 이력에 있다.
 
 ### 문서가 지워지거나 타입이 바뀔 때
@@ -895,4 +916,5 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
 - 중복 후보: 그 문서를 담은 쌍은 삭제 · 재분류 커밋에서 `resolved` 로 닫힌다. `decision.reason` 은 `deleted` · `retyped` 다.
   재분류된 문서는 새 주소로 새 쌍이 된다.
 - 흡수 기록: 그대로 남는다. 대상 문서가 그 주소에 없으면 되돌리기는 409 `target_missing` 이다.
+- 지운 링크 기록: 그대로 남는다. 한쪽 문서가 그 주소에 없으면 `changed` 가 `true` 다.
 

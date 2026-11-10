@@ -398,3 +398,115 @@ test("curation is a reserved type id: no type takes the store folder", async () 
     await t.cleanup();
   }
 });
+
+// ---------- 문서 연결: the curator's links (by: "curator") and the ones a person takes out ----------
+
+const links = (t, who, type, id, list, rev) => t[who]("PUT", `/api/docs/${type}/${id}/links`, { links: list }, { "if-match": rev });
+
+test("sightPair: a decided pair stays when unchanged() says both bodies are the decided ones", () => {
+  const seen = { key: "k", a: { type: "voc", id: "a", rev: "3" }, b: { type: "voc", id: "b", rev: "2" }, score: 0.9 };
+  const stored = { key: "k", ...seen, status: "dismissed", firstSeenAt: "t1", decision: { status: "dismissed", revs: { a: "1", b: "2" } } };
+  assert.equal(sightPair(stored, seen, { runId: "r", model: "m", at: "t2", unchanged: () => true }).outcome, "kept");
+  assert.equal(sightPair(stored, seen, { runId: "r", model: "m", at: "t2", unchanged: () => false }).outcome, "opened");
+});
+
+test("links: a curator edge keeps its by when a person saves the list, and backlinks carry it", async () => {
+  const t = await setup();
+  try {
+    const revA = await t.create("voc", "alarm-guide", "# 알람 안내\n");
+    await t.create("voc", "pump-guide", "# 펌프 안내\n");
+    const edge = { type: "voc", id: "pump-guide", rel: "related", by: "curator" };
+    const put = await links(t, "agent", "voc", "alarm-guide", [edge], revA);
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json().json.links, [edge]);
+
+    const saved = await links(t, "admin", "voc", "alarm-guide", [{ type: "voc", id: "pump-guide", rel: "related" }], put.json().rev);
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.deepEqual(saved.json().json.links, [edge]);
+    const back = (await t.user("GET", "/api/docs/voc/pump-guide")).json().backlinks;
+    assert.deepEqual(back, [{ type: "voc", id: "alarm-guide", rel: "related", by: "curator", status: "active" }]);
+
+    const bad = await links(t, "agent", "voc", "alarm-guide", [{ ...edge, by: "someone" }], saved.json().rev);
+    assert.equal(bad.statusCode, 400);
+    assert.equal(bad.json().error, "validation_failed");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("unlinks: a person taking a curator edge out leaves a record in the same commit; changed turns true once a body moves", async () => {
+  const t = await setup();
+  try {
+    const revA = await t.create("voc", "alarm-guide", "# 알람 안내\n");
+    await t.create("voc", "pump-guide", "# 펌프 안내\n");
+    await t.create("voc", "valve-guide", "# 밸브 안내\n");
+    const mine = { type: "voc", id: "valve-guide", rel: "related" };
+    const put = await links(t, "agent", "voc", "alarm-guide", [{ type: "voc", id: "pump-guide", rel: "related", by: "curator" }, mine], revA);
+    assert.equal(put.statusCode, 200, put.body);
+
+    const out = await links(t, "admin", "voc", "alarm-guide", [], put.json().rev);
+    assert.equal(out.statusCode, 200, out.body);
+    assert.equal(t.lastCommit(), "kim|links voc/alarm-guide (정리기 링크 1 걷음)");
+    const [u, ...rest] = (await t.agent("GET", "/api/curation/unlinks")).json().unlinks;
+    assert.equal(rest.length, 0); // the person's own edge leaves no record
+    assert.equal(u.key, "voc~alarm-guide~voc~pump-guide");
+    assert.deepEqual(u.from, { type: "voc", id: "alarm-guide" });
+    assert.deepEqual(u.to, { type: "voc", id: "pump-guide" });
+    assert.equal(u.rel, "related");
+    assert.equal(u.by, "curator");
+    assert.equal(u.removedBy, "kim");
+    assert.match(u.bodies.from, /^[0-9a-f]{64}$/);
+    assert.equal(u.changed, false);
+
+    // A links write moves the rev, not the body: still unchanged.
+    await links(t, "admin", "voc", "alarm-guide", [mine], out.json().rev);
+    assert.equal((await t.user("GET", "/api/curation/unlinks")).json().unlinks[0].changed, false);
+
+    const rev = await t.revOf("voc", "pump-guide");
+    const edit = await t.admin("PUT", "/api/docs/voc/pump-guide", { name: "pump-guide", markdown: "# 펌프 안내\n\n펌프를 멈춘다.\n" }, { "if-match": rev });
+    assert.equal(edit.statusCode, 200, edit.body);
+    assert.equal((await t.user("GET", "/api/curation/unlinks")).json().unlinks[0].changed, true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("revert: a links-only change since the absorption still reverts, and the curator's link to the source goes", async () => {
+  const t = await setup();
+  try {
+    const { id, toRev } = await absorb(t);
+    await t.create("voc", "other", "# 다른 안내\n");
+    const edges = [
+      { type: "unclassified", id: "note-1", rel: "related", by: "curator" },
+      { type: "voc", id: "other", rel: "related", by: "curator" },
+    ];
+    const put = await links(t, "agent", "voc", "sensor-guide", edges, toRev);
+    assert.equal(put.statusCode, 200, put.body);
+    const [rec] = (await t.user("GET", "/api/curation/absorptions")).json().absorptions;
+    assert.notEqual(rec.target.currentRev, toRev);
+    assert.equal(rec.revertable, true);
+
+    const r = await t.admin("POST", `/api/curation/absorptions/${id}/revert`);
+    assert.equal(r.statusCode, 200, r.body);
+    const doc = (await t.user("GET", "/api/docs/voc/sensor-guide")).json();
+    assert.equal(doc.json.body.markdown, "# 센서 안내\n\n## 교체\n\n주기 미정\n");
+    assert.deepEqual(doc.json.links, [edges[1]]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("dismiss: a links-only change on one side keeps the pair dismissed", async () => {
+  const t = await setup();
+  try {
+    const { pair, key } = await withPair(t);
+    await t.admin("POST", `/api/curation/duplicates/${key}/dismiss`);
+    await t.create("voc", "other", "# 다른 안내\n");
+    const put = await links(t, "agent", "voc", "alarm-guide", [{ type: "voc", id: "other", rel: "related", by: "curator" }], pair.a.rev);
+    assert.equal(put.statusCode, 200, put.body);
+    const again = await t.agent("POST", "/api/curation/duplicates", pairsBody([{ ...pair, a: { ...pair.a, rev: put.json().rev } }]));
+    assert.deepEqual(again.json(), { opened: 0, updated: 0, kept: 1, skipped: [] });
+  } finally {
+    await t.cleanup();
+  }
+});

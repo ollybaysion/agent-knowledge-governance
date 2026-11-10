@@ -28,6 +28,7 @@ import {
 } from "../store.mjs";
 import {
   absorbedPath,
+  docWrites,
   persistAbsorbed,
   persistDoc,
   renderDocMd,
@@ -41,6 +42,8 @@ import { mergeFacts } from "../facts.mjs";
 import { resolveConflict } from "../conflict.mjs";
 import {
   backlinksOf,
+  droppedBy,
+  keepBy,
   mergeBodyLinks,
   missingLinkTargets,
   resolveLinks,
@@ -56,7 +59,7 @@ import { hasGroup } from "../auth.mjs";
 import { etagOf, noneMatchHits } from "../etag.mjs";
 import { TYPES_PATH, UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
-import { pairsLeaving } from "../curation.mjs";
+import { pairsLeaving, unlinkWrites } from "../curation.mjs";
 
 // Published md if there is one, otherwise rendered on the spot. Only an active
 // doc has a file in rendered/ (issue #7), and a doc nobody can preview is a doc
@@ -1033,8 +1036,9 @@ export function registerDocsRoutes(app) {
             };
 
           // The body's [[ ]] stay linked whatever the list says: they are
-          // removed by editing the body, not here.
-          const merged = mergeBodyLinks(catalog, types.ids(), type, doc, doc, links);
+          // removed by editing the body, not here. An edge the list repeats
+          // keeps its stored `by`.
+          const merged = mergeBodyLinks(catalog, types.ids(), type, doc, doc, keepBy(doc.links, links));
           if (merged.error) return { status: 400, body: merged.error };
           const newDoc = merged.doc;
           const errors = validateForStore(newDoc, refs, inStore);
@@ -1050,9 +1054,20 @@ export function registerDocsRoutes(app) {
               body: { error: "unknown_link_target", missing },
             };
 
-          const rev = await persistDoc(storeDir, type, newDoc, {
+          // A curator edge taken out is remembered (json-spec §8.3) in the
+          // same commit, so the curator does not put it back.
+          const dropped = droppedBy(doc.links, newDoc.links);
+          const unlinks = unlinkWrites({ type, id }, dropped, {
+            by: request.user.id,
+            at: new Date().toISOString(),
+            bodyOf: (t, i) => (t === type && i === id ? newDoc.body : readJson(storeDir, `${t}/${i}.json`)?.body ?? null),
+          });
+          const written = docWrites(storeDir, type, newDoc);
+          const rev = await commitFiles(storeDir, {
             author: request.user.id,
-            message: `links ${type}/${id}`,
+            message: `links ${type}/${id}${dropped.length ? ` (정리기 링크 ${dropped.length} 걷음)` : ""}`,
+            writes: [...written.writes, ...unlinks],
+            removes: written.removes,
           });
           return { status: 200, body: { rev, json: newDoc } };
         },
