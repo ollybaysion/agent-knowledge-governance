@@ -35,6 +35,7 @@ import { registerAssetsRoutes, ASSET_LIMIT } from "./routes/assets.mjs";
 import { registerScoreRoutes } from "./routes/score.mjs";
 import { registerSchemaIndexRoutes } from "./routes/schema-index.mjs";
 import { registerReadTokensRoutes } from "./routes/read-tokens.mjs";
+import { registerCurationRoutes } from "./routes/curation.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = join(__dirname, "..", "schemas");
@@ -320,6 +321,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   registerScoreRoutes(app);
   registerSchemaIndexRoutes(app);
   registerReadTokensRoutes(app);
+  registerCurationRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({ error: "not_found", path: request.url });

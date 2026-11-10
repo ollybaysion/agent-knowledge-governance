@@ -34,6 +34,7 @@ export const RESERVED_TYPE_IDS = new Set([
   "audit",
   "score",
   "proposals",
+  "curation",
   "graph",
   "order",
   "rendered",
