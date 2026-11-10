@@ -1,4 +1,4 @@
-# agent-knowledge-governance — 문서 JSON 스펙 (v0.11.0)
+# agent-knowledge-governance — 문서 JSON 스펙 (v0.12.0)
 
 > 허브 문서의 **JSON 포맷 정의서**. 모체 설계도
 > [`agent-knowledge-governance-design.md`](agent-knowledge-governance-design.md) §5(데이터 모델)를 구현
@@ -118,6 +118,9 @@
 > 채팅 첫 화면에서 먼저 고를 조회의 목록. body 는 domain-skill 과 같은 `{ name, markdown }` 이고,
 > 항목은 `## 데이터` 의 에이전트 문법, 프리셋은 `## 프리셋` 의 목록 줄이다. 조회 id 는 세 타입을
 > 통틀어 하나다. 항목의 kind 는 읽는 표의 db-schema `kind` 에서 셈한다.
+> v0.12.0 개정(2026-11-10, 사용자 결정): **정리 기록 두 가지 신설**(§8) — 정리기(BE `curator`)가
+> 남기는 중복 후보 `store/curation/duplicates/<key>.json` 과 흡수 기록
+> `store/curation/absorptions/<uuid>.json`. 문서 봉투는 그대로다. 타입 id `curation` 은 예약어다.
 
 ---
 
@@ -145,6 +148,8 @@
 store/<type>/<id>.json               공통 봉투 + 타입별 body      (§2~§4)
 store/unclassified/<id>.md           unclassified만 md가 진실원   (§4.5)
 store/unclassified/<id>.meta.json    unclassified 사이드카 메타
+store/curation/duplicates/<key>.json   중복 후보 한 쌍            (§8.1)
+store/curation/absorptions/<uuid>.json 흡수 기록 한 건            (§8.2)
 
 [파생물 — 서버가 쓰기 커밋마다 자동 재생성, 손대지 않는다]
 rendered/<type>/index.json        프로바이더 계약 인덱스        (§5.1)
@@ -759,3 +764,96 @@ schemas/
 이 문서에서 파생되는 것: §5.1의 index.json 2엔트리와
 `rendered/db-schema/docs/fdc_sensor.md`(SNSR_ID는 `{{설명}}`, EQP_ID는
 `추정)` 표기, USE_YN은 평문+근거, 대표 쿼리 note는 `추정)` 표기) — 모두 같은 커밋.
+
+---
+
+## 8. 정리 기록 — 중복 후보 · 흡수 기록
+
+정리기(fdc-agent-be-spring 의 `curator` 역할)가 주기마다 남기는 기록이다. 문서가 아니므로 봉투가
+없다. 문서와 같은 git store 에 있고, 바뀔 때마다 커밋 하나다. 그래서 감사 로그가 누가 무엇을
+열고 · 닫고 · 되돌렸는지 보인다. 경로는 consuming.md 13절이 적는다.
+
+### 8.1 중복 후보 `store/curation/duplicates/<key>.json`
+
+임베딩 유사도가 문턱을 넘는 두 문서다. 파일 하나가 쌍 하나다.
+
+- **키**: 두 주소를 `type/id` 문자열 순으로 정렬해 `<type>~<id>~<type>~<id>` 로 잇는다.
+  `~` 는 타입 id(`^[a-z][a-z0-9-]*$`)에도 문서 id(`^[a-z0-9._-]+$`)에도 없다. 그래서 키는 다시 둘로 나뉜다.
+  `a` 가 정렬의 앞쪽이다.
+- **상태** `status`: `open`(열림) · `dismissed`(그대로 둠) · `resolved`(처리함).
+
+```json
+{
+  "key": "unclassified~fdc-app--x-1a2b3c~voc~alarm-guide",
+  "a": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "<40자 rev>" },
+  "b": { "type": "voc", "id": "alarm-guide", "rev": "<40자 rev>" },
+  "score": 0.93,
+  "model": "bge-m3",
+  "runId": "curator:2026-11-11T03:30",
+  "seenAt": "2026-11-11T03:30:12.000Z",
+  "status": "dismissed",
+  "firstSeenAt": "2026-11-10T03:30:09.000Z",
+  "decision": {
+    "status": "dismissed",
+    "by": "renoir",
+    "at": "2026-11-10T09:12:00.000Z",
+    "revs": { "a": "<그때 a 의 rev>", "b": "<그때 b 의 rev>" }
+  }
+}
+```
+
+| 칸 | 뜻 |
+| --- | --- |
+| `a` · `b` | 정리기가 본 두 문서와 그때의 rev |
+| `score` | 유사도. -1 ~ 1 의 수 |
+| `model` · `runId` | 마지막으로 본 실행의 임베딩 모델과 실행 id |
+| `firstSeenAt` · `seenAt` | 처음 본 시각 · 마지막으로 본 시각(서버 시각, ISO 8601) |
+| `decision` | 사람이나 서버의 처리. `open` 에는 없다 |
+| `decision.revs` | 사람이 처리할 때 두 문서의 rev. 다시 열지 가르는 기준이다 |
+| `decision.reason` | 서버가 닫을 때만 있다: `deleted`(문서 삭제) · `retyped`(타입 바뀜) |
+
+같은 키를 다시 보면 이렇게 된다.
+
+1. 파일이 없으면 `open` 으로 만든다.
+2. `open` 이면 `a` · `b` · `score` · `model` · `runId` · `seenAt` 을 고친다.
+3. `dismissed` · `resolved` 이고 두 rev 가 `decision.revs` 와 같으면 파일을 그대로 둔다.
+4. 그 밖이면 `open` 으로 다시 연다. `decision` 은 걷는다. 앞 처리는 git 이력에 있다.
+
+한쪽 문서가 그 주소를 떠나면(삭제 · 재분류) 서버가 같은 커밋에서 쌍을 `resolved` 로 닫는다.
+`decision` 은 `{ status, by, at, reason }` 이다. 재분류된 문서는 새 주소로 새 쌍이 된다.
+
+### 8.2 흡수 기록 `store/curation/absorptions/<uuid>.json`
+
+정리기가 원래 문서(대개 `unclassified`)를 대상 문서(1급 문서)에 합쳐 반영한 기록이다.
+기록 하나가 흡수 하나다.
+
+```json
+{
+  "id": "6f1c2b9e-1d2a-4c7e-9a51-2d0f3f9c8e11",
+  "runId": "curator:2026-11-11T03:30",
+  "model": "gpt-oss-120b",
+  "source": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "<40자 rev>" },
+  "target": { "type": "voc", "id": "alarm-guide", "fromRev": "<흡수 전 rev>", "toRev": "<흡수 뒤 rev>" },
+  "summary": "합친 내용 한두 문장",
+  "score": 0.88,
+  "status": "applied",
+  "by": "curator",
+  "at": "2026-11-11T03:31:02.000Z"
+}
+```
+
+| 칸 | 뜻 |
+| --- | --- |
+| `source.rev` | 원래 문서를 읽은 rev. 원래 문서의 흡수 표시(`absorbed.rev`)와 같다 |
+| `target.fromRev` · `toRev` | 대상 문서의 흡수 전 · 뒤 rev. 둘 다 그 문서가 있던 커밋이어야 저장된다 |
+| `summary` | 한 줄로 접은 요약, 1000 자까지 |
+| `score` | 고른 대상의 유사도. 없어도 된다 |
+| `status` | `applied`(반영됨) · `reverted`(되돌림) |
+| `by` · `at` | 기록을 올린 토큰 id 와 서버 시각 |
+| `revert` | 되돌린 뒤에만 있다: `{ by, at }` |
+
+- 같은 `source`(type · id · rev)에서 같은 `target`(type · id · `toRev`)으로 가는 기록은 하나만 둔다.
+- 되돌리기는 대상 문서 본문을 `fromRev` 의 body 로 쓰는 새 개정이다. 봉투(상태 · 태그 · links …)는 지금 것을 둔다.
+  같은 커밋에서 기록을 `reverted` 로 고친다. 원래 문서의 흡수 표시가 아직 `source.rev` 이면 그 사이드카도 걷는다.
+- 기록은 문서가 지워지거나 재분류돼도 그대로 남는다. 그때 되돌리기는 409 `target_missing` 이다.
+

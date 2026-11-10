@@ -12,6 +12,7 @@ A program that talks HTTP itself reads section 9.
 에이전트 md 의 저장 검사(BE 규칙 미러)는 10절이 적는다.
 WorkBench 같은 다른 앱이 브라우저에서 문서를 읽는 길(개인 읽기 토큰)은 11절이 적는다.
 BE 가 첫 선택 데이터(`starter`) 문서를 읽는 길은 12절이 적는다.
+정리기(BE `curator`)가 중복 후보 · 흡수 기록을 남기는 길은 13절이 적는다.
 
 **Only active documents are in the bundle.** A document can also be `inactive`
 — present on the server and readable through the API and dashboard, but not
@@ -396,6 +397,8 @@ curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d clien
 | 제안 | `POST /api/proposals`(7절) |
 | 배치 | `POST /api/docs/:type/batch`(8절, 비활성으로 들어감) |
 | 점수 | `POST /api/score/:agent` |
+| 흡수 표시 | `PUT /api/docs/:type/:id/absorbed` — `{ "rev": "<읽은 rev>" }`(13절) |
+| 정리 기록 | `POST /api/curation/duplicates` · `POST /api/curation/absorptions`(13절) |
 
 `GET /api/docs` 의 db-schema 항목에는 `columns`(catalog 의 열 이름 목록, 미사용 열 포함)가 있다.
 
@@ -406,7 +409,8 @@ curl -s -d grant_type=client_credentials -d client_id=fdc-voc-agent-a2a -d clien
 
 admin 만 하는 것(agent 는 403): 승격(`…/promote`) · 폐기(`…/deprecate`) · 활성화 · 비활성화 ·
 삭제(`DELETE /api/docs/:type/:id`) · 역할(`…/role`) · 출처(`…/origin`) · 타입 바꾸기(`…/retype`) ·
-타입 등록 · 순서(`/api/types/…`) · 제안 채택 · 기각 · 검증 Set 저장.
+타입 등록 · 순서(`/api/types/…`) · 제안 채택 · 기각 · 검증 Set 저장 ·
+중복 후보 처리(`…/dismiss` · `…/resolve`) · 흡수 되돌리기(`…/revert`).
 
 ### 오류
 
@@ -764,3 +768,131 @@ AKG 는 항목 id 만 오류로 막는다(ascii 식별자, 문서 안에서 한 
 `GET /api/docs/starter/:id` 는 보기 화면이 쓰는 `starter{items[], presets[]}` 도 싣는다.
 `items[]` 는 `id` · `title` · `line` · `tables[]` · `kind` · `binds[]` · `warnings[]`, `presets[]` 는
 `name` · `items[]` · `line` · `warnings[]` 다. kind 는 AKG 가 그 시각의 DB 스키마 문서로 셈한 값이다.
+
+## 13. 정리기(curator): 중복 후보와 흡수
+
+정리기는 fdc-agent-be-spring 의 `curator` 역할이다. 따로 된 프로세스로 뜨고 크론으로 돈다.
+agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 두 일을 한다.
+
+- **중복 후보**: 임베딩 유사도가 문턱을 넘는 문서 쌍을 AKG 에 남긴다. 문서는 그대로 둔다.
+- **흡수**: 미분류 문서를 가장 맞는 1급 문서에 합쳐 바로 반영한다. 반영한 일을 기록으로 남긴다.
+
+사람은 AKG 정리 탭(`#/curation`)에서 기록을 본다. admin 이 쌍을 처리하고 흡수를 되돌린다.
+저장 꼴은 json-spec §8 이 적는다.
+
+### 흐름(한 번 실행)
+
+1. `GET /api/docs?fields=body` 로 목록과 본문을 읽는다. 줄의 `rev` 가 지난 실행과 같으면 지난 임베딩을 그대로 쓴다.
+2. 문턱을 넘는 쌍을 `POST /api/curation/duplicates` 로 올린다.
+3. `GET /api/docs?type=unclassified&absorbed=stale` 로 흡수할 문서를 고른다.
+4. 문서마다 대상 문서를 고르고 합친 본문을 만든다. LLM 이 "맞는 문서 없음" 을 내면 다음 문서로 간다.
+5. 대상 문서를 `PUT /api/docs/:type/:id` 로 고친다. `if-match` 는 읽은 rev, `x-akg-note` 는 흡수 메모다.
+6. 원래 문서에 `PUT /api/docs/:type/:id/absorbed` 로 흡수 표시를 붙인다. 몸은 `{ "rev": "<원래 문서의 읽은 rev>" }` 다.
+7. `POST /api/curation/absorptions` 로 흡수 기록을 남긴다. `target.toRev` 는 5 의 답 `rev` 다.
+
+- 5 의 답이 409(`slot_conflict` 또는 `unknown_base_rev`)이면 그사이 사람이 고친 것이다. 그 문서는 이번 실행에서 건너뛴다.
+  md 타입 body 에는 티어 슬롯이 없다. 그래서 바탕 rev 가 낡고 본문이 다르면 언제나 409 `slot_conflict` 다.
+- md 문서의 `PUT` 은 body `{ name, markdown }` 를 그대로 저장한다. 문서의 `status` 는 그대로다.
+- 되돌린 기록(`status: "reverted"`)의 원래 문서는 흡수 표시가 없어 3 의 목록에 다시 나온다.
+  정리기는 `GET /api/curation/absorptions?status=reverted` 를 읽고, 같은 `source`(type · id · rev)를 같은 대상에 다시 흡수하지 않는다.
+
+### 경로
+
+| 요청 | 누가 | 답 |
+| --- | --- | --- |
+| `POST /api/curation/duplicates` | agent · admin | `{opened, updated, kept, skipped[]}` |
+| `GET /api/curation/duplicates?status=open\|dismissed\|resolved` | user 이상 · agent | `{pairs[]}` — 점수 높은 순. `status` 가 없으면 모두 |
+| `POST /api/curation/duplicates/:key/dismiss` | admin | `{pair}` — 그대로 둠 |
+| `POST /api/curation/duplicates/:key/resolve` | admin | `{pair}` — 처리함 |
+| `POST /api/curation/absorptions` | agent · admin | 201 `{id, absorption}`. 같은 기록을 다시 올리면 200 `{id, deduped: true}` |
+| `GET /api/curation/absorptions?status=applied\|reverted` | user 이상 · agent | `{absorptions[]}` — 새 것 먼저 |
+| `GET /api/curation/absorptions/:id` | user 이상 · agent | `{absorption, before, after}` — 대상 문서의 `fromRev` · `toRev` body |
+| `POST /api/curation/absorptions/:id/revert` | admin | `{rev, unmarked, absorption}` |
+
+`POST /api/curation/duplicates` 의 몸:
+
+```json
+{
+  "runId": "curator:2026-11-11T03:30",
+  "model": "bge-m3",
+  "pairs": [
+    {
+      "a": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "<40자 rev>" },
+      "b": { "type": "voc", "id": "alarm-guide", "rev": "<40자 rev>" },
+      "score": 0.93
+    }
+  ]
+}
+```
+
+- `runId` 는 `^[\w.:-]{1,64}$`, `model` 은 한 줄 200 자까지, `pairs` 는 1 ~ 500 개다.
+- `a` · `b` 는 순서가 없다. 서버가 정렬해 키를 만든다(json-spec §8.1).
+- 쌍 하나라도 꼴이 틀리면 400 `pairs_rejected` 이고 아무것도 쓰지 않는다. `rejected[]` 가 `{index, error}` 를 싣는다:
+  `invalid_doc` · `same_doc` · `invalid_score` · `duplicate_in_request`.
+- 한쪽 문서가 AKG 에 없으면 그 쌍만 건너뛴다. `skipped[]` 가 `{index, key, error: "not_found", doc}` 를 싣는다.
+- `opened` 는 새로 열거나 다시 연 쌍, `updated` 는 열린 채 다시 본 쌍, `kept` 는 사람이 처리한 뒤 두 rev 가 그대로인 쌍이다.
+
+`GET /api/curation/duplicates` 의 한 줄:
+
+```json
+{
+  "key": "unclassified~fdc-app--x-1a2b3c~voc~alarm-guide",
+  "status": "open",
+  "score": 0.93,
+  "model": "bge-m3",
+  "runId": "curator:2026-11-11T03:30",
+  "firstSeenAt": "2026-11-11T03:30:12.000Z",
+  "seenAt": "2026-11-11T03:30:12.000Z",
+  "a": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "…", "exists": true, "title": "fdc-app--x-1a2b3c", "status": "inactive", "currentRev": "…" },
+  "b": { "type": "voc", "id": "alarm-guide", "rev": "…", "exists": true, "title": "alarm-guide", "status": "active", "currentRev": "…" }
+}
+```
+
+`a` · `b` 의 `rev` 는 정리기가 본 rev, `currentRev` 는 지금 rev 다. `status` 는 문서의 활성 여부다.
+문서가 없으면 `exists: false` 이고 `title` · `status` · `currentRev` 는 `null` 이다.
+
+`POST /api/curation/absorptions` 의 몸:
+
+```json
+{
+  "runId": "curator:2026-11-11T03:30",
+  "model": "gpt-oss-120b",
+  "source": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "<40자 rev>" },
+  "target": { "type": "voc", "id": "alarm-guide", "fromRev": "<40자 rev>", "toRev": "<40자 rev>" },
+  "summary": "합친 내용 한두 문장",
+  "score": 0.88
+}
+```
+
+- `summary` 는 한 줄로 접어 1000 자까지 둔다. `score` 는 없어도 된다.
+- 400: `invalid_run_id` · `invalid_model` · `invalid_doc`(`param`) · `same_doc` · `same_rev` · `invalid_summary` · `invalid_score` ·
+  `unknown_type` · `unknown_rev`(`param`: `source.rev` · `target.fromRev` · `target.toRev` — 그 문서가 그 커밋에 없다).
+
+`GET /api/curation/absorptions` 의 줄은 저장한 기록에 지금 상태를 더한다.
+
+- `source.marked`: 원래 문서의 흡수 표시가 이 기록의 `source.rev` 이면 `true`.
+- `target.currentRev`: 대상 문서의 지금 rev. `revertable` 은 `status` 가 `applied` 이고 `currentRev` 가 `toRev` 일 때만 `true` 다.
+
+### 되돌리기
+
+`POST /api/curation/absorptions/:id/revert` 는 대상 문서 본문을 `fromRev` 의 body 로 저장한다. 새 개정이다.
+문서 `PUT` 과 같은 검사(스키마 · 링크 · 데이터 id · 흐름)를 지난다.
+
+| 코드 | 본문 | 뜻 |
+| --- | --- | --- |
+| 200 | `{rev, unmarked, absorption}` | 되돌렸다. `unmarked` 는 원래 문서의 흡수 표시를 걷었는지다 |
+| 404 | `not_found` | 기록이 없다 |
+| 409 | `already_reverted` | 이미 되돌렸다 |
+| 409 | `target_changed` (`currentRev` · `toRev`) | 흡수 뒤 사람이 대상 문서를 고쳤다. 대상 문서 이력을 보고 손으로 고친다 |
+| 409 | `target_missing` | 대상 문서가 그 주소에 없다(삭제 · 재분류) |
+| 409 | `type_archived` | 대상 타입이 닫혔다 |
+
+- 흡수 표시는 그 표시가 이 기록의 `source.rev` 일 때만 걷는다. 원래 문서가 뒤에 다시 흡수됐으면 새 표시를 둔다.
+- 기록은 `status: "reverted"` 와 `revert: {by, at}` 를 얻는다. 되돌린 커밋은 감사 로그와 대상 문서 이력에 있다.
+
+### 문서가 지워지거나 타입이 바뀔 때
+
+- 중복 후보: 그 문서를 담은 쌍은 삭제 · 재분류 커밋에서 `resolved` 로 닫힌다. `decision.reason` 은 `deleted` · `retyped` 다.
+  재분류된 문서는 새 주소로 새 쌍이 된다.
+- 흡수 기록: 그대로 남는다. 대상 문서가 그 주소에 없으면 되돌리기는 409 `target_missing` 이다.
+
