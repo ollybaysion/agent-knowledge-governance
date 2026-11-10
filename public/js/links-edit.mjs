@@ -1,5 +1,7 @@
 // 연결 고치기: the doc's hand-made links (type · 문서 · 관계) in a dialog.
-// Links the body's [[ ]] made stay fixed here — they follow the body.
+// Links the body's [[ ]] made stay fixed here — they follow the body. A link
+// the curator made (`by: "curator"`) carries a 정리기 chip; changing its row
+// makes it the person's, and taking it out keeps the curator from adding it back.
 import { api } from "./api.mjs";
 import { el, toast } from "./dom.mjs";
 import { DOC_TYPES, TYPE_LABEL } from "./state.mjs";
@@ -7,10 +9,13 @@ import { STATUS_LABEL } from "./shared.mjs";
 
 const LINK_RELS = ["screen", "related"];
 
+/** The chip a curator-made link carries. */
+export const curatorChip = () => el("span", { class: "chip from-body", title: "정리기가 단 연결입니다. 지우면 두 문서 본문이 바뀔 때까지 다시 달지 않습니다", text: "정리기" });
+
 export function openLinksDialog({ type, id, data, getRev, reload }) {
   const fromBody = new Set((data.wikilinks || []).filter((w) => w.found).map((w) => `${w.type}/${w.id}#related`));
   const isFromBody = (l) => fromBody.has(`${l.type}/${l.id}#${l.rel}`);
-  const rows = (data.links || []).filter((l) => !isFromBody(l)).map(({ type: t, id: i, rel }) => ({ type: t, id: i, rel }));
+  const rows = (data.links || []).filter((l) => !isFromBody(l)).map(({ type: t, id: i, rel, by }) => ({ type: t, id: i, rel, ...(by ? { by } : {}) }));
   const fixed = (data.links || []).filter(isFromBody);
   const targetsOf = new Map();
   const targets = (t) => {
@@ -34,20 +39,34 @@ export function openLinksDialog({ type, id, data, getRev, reload }) {
       idSel.value = docs.some((d) => d.id === r.id) ? r.id : "";
       r.id = idSel.value;
     }
+    const mine = () => {
+      if (!r.by) return;
+      delete r.by;
+      byChip.remove();
+    };
     typeSel.addEventListener("change", () => {
       r.type = typeSel.value;
       r.id = "";
+      mine();
       fillIds();
     });
-    idSel.addEventListener("change", () => (r.id = idSel.value));
+    idSel.addEventListener("change", () => {
+      r.id = idSel.value;
+      mine();
+    });
     const relInp = el("input", { class: "fld mono", type: "text", list: "link-rels", "aria-label": "관계", placeholder: "related" });
     relInp.value = r.rel;
-    relInp.addEventListener("input", () => (r.rel = relInp.value.trim()));
+    relInp.addEventListener("input", () => {
+      r.rel = relInp.value.trim();
+      mine();
+    });
+    const byChip = r.by ? curatorChip() : null;
     fillIds();
     return el("div", { class: "link-row" }, [
       typeSel,
       idSel,
       relInp,
+      byChip,
       el("button", { type: "button", class: "btn ghost sm", text: "삭제", onclick: () => { rows.splice(rows.indexOf(r), 1); paint(); } }),
     ]);
   }

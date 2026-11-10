@@ -6,14 +6,20 @@
 //   `~` is in no type id and no document id, so the key splits back.
 // - 흡수 기록: store/curation/absorptions/<uuid>.json, one file per absorption
 //   the curator applied.
+// - 지운 정리기 링크: store/curation/unlinks/<key>.json, one file per pair
+//   whose curator-made edge (links[] entry with `by`) a person took out. The
+//   key is the pair key above. The curator reads them and leaves the pair
+//   unlinked while both bodies are the ones the person saw.
 //
 // Both live in the git store like proposals/: each change is a commit, so the
 // 감사 log shows who opened, dismissed, resolved or reverted what.
+import { createHash } from "node:crypto";
 import { isValidId, listIds, readJson } from "./store.mjs";
 import { TYPE_ID_RE } from "./types.mjs";
 
 export const PAIRS_DIR = "curation/duplicates";
 export const ABSORPTIONS_DIR = "curation/absorptions";
+export const UNLINKS_DIR = "curation/unlinks";
 
 export const PAIR_STATUSES = ["open", "dismissed", "resolved"];
 export const ABSORPTION_STATUSES = ["applied", "reverted"];
@@ -30,6 +36,10 @@ const KEY_RE = /^([a-z][a-z0-9-]*)~([a-z0-9._-]+)~([a-z][a-z0-9-]*)~([a-z0-9._-]
 export const stableJson = (obj) => JSON.stringify(obj, null, 2) + "\n";
 export const pairPath = (key) => `${PAIRS_DIR}/${key}.json`;
 export const absorptionPath = (id) => `${ABSORPTIONS_DIR}/${id}.json`;
+export const unlinkPath = (key) => `${UNLINKS_DIR}/${key}.json`;
+
+/** SHA-256 hex of a body as stored: a links · tags · status write leaves it as it was. */
+export const bodyHash = (body) => createHash("sha256").update(JSON.stringify(body ?? null)).digest("hex");
 
 const addr = (d) => `${d.type}/${d.id}`;
 const isRev = (v) => typeof v === "string" && REV_RE.test(v);
@@ -108,15 +118,16 @@ export function readPairsBody(body) {
  * The stored pair after one sighting, and what happened to it:
  * `opened` (new, or a decided pair whose documents changed since the
  * decision), `updated` (open, seen again), `kept` (decided, and both
- * documents are at the revs the person decided on — the file stays).
+ * documents are at the revs the person decided on, or `unchanged(revs)` says
+ * their bodies are the ones at those revs — the file stays).
  * @returns {{outcome: "opened"|"updated"|"kept", pair: object | null}} pair null for kept
  */
-export function sightPair(stored, seen, { runId, model, at }) {
+export function sightPair(stored, seen, { runId, model, at, unchanged }) {
   const sighting = { a: seen.a, b: seen.b, score: seen.score, model, runId, seenAt: at };
   if (!stored) return { outcome: "opened", pair: { key: seen.key, ...sighting, status: "open", firstSeenAt: at } };
   if (stored.status === "open") return { outcome: "updated", pair: { ...stored, ...sighting } };
   const revs = stored.decision?.revs;
-  if (revs && revs.a === seen.a.rev && revs.b === seen.b.rev) return { outcome: "kept", pair: null };
+  if (revs && ((revs.a === seen.a.rev && revs.b === seen.b.rev) || unchanged?.(revs))) return { outcome: "kept", pair: null };
   const { decision: _old, ...rest } = stored;
   return { outcome: "opened", pair: { ...rest, ...sighting, status: "open" } };
 }
@@ -161,4 +172,29 @@ export function readAbsorptionBody(body) {
   if (!summary) return { error: "invalid_summary", max: SUMMARY_MAX };
   if (body.score !== undefined && !isScore(body.score)) return { error: "invalid_score" };
   return { runId, model, source, target, summary, ...(body.score !== undefined ? { score: body.score } : {}) };
+}
+
+/**
+ * The writes that remember the curator edges a links PUT took out of `from`:
+ * one unlink record per edge, with both bodies' hashes as they stand.
+ * `bodyOf(type, id)` reads a document's body (null when it is gone).
+ */
+export function unlinkWrites(from, dropped, { by, at, bodyOf }) {
+  return dropped.map((l) => {
+    const to = { type: l.type, id: l.id };
+    const key = pairKey(from, to);
+    return {
+      relpath: unlinkPath(key),
+      content: stableJson({
+        key,
+        from: { type: from.type, id: from.id },
+        to,
+        rel: l.rel,
+        by: l.by,
+        removedBy: by,
+        removedAt: at,
+        bodies: { from: bodyHash(bodyOf(from.type, from.id)), to: bodyHash(bodyOf(to.type, to.id)) },
+      }),
+    };
+  });
 }

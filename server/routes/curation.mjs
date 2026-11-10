@@ -9,14 +9,16 @@ import { errorReport } from "../../src/flow/flow-error.mjs";
 import { commitFiles, hasAsset, listIds, readJson, readJsonAtRev, revOfPath } from "../store.mjs";
 import { absorbedPath, docWrites } from "../render-store.mjs";
 import { applyEdit, EditError } from "../edit.mjs";
-import { mergeBodyLinks } from "../links.mjs";
+import { mergeBodyLinks, withLinks } from "../links.mjs";
 import { agentRegistry, dataIdOwners } from "../data-ids.mjs";
 import {
   ABSORPTION_STATUSES,
   PAIR_STATUSES,
   PAIRS_DIR,
   ABSORPTIONS_DIR,
+  UNLINKS_DIR,
   absorptionPath,
+  bodyHash,
   pairPath,
   parseKey,
   readAbsorptionBody,
@@ -51,6 +53,13 @@ export function registerCurationRoutes(app) {
       currentRev: entry ? revOfPath(storeDir, docPath(d)) : null,
     };
   };
+  // True when the document's body at `rev` is its body at `other` (default:
+  // now). A links · tags · status write moves the rev and leaves the body.
+  const sameBody = (d, rev, other) => {
+    const then = readJsonAtRev(storeDir, docPath(d), rev);
+    const now = other === undefined ? readJson(storeDir, docPath(d)) : readJsonAtRev(storeDir, docPath(d), other);
+    return !!then && !!now && bodyHash(then.body) === bodyHash(now.body);
+  };
   const pairView = (pair) => ({ ...pair, a: docNow(pair.a), b: docNow(pair.b) });
   const absorptionView = (rec) => {
     const source = docNow(rec.source);
@@ -60,7 +69,10 @@ export function registerCurationRoutes(app) {
       ...rec,
       source: { ...source, marked: mark?.rev === rec.source.rev },
       target,
-      revertable: rec.status === "applied" && target.exists && target.currentRev === rec.target.toRev,
+      revertable:
+        rec.status === "applied" &&
+        target.exists &&
+        (target.currentRev === rec.target.toRev || sameBody(rec.target, rec.target.toRev)),
     };
   };
   const readAll = (dir) => listIds(storeDir, dir).map((name) => readJson(storeDir, `${dir}/${name}.json`)).filter(Boolean);
@@ -83,7 +95,8 @@ export function registerCurationRoutes(app) {
             skipped.push({ index: seen.index, key: seen.key, error: "not_found", doc: `${gone.type}/${gone.id}` });
             continue;
           }
-          const { outcome, pair } = sightPair(readJson(storeDir, pairPath(seen.key)), seen, { runId, model, at });
+          const unchanged = (revs) => ["a", "b"].every((k) => revs[k] === seen[k].rev || sameBody(seen[k], revs[k], seen[k].rev));
+          const { outcome, pair } = sightPair(readJson(storeDir, pairPath(seen.key)), seen, { runId, model, at, unchanged });
           counts[outcome] += 1;
           if (pair) writes.push({ relpath: pairPath(seen.key), content: stableJson(pair) });
         }
@@ -196,6 +209,21 @@ export function registerCurationRoutes(app) {
     return { absorptions };
   });
 
+  // The curator edges a person took out (json-spec §8.3), each with
+  // `changed`: either document is gone or its body is not the one the person
+  // saw. The curator leaves an unchanged pair unlinked.
+  app.get("/api/curation/unlinks", { config: { roles: ["user", "agent"] } }, async () => {
+    const bodyNow = (d) => (types.bodySchema(d.type) && catalog.exists(d.type, d.id) ? readJson(storeDir, docPath(d)) : null);
+    const changed = (d, hash) => {
+      const now = bodyNow(d);
+      return !now || bodyHash(now.body) !== hash;
+    };
+    const unlinks = readAll(UNLINKS_DIR)
+      .sort((x, y) => (x.removedAt === y.removedAt ? (x.key < y.key ? -1 : 1) : x.removedAt < y.removedAt ? 1 : -1))
+      .map((u) => ({ ...u, changed: changed(u.from, u.bodies?.from) || changed(u.to, u.bodies?.to) }));
+    return { unlinks };
+  });
+
   // One record with the target's body before (fromRev) and after (toRev):
   // what the 정리 tab's 바뀐 부분 compares.
   app.get("/api/curation/absorptions/:id", { config: { roles: ["user", "agent"] } }, async (request, reply) => {
@@ -229,7 +257,7 @@ export function registerCurationRoutes(app) {
         if (types.isArchived(type))
           return { status: 409, body: { error: "type_archived", message: `${type} 타입은 닫혀 새 내용을 받지 않습니다` } };
         const currentRev = revOfPath(storeDir, relpath);
-        if (currentRev !== rec.target.toRev)
+        if (currentRev !== rec.target.toRev && !sameBody(rec.target, rec.target.toRev))
           return {
             status: 409,
             body: {
@@ -249,7 +277,10 @@ export function registerCurationRoutes(app) {
           if (err instanceof EditError) return { status: 400, body: { error: "edit_rejected", message: err.message } };
           throw err;
         }
-        const merged = mergeBodyLinks(catalog, types.ids(), type, current, { ...current, body });
+        // The link to the source the curator made with the absorption goes with it.
+        const fromSource = (l) => l.by && l.type === rec.source.type && l.id === rec.source.id;
+        const kept = withLinks(current, (current.links ?? []).filter((l) => !fromSource(l)));
+        const merged = mergeBodyLinks(catalog, types.ids(), type, current, { ...kept, body });
         if (merged.error) return { status: 400, body: merged.error };
         const newDoc = merged.doc;
         const errors = validateForStore(newDoc, refs, inStore);

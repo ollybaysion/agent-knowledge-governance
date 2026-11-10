@@ -13,6 +13,11 @@
       "type": "string",
       "description": "What the edge means. Free string; in use: screen (manual → the screen it operates), related.",
       "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "by": {
+      "type": "string",
+      "enum": ["curator"],
+      "description": "Who made the edge when a program did: curator (fdc-agent-be-spring's 정리기). A person's edge and a body [[ ]] edge carry none."
     }
   }
 }
