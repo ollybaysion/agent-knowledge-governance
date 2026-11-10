@@ -62,6 +62,7 @@ const screens = {
   graph: () => import("./tabs/graph.mjs"),
   review: () => import("./tabs/review.mjs"),
   audit: () => import("./tabs/audit.mjs"),
+  curation: () => import("./tabs/curation.mjs"),
   types: () => import("./tabs/types.mjs"),
   "read-tokens": () => import("./tabs/read-tokens.mjs"),
 };
@@ -99,6 +100,8 @@ export async function route() {
     if ((m = await load("graph"))) m.renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null);
   } else if (head === "review" || head === "queue") {
     if ((m = await load("review"))) m.renderReview();
+  } else if (head === "curation") {
+    if ((m = await load("curation"))) m.renderCuration();
   } else if (head === "audit") {
     if ((m = await load("audit"))) m.renderAuditScreen();
   } else if (head === "read-tokens") {

@@ -56,6 +56,7 @@ import { hasGroup } from "../auth.mjs";
 import { etagOf, noneMatchHits } from "../etag.mjs";
 import { TYPES_PATH, UNCLASSIFIED } from "../types.mjs";
 import { linkedSkills, pieceChoices, pieceIds, queryChoices } from "../verify-queries.mjs";
+import { pairsLeaving } from "../curation.mjs";
 
 // Published md if there is one, otherwise rendered on the spot. Only an active
 // doc has a file in rendered/ (issue #7), and a doc nobody can preview is a doc
@@ -1518,6 +1519,8 @@ export function registerDocsRoutes(app) {
           const moved = docsWrites(storeDir, to, [newDoc]);
           writes.push(...moved.writes);
           removes.push(...moved.removes);
+          // A duplicate pair names the old address: it closes with the move.
+          writes.push(...pairsLeaving(storeDir, type, id, { by: request.user.id, at: new Date().toISOString(), reason: "retyped" }));
 
           const rev = await commitFiles(storeDir, {
             author: request.user.id,
@@ -1586,6 +1589,8 @@ export function registerDocsRoutes(app) {
             writes.push(...w.writes);
             removes.push(...w.removes);
           }
+          // The duplicate pairs that name the doc close with it.
+          writes.push(...pairsLeaving(storeDir, type, id, { by: request.user.id, at: new Date().toISOString(), reason: "deleted" }));
 
           const rev = await commitFiles(storeDir, {
             author: request.user.id,

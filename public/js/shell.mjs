@@ -21,6 +21,7 @@ export const TABS = [
   { id: "docs", label: "문서", hash: "#/docs" },
   { id: "graph", label: "그래프", hash: "#/graph" },
   { id: "review", label: "검토", hash: "#/review" },
+  { id: "curation", label: "정리", hash: "#/curation" },
   { id: "audit", label: "감사", hash: "#/audit" },
   { id: "types", label: "타입", hash: "#/types", admin: true },
 ];
