@@ -156,7 +156,7 @@ test("warmRevCache fills each path's rev and time from one history walk, as git 
   const expected = paths.map((p) => git(dir, ["log", "-1", "--format=%H %aI", "--", p]).trim());
 
   invalidateCache(dir);
-  const warmed = warmRevCache(dir);
+  const warmed = await warmRevCache(dir);
   assert.equal(warmed.commits, 7);
   // With .git away a cold read would throw: every answer below is the cache's.
   renameSync(join(dir, ".git"), join(dir, ".git-away"));
@@ -178,7 +178,7 @@ test("warmRevCache on a history git cannot read leaves the cold reads to answer"
   invalidateCache(dir);
   renameSync(join(dir, ".git"), join(dir, ".git-away"));
   try {
-    assert.equal(warmRevCache(dir), null);
+    assert.equal(await warmRevCache(dir), null);
   } finally {
     renameSync(join(dir, ".git-away"), join(dir, ".git"));
   }

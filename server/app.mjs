@@ -119,7 +119,7 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   // Every list answer carries each document's rev: one walk of the history
   // here instead of one `git log -1` per document on the first list.
   log("rev 표: git 이력 읽는 중");
-  const revs = warmRevCache(storeDir);
+  const revs = await warmRevCache(storeDir);
   log(
     revs
       ? `rev 표: 커밋 ${revs.commits} · 경로 ${revs.paths} · ${revs.ms} ms`

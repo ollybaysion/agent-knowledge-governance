@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { git, gitAsync, isCleanRepo } from "./git.mjs";
+import { StringDecoder } from "node:string_decoder";
+import { git, gitAsync, gitEach, isCleanRepo } from "./git.mjs";
 
 const ID_RE = /^[a-z0-9._-]+$/;
 const ACTOR_RE = /^[a-zA-Z0-9:_-]+$/;
@@ -167,37 +168,60 @@ function cacheCommit(cache, relpath, entry, { keep }) {
   }
 }
 
+// One walk of `git log <range>`, newest commit first, read as git writes it:
+// the history has no size limit. Each path and the directories above it get
+// the first commit that shows them, which is their last one.
+async function walkHistory(dir, range, table) {
+  let commits = 0;
+  // "<rev>\x1f<at>\0\n<path>\0<path>\0" per commit.
+  const take = (chunk) => {
+    const end = chunk.indexOf("\0");
+    const [rev, at] = (end < 0 ? chunk : chunk.slice(0, end)).split("\x1f");
+    if (!rev) return;
+    commits += 1;
+    const entry = { rev, at };
+    if (end < 0) return;
+    for (const relpath of chunk.slice(end + 1).replace(/^\n/, "").split("\0")) {
+      if (relpath) cacheCommit(table, relpath, entry, { keep: true });
+    }
+  };
+  // Commits start with \x1e; the text after the last one waits for the next piece.
+  const decoder = new StringDecoder("utf8");
+  let pending = [];
+  const feed = (text) => {
+    const parts = text.split("\x1e");
+    pending.push(parts[0]);
+    if (parts.length === 1) return;
+    take(pending.join(""));
+    for (let i = 1; i < parts.length - 1; i++) take(parts[i]);
+    pending = [parts.at(-1)];
+  };
+  const args = ["log", "--name-only", "--no-renames", "-z", "--format=%x1e%H%x1f%aI", range, "--"];
+  await gitEach(dir, args, (chunk) => feed(decoder.write(chunk)));
+  feed(decoder.end());
+  take(pending.join(""));
+  return commits;
+}
+
 /**
  * Fills the rev cache from one walk of the history, newest commit first: the
  * first commit a path shows up in is its last one, the same answer a cold
  * `git log -1 -- <path>` gives. Run once at boot, before any request; a path
  * the walk does not see is still read cold. A history git cannot hand over
  * leaves the cache as it was.
- * @returns {{commits: number, paths: number, ms: number} | null} null when the walk failed
+ * @returns {Promise<{commits: number, paths: number, ms: number} | null>} null when the walk failed
  */
-export function warmRevCache(dir) {
+export async function warmRevCache(dir) {
   const start = performance.now();
-  let out;
+  const table = new Map();
+  let commits;
   try {
-    out = git(dir, ["log", "--name-only", "--no-renames", "-z", "--format=%x1e%H%x1f%aI"]);
+    commits = await walkHistory(dir, "HEAD", table);
   } catch {
     return null;
   }
   const cache = cacheFor(dir);
-  let commits = 0;
-  // "\x1e<rev>\x1f<at>\0\n<path>\0<path>\0" per commit.
-  for (const chunk of out.split("\x1e")) {
-    if (!chunk) continue;
-    const end = chunk.indexOf("\0");
-    const [rev, at] = (end < 0 ? chunk : chunk.slice(0, end)).split("\x1f");
-    if (!rev) continue;
-    commits += 1;
-    const entry = { rev, at };
-    if (end < 0) continue;
-    for (const relpath of chunk.slice(end + 1).replace(/^\n/, "").split("\0")) {
-      if (relpath) cacheCommit(cache, relpath, entry, { keep: true });
-    }
-  }
+  for (const [relpath, entry] of table) if (!cache.has(relpath)) cache.set(relpath, entry);
   return { commits, paths: cache.size, ms: Math.round(performance.now() - start) };
 }
 
