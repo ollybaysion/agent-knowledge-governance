@@ -82,7 +82,7 @@ test("boot log: the settings aside, one line as each step starts and ends, in bo
     assert.equal(lines[0], `store: ${storeDir} 여는 중`);
     assert.match(lines[1], /^store: 새로 만듦 — git init · "init store" 커밋 · \d+ ms$/);
     assert.equal(lines[2], "rev 표: git 이력 읽는 중");
-    assert.match(lines[3], /^rev 표: 커밋 1 · 경로 1 · \d+ ms$/);
+    assert.match(lines[3], /^rev 표: 전체 커밋 1 · 경로 1 · \d+ ms \(저장본 없음\)$/);
     assert.equal(lines[4], `로그인 길: 비밀번호 파일 ${join(home, "users.yml")} · 사용자 2 (admin 1 · user 1 · agent 0)`);
     assert.match(lines[5], /^Redis: redis:\/\/\S+ 접속 중 — 세션 키 akg-test:session:sessions:\*$/);
     assert.match(lines[6], /^Redis: 접속 · PING · \d+ ms$/);

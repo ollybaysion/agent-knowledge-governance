@@ -8,14 +8,15 @@ export class GitError extends Error {}
 // Default maxBuffer is 1MB, which `git log` over a long history can exceed.
 // Unlike the bundle route this one is already fail-closed (r.error below
 // throws), so an overflow is loud rather than silent — but it would still
-// take out audit queries, so give it real headroom.
-const MAX_BUFFER = 64 * 1024 * 1024;
+// take out audit queries, so give it real headroom. gitEach() reads past it.
+// A test lowers `limits.output` to stand in for an output over 64 MB.
+export const limits = { output: 64 * 1024 * 1024 };
 
 export function git(cwd, args) {
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
-    maxBuffer: MAX_BUFFER,
+    maxBuffer: limits.output,
   });
   if (r.error) throw new GitError(`git ${args[0]}: ${r.error.message}`);
   if (r.status !== 0) {
@@ -29,12 +30,29 @@ export function git(cwd, args) {
  * runs. Same errors, same output limit.
  * @returns {Promise<string>} stdout
  */
-export function gitAsync(cwd, args) {
+export async function gitAsync(cwd, args) {
+  const out = [];
+  let size = 0;
+  await gitEach(cwd, args, (chunk) => {
+    size += chunk.length;
+    if (size > limits.output) throw new GitError(`git ${args[0]}: stdout maxBuffer exceeded`);
+    out.push(chunk);
+  });
+  return Buffer.concat(out).toString("utf8");
+}
+
+/**
+ * gitAsync() for an output of any size: stdout comes to `onChunk` piece by
+ * piece as git writes it, and is never held whole. stderr keeps the limit.
+ * A throw in `onChunk` stops git and rejects with that error.
+ * @param {(chunk: Buffer) => void} onChunk
+ * @returns {Promise<void>}
+ */
+export function gitEach(cwd, args, onChunk) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, { cwd });
-    const out = [];
     const err = [];
-    const size = { out: 0, err: 0 };
+    let errSize = 0;
     let failed = false;
     const fail = (error) => {
       if (failed) return;
@@ -42,13 +60,19 @@ export function gitAsync(cwd, args) {
       child.kill();
       reject(error);
     };
-    const collect = (chunks, key) => (chunk) => {
-      size[key] += chunk.length;
-      if (size[key] > MAX_BUFFER) return fail(new GitError(`git ${args[0]}: ${key === "out" ? "stdout" : "stderr"} maxBuffer exceeded`));
-      chunks.push(chunk);
-    };
-    child.stdout.on("data", collect(out, "out"));
-    child.stderr.on("data", collect(err, "err"));
+    child.stdout.on("data", (chunk) => {
+      if (failed) return;
+      try {
+        onChunk(chunk);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      errSize += chunk.length;
+      if (errSize > limits.output) return fail(new GitError(`git ${args[0]}: stderr maxBuffer exceeded`));
+      err.push(chunk);
+    });
     child.on("error", (error) => fail(new GitError(`git ${args[0]}: ${error.message}`)));
     child.on("close", (code) => {
       if (failed) return;
@@ -57,7 +81,7 @@ export function gitAsync(cwd, args) {
         reject(new GitError(`git ${args.join(" ")} failed: ${Buffer.concat(err).toString("utf8").trim()}`));
         return;
       }
-      resolve(Buffer.concat(out).toString("utf8"));
+      resolve();
     });
   });
 }

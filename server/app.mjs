@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
 
 import { loadContractSchemas, loadSchemas } from "../src/envelope.mjs";
-import { initStore, isValidId, warmRevCache } from "./store.mjs";
+import { initStore, isValidId, saveRevTable, warmRevCache } from "./store.mjs";
 import {
   hasGroup,
   isRateLimited,
@@ -87,6 +87,23 @@ function sameToken(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const REV_TABLE_REASONS = {
+  missing: "저장본 없음",
+  unreadable: "저장본을 읽지 못함",
+  version: "저장본 판 다름",
+  "not-ancestor": "저장본 HEAD 가 이력에 없음",
+};
+
+/** The boot log line of the rev table: built from the saved table or the whole history, and why. */
+function revTableLine(revs) {
+  if (!revs) return "rev 표: git 이력을 읽지 못했습니다 — rev 는 경로마다 처음 읽을 때 셉니다";
+  const how =
+    revs.from === "saved" ? `저장본(${revs.base.slice(0, 7)}) + 새 커밋 ${revs.commits}` : `전체 커밋 ${revs.commits}`;
+  const why = revs.from === "full" ? ` (${REV_TABLE_REASONS[revs.reason]})` : "";
+  const unsaved = revs.saveError ? ` · 저장본을 쓰지 못함: ${revs.saveError}` : "";
+  return `rev 표: ${how} · 경로 ${revs.paths} · ${revs.ms} ms${why}${unsaved}`;
+}
+
 /** 'self' plus the FE origin, when the FE address is a URL. */
 export function frameAncestors(feUrl) {
   try {
@@ -102,7 +119,8 @@ export function frameAncestors(feUrl) {
  * @param {{storeDir: string, auth: Parameters<typeof openAuth>[0], schemasDir?: string, log?: (line: string) => void}} opts
  *   log gets one line as each boot step starts and ends — server/main.mjs
  *   prints them; a step that can take long (rev 표 · Keycloak · Redis ·
- *   카탈로그) logs before it runs, so a boot that hangs shows where.
+ *   카탈로그) logs before it runs, so a boot that hangs shows where. On
+ *   close it gets one more line when the rev table is saved.
  * @returns {Promise<import("fastify").FastifyInstance>}
  */
 export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMAS_DIR, log = noLog }) {
@@ -117,14 +135,10 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
       : `store: 기존 레포 · 깨끗함 · ${elapsed(start)}`,
   );
   // Every list answer carries each document's rev: one walk of the history
-  // here instead of one `git log -1` per document on the first list.
+  // here instead of one `git log -1` per document on the first list. The
+  // table saved by the last run cuts the walk to the commits after it.
   log("rev 표: git 이력 읽는 중");
-  const revs = warmRevCache(storeDir);
-  log(
-    revs
-      ? `rev 표: 커밋 ${revs.commits} · 경로 ${revs.paths} · ${revs.ms} ms`
-      : "rev 표: git 이력을 읽지 못했습니다 — rev 는 경로마다 처음 읽을 때 셉니다",
-  );
+  log(revTableLine(await warmRevCache(storeDir)));
   const auth = await openAuth(authConfig, log); // throws AuthBootError: no FE address, Keycloak unreachable, bad password file, Redis unreachable
 
   start = performance.now();
@@ -162,6 +176,12 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   app.decorate("akg", { storeDir, auth, refs, contracts, queue, types, catalog });
   app.addHook("onClose", () => auth.close());
   app.addHook("onClose", async () => catalog.close());
+  // The commits of this run go into the saved rev table, so the next boot walks none.
+  app.addHook("onClose", async () => {
+    const saved = await saveRevTable(storeDir);
+    if (saved?.error) log(`rev 표: 저장본을 쓰지 못함: ${saved.error}`);
+    else if (saved) log(`rev 표: 저장본(${saved.head.slice(0, 7)}) 씀 · 새 커밋 ${saved.commits} · ${saved.ms} ms`);
+  });
 
   // S2: strict CSP + no-sniff on every response, dashboard and API alike.
   // frame-ancestors: the page opens inside FE's drawer (?embed=1), and
