@@ -17,6 +17,7 @@ const HOME = process.env.AKG_HOME ?? "./.akg-data";
 const STORE_DIR = process.env.AKG_STORE_DIR ?? join(HOME, "store");
 const HOST = process.env.AKG_HOST ?? "127.0.0.1"; // S2: loopback only, reverse proxy handles external exposure
 const PORT = Number(process.env.AKG_PORT ?? 8787);
+const SIGNALS = ["SIGTERM", "SIGINT"];
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 const uptimeMs = () => Math.round(process.uptime() * 1000);
@@ -55,6 +56,24 @@ try {
   log(
     `akg server listening on http://${HOST}:${PORT} (store=${STORE_DIR}) · listen ${Math.round(performance.now() - start)} ms · 기동 ${uptimeMs()} ms`,
   );
+  // SIGTERM (systemd · kill) and SIGINT (Ctrl-C) close the app: the requests
+  // in flight end, then the onClose hooks run (the rev table is saved). A
+  // second signal ends the process at once.
+  const close = (signal) => {
+    for (const s of SIGNALS) process.removeListener(s, close);
+    log(`${signal}: 닫는 중`);
+    app.close().then(
+      () => {
+        log("닫힘");
+        process.exit(0);
+      },
+      (err) => {
+        console.error(`[+${uptimeMs()} ms] 닫기 실패: ${err.message}`);
+        process.exit(1);
+      },
+    );
+  };
+  for (const s of SIGNALS) process.on(s, close);
 } catch (err) {
   console.error(`[+${uptimeMs()} ms] akg server 기동 실패: ${err.message} (${err.constructor.name})`);
   process.exit(1);
