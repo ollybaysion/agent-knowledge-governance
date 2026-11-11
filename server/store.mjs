@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -203,26 +204,154 @@ async function walkHistory(dir, range, table) {
   return commits;
 }
 
+// The rev table outlives the process: .git/akg-rev-table.json holds the
+// table at one HEAD. git does not know the file, so a commit or a gc leaves
+// it alone, and it moves with the store.
+const REV_TABLE_VERSION = 1;
+const HEAD_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const revTableFile = (dir) => join(dir, ".git", "akg-rev-table.json");
+const revTables = new Map(); // dir -> {head, table}: the last table built, the base of the next
+
+// {v, head, commits: [[rev, at]], paths: {relpath: index into commits}}. The
+// paths of one commit share one entry again, as they do after a walk.
+function readRevTable(dir) {
+  let saved;
+  try {
+    saved = JSON.parse(readFileSync(revTableFile(dir), "utf8"));
+  } catch (err) {
+    return { reason: err.code === "ENOENT" ? "missing" : "unreadable" };
+  }
+  if (typeof saved !== "object" || saved === null) return { reason: "unreadable" };
+  if (saved.v !== REV_TABLE_VERSION) return { reason: "version" };
+  const { head, commits, paths } = saved;
+  if (typeof head !== "string" || !HEAD_RE.test(head)) return { reason: "unreadable" };
+  if (!Array.isArray(commits) || typeof paths !== "object" || paths === null || Array.isArray(paths))
+    return { reason: "unreadable" };
+  const entries = [];
+  for (const c of commits) {
+    if (!Array.isArray(c) || typeof c[0] !== "string" || typeof c[1] !== "string") return { reason: "unreadable" };
+    entries.push({ rev: c[0], at: c[1] });
+  }
+  const table = new Map();
+  for (const [relpath, i] of Object.entries(paths)) {
+    if (!Number.isInteger(i) || !entries[i]) return { reason: "unreadable" };
+    table.set(relpath, entries[i]);
+  }
+  return { head, table };
+}
+
+// Written to a side file and renamed over the old one: a crash mid-write
+// leaves the old file, never half of a new one.
+function writeRevTable(dir, head, table) {
+  const index = new Map(); // entry -> its place in commits
+  const commits = [];
+  const paths = Object.create(null);
+  for (const [relpath, entry] of table) {
+    let i = index.get(entry);
+    if (i === undefined) {
+      index.set(entry, (i = commits.length));
+      commits.push([entry.rev, entry.at]);
+    }
+    paths[relpath] = i;
+  }
+  const file = revTableFile(dir);
+  const tmp = `${file}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify({ v: REV_TABLE_VERSION, head, commits, paths }));
+    renameSync(tmp, file);
+  } catch (err) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {}
+    throw err;
+  }
+}
+
+function isAncestor(dir, rev, head) {
+  try {
+    git(dir, ["merge-base", "--is-ancestor", rev, head]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The table at HEAD from `base`, a table at an earlier head: when that head is
+// in HEAD's history, only the commits after it are walked and their entries
+// win. Otherwise the whole history is walked. Same answers either way.
+async function tableAtHead(dir, base) {
+  const head = git(dir, ["rev-parse", "HEAD"]).trim();
+  if (base && base.head === head) return { head, table: base.table, commits: 0, from: "base", moved: false };
+  const table = new Map();
+  if (base && isAncestor(dir, base.head, head)) {
+    const commits = await walkHistory(dir, `${base.head}..${head}`, table);
+    for (const [relpath, entry] of base.table) if (!table.has(relpath)) table.set(relpath, entry);
+    return { head, table, commits, from: "base", moved: true };
+  }
+  const commits = await walkHistory(dir, head, table);
+  return { head, table, commits, from: "full", moved: true };
+}
+
 /**
- * Fills the rev cache from one walk of the history, newest commit first: the
- * first commit a path shows up in is its last one, the same answer a cold
- * `git log -1 -- <path>` gives. Run once at boot, before any request; a path
- * the walk does not see is still read cold. A history git cannot hand over
- * leaves the cache as it was.
- * @returns {Promise<{commits: number, paths: number, ms: number} | null>} null when the walk failed
+ * Fills the rev cache at boot, before any request. The table the last run
+ * saved is read and the commits after its HEAD are walked onto it; with no
+ * usable file the whole history is walked. Either way each path gets the
+ * newest commit that touched it, the same answer a cold `git log -1 --
+ * <path>` gives, and a path the history does not show is still read cold. A
+ * table that moved is saved. A history git cannot hand over leaves the cache
+ * as it was.
+ * @returns {Promise<{from: "saved" | "full", base?: string, reason?: string, commits: number, paths: number, ms: number, saveError?: string} | null>}
+ *   "saved": the file's table, `base` its HEAD, `commits` the ones walked after it.
+ *   "full": the whole history, `reason` why the file was passed over
+ *   ("missing" · "unreadable" · "version" · "not-ancestor").
+ *   null when the walk failed.
  */
 export async function warmRevCache(dir) {
   const start = performance.now();
-  const table = new Map();
-  let commits;
+  const saved = readRevTable(dir);
+  let at;
   try {
-    commits = await walkHistory(dir, "HEAD", table);
+    at = await tableAtHead(dir, saved.table ? saved : null);
   } catch {
     return null;
   }
   const cache = cacheFor(dir);
-  for (const [relpath, entry] of table) if (!cache.has(relpath)) cache.set(relpath, entry);
-  return { commits, paths: cache.size, ms: Math.round(performance.now() - start) };
+  for (const [relpath, entry] of at.table) if (!cache.has(relpath)) cache.set(relpath, entry);
+  revTables.set(dir, { head: at.head, table: at.table });
+  const result =
+    at.from === "base"
+      ? { from: "saved", base: saved.head, commits: at.commits }
+      : { from: "full", reason: saved.reason ?? "not-ancestor", commits: at.commits };
+  if (at.moved) {
+    try {
+      writeRevTable(dir, at.head, at.table);
+    } catch (err) {
+      result.saveError = err.message;
+    }
+  }
+  return { ...result, paths: cache.size, ms: Math.round(performance.now() - start) };
+}
+
+/**
+ * Saves the rev table again when HEAD moved since boot: the commits since
+ * then are walked onto the boot's table, so the next boot walks none. Run as
+ * the server closes. Never throws.
+ * @returns {Promise<{head: string, commits: number, ms: number} | {error: string} | null>}
+ *   null when HEAD did not move or boot built no table
+ */
+export async function saveRevTable(dir) {
+  const base = revTables.get(dir);
+  if (!base) return null;
+  const start = performance.now();
+  try {
+    const at = await tableAtHead(dir, base);
+    if (!at.moved) return null;
+    writeRevTable(dir, at.head, at.table);
+    revTables.set(dir, { head: at.head, table: at.table });
+    return { head: at.head, commits: at.commits, ms: Math.round(performance.now() - start) };
+  } catch (err) {
+    return { error: err.message };
+  }
 }
 
 export function revOfPath(dir, relpath) {
