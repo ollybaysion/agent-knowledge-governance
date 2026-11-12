@@ -17,6 +17,8 @@ export { mdLine };
 export const INPUT_HINT = "입력은 흐름 펜스의 `id([글])` 노드로 적는다";
 /** The common md BE's check-flow always adds. */
 export const COMMON = "eqp-scope";
+/** The starter document type: its items are registered queries ({@link readStarter}). */
+export const STARTER = "starter";
 export const COMMON_MD =
   "# 설비 범위\n\n## 한 줄 설명\n\n라인 · 설비 · 기간 입력을 모은다. 다른 md 가 흐름 노드 `eqp-scope[[설비 범위]]` 로 앞에 세운다.\n\n" +
   "## 데이터\n\n```mermaid\nflowchart TD\n  line([라인])\n  eqp_id([설비])\n  duration([기간])\n```\n";
@@ -250,11 +252,44 @@ export function readAgentMd(name, markdown) {
 }
 
 /**
+ * A starter document as BE reads it (SkillMarkdownTool.starter): its
+ * `## 데이터` items read like an agent md's, no flow. `starter` marks it:
+ * its items are registered queries, the document is no md a flow points at.
+ * - rejection: BE's reason for not reading it — a map item, no item, an item
+ *   an agent md would be refused for; null when it reads.
+ */
+export function readStarter(name, markdown) {
+  const secs = sections(markdown);
+  const out = { name, starter: true, queries: [], maps: [], fence: null, flow: QueryFlow.EMPTY, rejection: null };
+  try {
+    const data = secs.filter((s) => s.level === 2 && normalize(s.title) === DATA);
+    if (data.length > 1)
+      throw new Reject(`${name}: ## ${DATA} 절은 하나다, ${data.length} 개다 — ${data.map((s) => s.from).join(" · ")} 번째 줄`);
+    secs.forEach((s, i) => {
+      if (s.level !== 2 || normalize(s.title) !== DATA) return;
+      for (const { kind, ...rest } of needs(name, s, secs.slice(i + 1, nextAtOrAbove(secs, i + 1, 2)), new Set(), [])) {
+        if (kind !== Kind.QUERY) throw new Reject(`${name}: 첫 선택 데이터 문서에는 변환 항목을 쓰지 않는다 — ${rest.id}`);
+        out.queries.push(rest);
+      }
+    });
+    if (!out.queries.length) throw new Reject(`${name}: ## ${DATA} 절에 항목이 없다`);
+    const empty = out.queries.find((q) => q.sql === null);
+    if (empty) throw new Reject(`${name} needs[${empty.id}]: sql 이 없습니다`);
+  } catch (err) {
+    if (!(err instanceof Reject)) throw err;
+    out.rejection = err.message;
+    out.queries = [];
+  }
+  return out;
+}
+
+/**
  * Each registered md's flow errors against all of them, one pass — BE
- * QueryFlowTool.errors. The facts: every md's queries (first id wins),
- * names and subgraphs. Output columns are read with columnsOf, as BE's
- * check-flow reads them.
- * @param {ReturnType<readAgentMd>[]} specs registered mds, in order (no rejection)
+ * QueryFlowTool.errors. The facts: every md's and starter's queries (first
+ * id wins), the mds' names and subgraphs. Output columns are read with
+ * columnsOf, as BE's check-flow reads them.
+ * @param {(ReturnType<readAgentMd>|ReturnType<readStarter>)[]} specs registered
+ *   mds and starters, in order (no rejection)
  * @returns {Map<string, object[]>} md name → its errors, specs order
  */
 export function flowErrors(specs) {
@@ -262,7 +297,7 @@ export function flowErrors(specs) {
   for (const s of specs)
     for (const q of s.queries) if (!pool.has(q.id)) pool.set(q.id, { id: q.id, vars: q.vars, columns: columnsOf(q.sql) });
   const mds = new Map();
-  for (const s of specs) if (!mds.has(s.name)) mds.set(s.name, md(s.name, s.flow, s.queries.map((q) => q.id), s.maps));
+  for (const s of specs) if (!s.starter && !mds.has(s.name)) mds.set(s.name, md(s.name, s.flow, s.queries.map((q) => q.id), s.maps));
   const subgraphs = subgraphsOf(mds.values());
   const out = new Map();
   for (const s of specs) {
@@ -291,27 +326,27 @@ export function flowRejections(specs) {
 }
 
 /**
- * A save of one agent md checked against the registered ones — what BE would
- * leave out once the store holds the save.
+ * A save of one agent md or starter checked against the registered ones —
+ * what BE would leave out once the store holds the save.
  * @param {{type: string, id: string, markdown: string}[]} registry the active
- *   agent mds as the store holds them now, in store order
+ *   agent mds and starters as the store holds them now, in store order
  * @param {{type: string, id: string, markdown: string|null, active: boolean}} self
  *   the document saved; `active` false when the save takes it out of the registry
  * @returns {{errors: object[], fenceLine: number, broken: {md: string, errors: object[]}[]}}
- *   errors: self's flow errors (none when self is out); broken: the other mds
- *   the save makes BE leave out
+ *   errors: self's flow errors (none when self is out or a starter); broken:
+ *   the other mds the save makes BE leave out
  */
 export function saveCheck(registry, self) {
   const isSelf = (d) => d.type === self.type && d.id === self.id;
-  const read = (d) => readAgentMd(d.id, d.markdown);
+  const read = (d) => (d.type === STARTER ? readStarter : readAgentMd)(d.id, d.markdown);
   const registered = (docs) => docs.map(read).filter((s) => s.rejection === null);
   const before = flowRejections(registered(registry));
   const docs = registry.filter((d) => !isSelf(d) || self.active).map((d) => (isSelf(d) ? self : d));
   if (self.active && !registry.some(isSelf)) docs.push(self);
   const after = flowRejections(registered(docs));
-  const mine = self.markdown != null ? readAgentMd(self.id, self.markdown) : null;
+  const mine = self.markdown != null && self.type !== STARTER ? readAgentMd(self.id, self.markdown) : null;
   return {
-    errors: self.active ? after.get(self.id) ?? [] : [],
+    errors: self.active && self.type !== STARTER ? after.get(self.id) ?? [] : [],
     fenceLine: mine?.fence?.line ?? 0,
     broken: [...after].filter(([name]) => name !== self.id && !before.has(name)).map(([name, errors]) => ({ md: name, errors })),
   };
