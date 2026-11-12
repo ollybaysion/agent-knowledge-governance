@@ -1,6 +1,7 @@
 // The document type list: code types (a schema and a renderer in this repo)
-// plus md types an admin registers. store/types.json holds the order and the
-// registered types; while it is absent the defaults below are the list.
+// plus md types an admin registers. store/types.json holds the order, the
+// registered types and the code types' search weights; while it is absent the
+// defaults below are the list.
 import { commitFiles, readJson, readText, revOfPath } from "./store.mjs";
 
 export const TYPES_PATH = "types.json";
@@ -25,6 +26,12 @@ const DEFAULT_REGISTERED = [
 
 export const TYPE_ID_RE = /^[a-z][a-z0-9-]*$/;
 export const COLOR_RE = /^#[0-9a-f]{6}$/;
+
+// A type's search weight: 0 adds nothing, 1 adds what lifts a k-th chunk to
+// first in each ranking (the BE's Tier.OWN unit), a negative one takes as much.
+export const WEIGHT_MIN = -1;
+export const WEIGHT_MAX = 1;
+export const isWeight = (w) => typeof w === "number" && Number.isFinite(w) && w >= WEIGHT_MIN && w <= WEIGHT_MAX;
 
 // Route words and store folders a type id would collide with.
 export const RESERVED_TYPE_IDS = new Set([
@@ -70,6 +77,7 @@ function entry(t, kind, builtin) {
     kind,
     builtin,
     status: t.status ?? "active",
+    weight: t.weight ?? 0,
   };
 }
 
@@ -79,7 +87,7 @@ function entry(t, kind, builtin) {
  */
 export function typeEntries(file) {
   const byId = new Map();
-  for (const t of CODE_TYPES) byId.set(t.id, entry(t, "structured", true));
+  for (const t of CODE_TYPES) byId.set(t.id, entry({ ...t, weight: file.weights?.[t.id] }, "structured", true));
   for (const t of file.registered ?? []) {
     if (!isBuiltinTypeId(t.id)) byId.set(t.id, entry(t, "md", false));
   }

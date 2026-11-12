@@ -1,13 +1,16 @@
 // The document type list: GET for everyone who reads, register · edit ·
-// order · close for admin. Each write is one commit of store/types.json and
-// its rendered/types.json copy.
+// order · close for admin, and a code type's weight. Each write is one commit
+// of store/types.json and its rendered/types.json copy.
 import { commitFiles } from "../store.mjs";
 import {
   COLOR_RE,
   RESERVED_TYPE_IDS,
   TYPE_ID_RE,
   UNCLASSIFIED,
+  WEIGHT_MAX,
+  WEIGHT_MIN,
   isBuiltinTypeId,
+  isWeight,
   readTypesFile,
   typeEntries,
   typesWrites,
@@ -16,12 +19,13 @@ import { priorityOf } from "./docs.mjs";
 
 const LABEL_MAX = 40;
 const DESCRIPTION_MAX = 200;
-const FIELDS = new Set(["label", "color", "description"]);
+const FIELDS = new Set(["label", "color", "description", "weight"]);
+const WEIGHT_ERROR = `weight 는 ${WEIGHT_MIN} ~ ${WEIGHT_MAX} 의 수입니다`;
 
 /** The registered type's fields from a PUT body, or {errors}. */
 function typeFields(body) {
   if (!body || typeof body !== "object" || Array.isArray(body))
-    return { errors: ["몸은 { label, color, description? } 객체입니다"] };
+    return { errors: ["몸은 { label, color, description?, weight? } 객체입니다"] };
   const errors = [];
   for (const key of Object.keys(body))
     if (!FIELDS.has(key)) errors.push(`모르는 칸입니다 — ${key}`);
@@ -35,8 +39,12 @@ function typeFields(body) {
       errors.push(`description 은 ${DESCRIPTION_MAX}자 이하 문자열입니다`);
     else description = body.description.trim() || undefined;
   }
+  if (body.weight !== undefined && !isWeight(body.weight)) errors.push(WEIGHT_ERROR);
   if (errors.length) return { errors };
-  return { fields: { label, color, ...(description ? { description } : {}) } };
+  return {
+    fields: { label, color, ...(description ? { description } : {}) },
+    weight: body.weight,
+  };
 }
 
 export function registerTypesRoutes(app) {
@@ -101,24 +109,38 @@ export function registerTypesRoutes(app) {
     { config: { roles: ["admin"] } },
     async (request, reply) => {
       const { id } = request.params;
-      if (isBuiltinTypeId(id))
-        return reply.code(400).send({ error: "builtin_type", message: "코드 타입 · 미분류는 고칠 수 없습니다" });
+      if (id === UNCLASSIFIED.id)
+        return reply.code(400).send({ error: "builtin_type", message: "미분류는 고칠 수 없습니다" });
+      if (isBuiltinTypeId(id)) {
+        const body = request.body;
+        const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+        if (keys.length !== 1 || keys[0] !== "weight")
+          return reply.code(400).send({ error: "builtin_type", message: "코드 타입은 weight 만 고칠 수 있습니다" });
+        if (!isWeight(body.weight)) return reply.code(400).send({ error: "invalid_body", details: [WEIGHT_ERROR] });
+        const result = await write(request, (file) => {
+          file.weights = { ...(file.weights ?? {}), [id]: body.weight };
+          return { file, message: `타입 고침 ${id}` };
+        });
+        return reply.code(result.status).send(result.body);
+      }
       if (!TYPE_ID_RE.test(id))
         return reply.code(400).send({ error: "invalid_type_id", message: "id 는 ^[a-z][a-z0-9-]*$ 입니다" });
       if (RESERVED_TYPE_IDS.has(id))
         return reply.code(409).send({ error: "reserved_type_id", message: `${id} 는 예약어입니다` });
-      const { fields, errors } = typeFields(request.body);
+      const { fields, weight, errors } = typeFields(request.body);
       if (errors) return reply.code(400).send({ error: "invalid_body", details: errors });
 
       const result = await write(request, (file) => {
         const registered = file.registered ?? [];
         const at = registered.findIndex((t) => t.id === id);
         if (at >= 0) {
-          registered[at] = { id, ...fields, status: registered[at].status ?? "active" };
+          // A body without weight keeps the weight the type has.
+          const w = weight ?? registered[at].weight;
+          registered[at] = { id, ...fields, status: registered[at].status ?? "active", ...(w !== undefined ? { weight: w } : {}) };
           file.registered = registered;
           return { file, message: `타입 고침 ${id}` };
         }
-        registered.push({ id, ...fields, status: "active" });
+        registered.push({ id, ...fields, status: "active", ...(weight !== undefined ? { weight } : {}) });
         file.registered = registered;
         // A new type goes last, just before unclassified.
         file.order = [...(file.order ?? []).filter((x) => x !== id), id];

@@ -2,7 +2,7 @@
 // 종류 · 문서 · 상태 · 설명 · 동작) and a 408 form on the right. The order
 // is dragged (or moved with ↑ ↓ on the handle) and saved with 순서 저장;
 // 미분류 stays last. A registered type is edited or closed here; a code
-// type's fields live in code.
+// type's weight is edited here and its other fields live in code.
 import { api, invalidateDocs } from "../api.mjs";
 import { el, icon, toast } from "../dom.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
@@ -115,7 +115,7 @@ export async function renderTypes() {
         pinned
           ? el("span", { class: "dim", text: "늘 마지막" })
           : t.builtin
-            ? el("span", { class: "dim", text: "칸은 코드에서" })
+            ? el("button", { type: "button", class: "btn sm", text: "가중치", onclick: () => { editing = t.id; paintRows(); paintForm(); } })
             : [
                 el("button", { type: "button", class: "btn sm", text: "고치기", onclick: () => { editing = t.id; paintRows(); paintForm(); } }),
                 t.status === "archived"
@@ -175,8 +175,10 @@ export async function renderTypes() {
   function paintForm() {
     const t = editing ? byId.get(editing) : null;
     const isNew = !t;
+    const code = Boolean(t?.builtin);
     const id = el("input", { type: "text", class: "fld mono", placeholder: "meeting-note", "aria-label": "id", disabled: !isNew, value: t?.id ?? "" });
-    const label = el("input", { type: "text", class: "fld", placeholder: "회의록", maxlength: "40", "aria-label": "라벨", value: t?.label ?? "" });
+    const label = el("input", { type: "text", class: "fld", placeholder: "회의록", maxlength: "40", "aria-label": "라벨", disabled: code, value: t?.label ?? "" });
+    const weight = el("input", { type: "number", class: "fld mono", min: "-1", max: "1", step: "0.1", "aria-label": "가중치", value: String(t?.weight ?? 0) });
     const desc = el("input", { type: "text", class: "fld", placeholder: "FDC 주간 회의 기록", maxlength: "200", "aria-label": "설명 한 줄", value: t?.description ?? "" });
     let color = t?.color ?? PALETTE[5].color;
     const custom = el("input", { type: "text", class: "fld mono color-in", "aria-label": "색 직접 넣기 (#rrggbb)", value: color });
@@ -237,15 +239,16 @@ export async function renderTypes() {
     const f = el("form", { class: "types-f", novalidate: true }, [
       el("div", { class: "tf-h" }, isNew
         ? [el("b", { text: "새 타입" }), el("span", { class: "dim", text: "md 타입 — 본문은 이름과 md 한 장" })]
-        : [el("b", { text: `${t.label} 고치기` }), el("span", { class: "tag", text: "등록" }), el("span", { class: "mono dim", text: t.id })]),
+        : [el("b", { text: `${t.label} 고치기` }), el("span", { class: "tag", text: code ? "코드" : "등록" }), el("span", { class: "mono dim", text: t.id })]),
       el("div", { class: "tf-body panel-scroll" }, [
         field("id", id, isNew ? "영문 소문자 · 숫자 · 하이픈. 저장 뒤 고정" : "저장 뒤 고정된 값"),
-        field("라벨", label, "트리 · 칩 · 새 문서 메뉴에 보임"),
-        el("div", { class: "tf-row" }, [el("span", { class: "tf-k", text: "색" }), swatches, el("div", { class: "color-custom" }, [el("span", { class: "dim", text: "직접" }), custom]), colorNote]),
-        field("설명 한 줄", desc, "새 문서 메뉴에서 라벨 옆에 보임"),
+        field("라벨", label, code ? "코드 타입의 라벨은 코드에서 고칩니다" : "트리 · 칩 · 새 문서 메뉴에 보임"),
+        code ? null : el("div", { class: "tf-row" }, [el("span", { class: "tf-k", text: "색" }), swatches, el("div", { class: "color-custom" }, [el("span", { class: "dim", text: "직접" }), custom]), colorNote]),
+        code ? null : field("설명 한 줄", desc, "새 문서 메뉴에서 라벨 옆에 보임"),
+        field("가중치", weight, "검색 가산점 -1 ~ 1. 0 은 그대로입니다. 1 은 순위표마다 k 위 조각을 1 위로 올리는 만큼 더합니다. 음수는 그만큼 뺍니다"),
         isNew ? null : el("div", { class: "tf-row" }, [el("span", { class: "tf-k", text: "순서" }), el("div", { class: "fld ro", text: posOf(t.id) }), el("span", { class: "dim fhint", text: "표에서 ⋮⋮ 를 끌어 바꿉니다. 미분류는 늘 마지막" })]),
         isNew ? null : el("div", { class: "tf-row" }, [el("span", { class: "tf-k", text: "이 타입의 문서" }), el("div", { class: "fld ro", text: String(t.count ?? 0) })]),
-        preview,
+        code ? null : preview,
         errors,
       ]),
       el("div", { class: "tf-foot" }, [
@@ -263,8 +266,10 @@ export async function renderTypes() {
         else if (RESERVED.has(tid)) problems.push(`${tid} 는 예약어입니다`);
         else if (byId.has(tid)) problems.push(`${tid} 타입이 이미 있습니다`);
       }
-      if (!label.value.trim()) problems.push("라벨이 비었습니다");
-      if (!COLOR_RE.test(color)) problems.push("색은 #rrggbb 입니다");
+      if (!code && !label.value.trim()) problems.push("라벨이 비었습니다");
+      if (!code && !COLOR_RE.test(color)) problems.push("색은 #rrggbb 입니다");
+      const w = weight.valueAsNumber;
+      if (!(w >= -1 && w <= 1)) problems.push("가중치는 -1 ~ 1 의 수입니다");
       if (problems.length) {
         errors.replaceChildren(...problems.map((p) => el("li", { text: p })));
         errors.hidden = false;
@@ -274,7 +279,7 @@ export async function renderTypes() {
       const r = await api(`/api/types/${encodeURIComponent(tid)}`, {
         method: "PUT",
         headers: TYPES_REV ? { "if-match": TYPES_REV } : {},
-        body: { label: label.value.trim(), color, ...(desc.value.trim() ? { description: desc.value.trim() } : {}) },
+        body: code ? { weight: w } : { label: label.value.trim(), color, ...(desc.value.trim() ? { description: desc.value.trim() } : {}), weight: w },
       });
       save.disabled = false;
       if (!r.ok) {
