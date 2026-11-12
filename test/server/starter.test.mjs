@@ -12,6 +12,8 @@ import { signIn, as } from "../sign-in.mjs";
 
 const EXAMPLES = new URL("../../examples/", import.meta.url);
 const example = (p) => JSON.parse(readFileSync(new URL(p, EXAMPLES), "utf8"));
+const FLOW = new URL("../fixtures/flow/", import.meta.url);
+const flowMd = (p) => readFileSync(new URL(p, FLOW), "utf8");
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-starter-"));
@@ -221,7 +223,56 @@ test("starter: a table only a starter reads stays 기타 — 주요 · 쓰는 �
     assert.deepEqual(byId.fdc_chamber.usedBy, []);
     assert.equal((await t.call("GET", "/api/docs/db-schema/fdc_setup_event")).json().major, false);
     const facts = (await t.call("GET", "/api/flow-facts")).json().mds;
-    assert.deepEqual(facts.map((m) => m.type), ["domain-skill"]);
+    assert.deepEqual(facts.map((m) => m.type), ["domain-skill", "starter"]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("starter: its active items are registered queries — /api/flow-facts carries them and an agent md's flow may point at them", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "eqp-scope", flowMd("skills/eqp-scope.md")))).statusCode, 201);
+    assert.equal((await t.call("POST", "/api/docs/starter", starter("eqp-basics", flowMd("starter-ref/eqp-basics.md")))).statusCode, 201);
+    const gone = `# 옛\n\n## 데이터\n\n### old_row — 행\n\n${fence("SELECT * FROM T WHERE EQP_ID = :eqp_id")}\n`;
+    assert.equal((await t.call("POST", "/api/docs/starter", starter("old-basics", gone, "archived"))).statusCode, 201);
+    assert.equal((await t.call("POST", "/api/docs/starter", starter("off-basics", gone.replace("old_row", "off_row"), "inactive"))).statusCode, 201);
+
+    const facts = await t.call("GET", "/api/flow-facts");
+    assert.equal(facts.statusCode, 200);
+    assert.deepEqual(facts.json().mds.map((m) => [m.type, m.id]), [["domain-skill", "eqp-scope"], ["starter", "eqp-basics"]]);
+    assert.deepEqual(facts.json().mds[1], { type: "starter", id: "eqp-basics", markdown: flowMd("starter-ref/eqp-basics.md") });
+
+    const check = flowMd("starter-ref/interlock-check.md");
+    const nowhere = await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "interlock-check", check.replace("eqp_info --> interlock_data", "old_row --> interlock_data")));
+    assert.equal(nowhere.statusCode, 400, nowhere.body);
+    assert.equal(nowhere.json().error, "flow_rejected");
+    assert.equal(nowhere.json().errors[0].code, "UNKNOWN_ID", "an archived starter's item is not registered");
+    const created = await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "interlock-check", check));
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(created.json().flowWarnings, undefined);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("starter: a write that takes a referenced item away is saved and names the agent md it breaks, as an agent md's would", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "eqp-scope", flowMd("skills/eqp-scope.md")))).statusCode, 201);
+    const basics = flowMd("starter-ref/eqp-basics.md");
+    assert.equal((await t.call("POST", "/api/docs/starter", starter("eqp-basics", basics))).statusCode, 201);
+    assert.equal((await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "interlock-check", flowMd("starter-ref/interlock-check.md")))).statusCode, 201);
+
+    const renamed = await t.put("starter", "eqp-basics", { name: "eqp-basics", markdown: basics.replace("eqp_info", "eqp_row") });
+    assert.equal(renamed.statusCode, 200, renamed.body);
+    assert.deepEqual(renamed.json().flowWarnings.map((w) => [w.md, w.errors[0].code]), [["interlock-check", "UNKNOWN_ID"]]);
+
+    const back = await t.put("starter", "eqp-basics", { name: "eqp-basics", markdown: basics });
+    assert.equal(back.json().flowWarnings, undefined);
+    const off = await t.call("POST", "/api/docs/starter/eqp-basics/deactivate", undefined, { "if-match": back.json().rev });
+    assert.equal(off.statusCode, 200, off.body);
+    assert.deepEqual(off.json().flowWarnings.map((w) => w.md), ["interlock-check"]);
   } finally {
     await t.cleanup();
   }

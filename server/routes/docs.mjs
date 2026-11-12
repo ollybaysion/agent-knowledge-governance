@@ -53,7 +53,7 @@ import {
 } from "../links.mjs";
 import { columnsOf } from "../catalog.mjs";
 import { tableUses } from "../../src/table-class.mjs";
-import { addOwner, agentRegistry, dataIdOwners, tableClass, tableClassOf, tableKinds } from "../data-ids.mjs";
+import { addOwner, agentRegistry, dataIdOwners, isRegistryType, tableClass, tableClassOf, tableKinds } from "../data-ids.mjs";
 import { queryWarnings, STARTER, starterView } from "../../src/starter.mjs";
 import { hasGroup } from "../auth.mjs";
 import { etagOf, noneMatchHits } from "../etag.mjs";
@@ -233,10 +233,11 @@ export function registerDocsRoutes(app) {
 
   // What the consumer would leave out once the store holds this write: the
   // doc's own flow errors refuse it (400), the other agent mds it breaks come
-  // back as flowWarnings. Run inside the queue: the other side is in the store.
+  // back as flowWarnings. A starter has no flow: its write only breaks others.
+  // Run inside the queue: the other side is in the store.
   // `doc` null = the document leaves the store.
   const flowCheck = (type, id, doc) =>
-    type === "domain-skill" || type === "domain"
+    isRegistryType(type)
       ? saveCheck(agentRegistry(storeDir), { type, id, markdown: doc?.body?.markdown ?? null, active: doc?.status === "active" })
       : null;
   const flowRefusal = (check) =>
@@ -579,8 +580,9 @@ export function registerDocsRoutes(app) {
     },
   );
 
-  // The agent mds the consumer registers (active domain-skill and domain), for
-  // the editor to run the save's flow check before it saves (src/flow/agent-md.mjs).
+  // The agent mds the consumer registers (active domain-skill and domain) and
+  // the active starters, for the editor to run the save's flow check before it
+  // saves (src/flow/agent-md.mjs).
   app.get("/api/flow-facts", { config: { roles: ["user", "agent"] } }, async () => ({ mds: agentRegistry(storeDir) }));
 
   // A person who writes may file an unclassified document; every other type is
@@ -1362,9 +1364,9 @@ export function registerDocsRoutes(app) {
         async () => {
           const closed = closedType(type);
           if (closed) return closed;
-          // The agent mds as the commit will leave them: each one turned on
-          // joins, so the next one's flow check sees it.
-          const registry = type === "domain-skill" || type === "domain" ? agentRegistry(storeDir) : null;
+          // The agent mds and starters as the commit will leave them: each
+          // one turned on joins, so the next one's flow check sees it.
+          const registry = isRegistryType(type) ? agentRegistry(storeDir) : null;
           const results = [];
           const docs = [];
           for (const { id, rev } of items) {

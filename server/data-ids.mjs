@@ -3,7 +3,7 @@ import { skillDataIds } from "../src/skill-data-ids.mjs";
 import { coverageOf } from "../src/table-class.mjs";
 import { listIds, readJson } from "./store.mjs";
 
-// The agent mds: the documents whose 조회 count for 주요 · 쓰는 조회 and the flow check.
+// The agent mds: the documents whose 조회 count for 주요 · 쓰는 조회 and whose flow is checked.
 const AGENT_TYPES = ["domain-skill", "domain"];
 // The types whose md carries a ## 데이터 section the consumer reads: one query
 // id across all of them.
@@ -48,14 +48,18 @@ export function dataIdOwners(storeDir, selfId, selfType = null) {
   return owners;
 }
 
+/** A type whose active documents are in {@link agentRegistry}: a save of one runs the flow check. */
+export const isRegistryType = (type) => DATA_ID_TYPES.includes(type);
+
 /**
- * The active domain-skill and domain documents — the agent mds the consumer
- * registers, in store order. Read on each call, like dataIdOwners.
+ * The active domain-skill, domain and starter documents — the agent mds the
+ * consumer registers and the starters whose items their flows may point at,
+ * in store order. Read on each call, like dataIdOwners.
  * @returns {{type: string, id: string, markdown: string}[]}
  */
 export function agentRegistry(storeDir) {
   const out = [];
-  for (const type of AGENT_TYPES) {
+  for (const type of DATA_ID_TYPES) {
     for (const id of listIds(storeDir, type)) {
       let doc;
       try {

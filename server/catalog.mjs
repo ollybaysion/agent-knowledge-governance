@@ -217,7 +217,7 @@ export function createCatalog(storeDir, types) {
         for (const f of byLinker.get(t)?.sort() ?? NONE) out.push([t, f.slice(0, -".json".length)]);
       return out;
     },
-    /** The active domain-skill and domain documents with their markdown, as agentRegistry lists them. */
+    /** The active domain-skill and domain documents with their markdown, as agentRegistry lists them (its starters left out). */
     agents() {
       const out = [];
       for (const type of AGENT_TYPES)
