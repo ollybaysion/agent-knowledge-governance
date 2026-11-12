@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFiles, flowRejections, readAgentMd, saveCheck, INPUT_HINT } from "../../src/flow/agent-md.mjs";
+import { checkFiles, flowRejections, readAgentMd, readStarter, saveCheck, INPUT_HINT } from "../../src/flow/agent-md.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "flow");
 const file = (rel) => ({ path: rel.split("/").pop(), text: readFileSync(join(FIXTURES, rel), "utf8") });
@@ -305,6 +305,71 @@ test("저장 검사: 자기 오류를 내고, 저장으로 깨지는 다른 md �
   const lone = saveCheck([scope], { ...spec, active: true });
   assert.deepEqual(lone.errors.map((e) => e.code), ["UNKNOWN_ID", "UNSOURCED_VAR"]);
   assert.deepEqual(lone.broken, []);
+});
+
+// ---- a starter's items as registered queries (test/fixtures/flow/starter-ref, the BE PR's example)
+const starterRef = () => ({
+  scope: doc("eqp-scope", file("skills/eqp-scope.md").text),
+  basics: doc("eqp-basics", file("starter-ref/eqp-basics.md").text, "starter"),
+  check: doc("interlock-check", file("starter-ref/interlock-check.md").text),
+});
+const flowCodes = (r) => r.errors.map((e) => e.code);
+
+test("저장 검사: 조회 노드가 starter 항목을 가리키면 통과하고, 어디에도 없는 id 는 UNKNOWN_ID 다", () => {
+  const { scope, basics, check } = starterRef();
+  assert.deepEqual(saveCheck([scope, basics], { ...check, active: true }), { errors: [], fenceLine: 9, broken: [] });
+  const nowhere = check.markdown.replaceAll("eqp_info", "nope_info");
+  assert.deepEqual(flowCodes(saveCheck([scope, basics], { ...check, markdown: nowhere, active: true }))[0], "UNKNOWN_ID");
+  // a starter is no md a flow node points at
+  const asFlow = check.markdown.replace("eqp-scope --> eqp_info", "eqp-scope --> eqp_info\n  eqp-basics[[설비 바탕]] --> interlock_data");
+  assert.deepEqual(flowCodes(saveCheck([scope, basics], { ...check, markdown: asFlow, active: true })), ["UNKNOWN_ID"]);
+});
+
+test("저장 검사: 참조한 starter 항목의 바인드는 이 문서의 흐름에서 채운다 — 앞줄이 없으면 UNSOURCED_VAR", () => {
+  const { scope, basics, check } = starterRef();
+  const bare = check.markdown.replace("  eqp-scope[[설비 범위]]\n  eqp-scope --> eqp_info\n", "");
+  const r = saveCheck([scope, basics], { ...check, markdown: bare, active: true });
+  assert.deepEqual(r.errors.map((e) => e.message), ["eqp_info 의 :eqp_id 를 채울 입력이 없다"]);
+  assert.deepEqual(flowCodes(r), ["UNSOURCED_VAR"]);
+});
+
+test("저장 검사: 뒤 조회의 바인드를 starter 항목의 열이 채우고, 열에 없는 바인드는 UNSOURCED_VAR 다", () => {
+  const { scope, basics, check } = starterRef();
+  const listed = { ...basics, markdown: basics.markdown.replace("select *", "select eqp_id, model_id") };
+  assert.deepEqual(flowCodes(saveCheck([scope, listed], { ...check, active: true })), ["UNSOURCED_VAR", "UNSOURCED_VAR"], "start_time · end_time: no column");
+  const timed = check.markdown.replace(" and event_time between :start_time and :end_time", "");
+  assert.deepEqual(saveCheck([scope, listed], { ...check, markdown: timed, active: true }).errors, []);
+  const recipe = timed.replace("model_id = :model_id", "recipe_id = :recipe_id");
+  const r = saveCheck([scope, listed], { ...check, markdown: recipe, active: true });
+  assert.deepEqual(r.errors.map((e) => e.message), ["interlock_data 의 :recipe_id 를 채울 입력이 없다"]);
+});
+
+test("저장 검사: starter 를 고치거나 빼서 참조된 항목이 사라지면 저장은 되고, 깨지는 md 를 알린다", () => {
+  const { scope, basics, check } = starterRef();
+  const registry = [scope, basics, check];
+  const renamed = basics.markdown.replace("eqp_info", "eqp_row");
+  for (const self of [{ ...basics, markdown: renamed, active: true }, { ...basics, markdown: null, active: false }]) {
+    const r = saveCheck(registry, self);
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.fenceLine, 0);
+    assert.deepEqual(r.broken.map((b) => b.md), ["interlock-check"]);
+    assert.equal(r.broken[0].errors[0].code, "UNKNOWN_ID");
+  }
+  // the same as an agent md's query that goes away
+  const asAgent = doc("eqp-basics", basics.markdown.replace("## 데이터\n", "## 데이터\n\n```mermaid\nflowchart TD\n  eqp_id([설비]) --> eqp_info\n```\n"));
+  const r = saveCheck([scope, asAgent, check], { ...asAgent, markdown: null, active: false });
+  assert.deepEqual(r.broken.map((b) => b.md), ["interlock-check"]);
+  assert.equal(r.broken[0].errors[0].code, "UNKNOWN_ID");
+});
+
+test("readStarter: BE 처럼 항목을 읽고, 변환 항목 · 빈 문서는 읽지 않는다", () => {
+  const r = readStarter("eqp-basics", file("starter-ref/eqp-basics.md").text);
+  assert.equal(r.rejection, null);
+  assert.deepEqual(r.queries.map((q) => [q.id, q.vars]), [["eqp_info", ["eqp_id"]]]);
+  assert.equal(readStarter("m", "# m\n\n## 데이터\n\n### m_row — 행\n\n```map\na = b\n```\n").rejection, "m: 첫 선택 데이터 문서에는 변환 항목을 쓰지 않는다 — m_row");
+  const none = readStarter("e", "# e\n\n## 데이터\n\n글\n");
+  assert.equal(none.rejection, "e: ## 데이터 절에 항목이 없다");
+  assert.deepEqual(none.queries, []);
 });
 
 // ---- the map node (flow-map-node-spec.md): BE's map-node samples and their codes
