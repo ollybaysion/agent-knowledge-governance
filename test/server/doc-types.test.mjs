@@ -85,11 +85,11 @@ test("GET /api/types: a user reads the default list — code types, voc, unclass
     assert.equal(empty.json().rev, null);
     assert.deepEqual(empty.json().types.map((x) => x.id), DEFAULT_ORDER);
     const byId = Object.fromEntries(empty.json().types.map((x) => [x.id, x]));
-    assert.deepEqual(byId["db-schema"], { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", builtin: true, status: "active", count: 0 });
-    assert.deepEqual(byId.domain, { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", builtin: true, status: "active", count: 0 });
-    assert.deepEqual(byId.starter, { id: "starter", label: "첫 선택 데이터", color: "#c0623b", kind: "structured", builtin: true, status: "active", count: 0 });
-    assert.deepEqual(byId.voc, { id: "voc", label: "VOC", color: "#4e9a5a", kind: "md", builtin: false, status: "active", count: 0 });
-    assert.deepEqual(byId.unclassified, { id: "unclassified", label: "미분류", color: "#8a8f98", kind: "md", builtin: true, status: "active", count: 0 });
+    assert.deepEqual(byId["db-schema"], { id: "db-schema", label: "DB 스키마", color: "#3f7d8a", kind: "structured", builtin: true, status: "active", weight: 0, count: 0 });
+    assert.deepEqual(byId.domain, { id: "domain", label: "도메인", color: "#4f6d8a", kind: "structured", builtin: true, status: "active", weight: 0, count: 0 });
+    assert.deepEqual(byId.starter, { id: "starter", label: "첫 선택 데이터", color: "#c0623b", kind: "structured", builtin: true, status: "active", weight: 0, count: 0 });
+    assert.deepEqual(byId.voc, { id: "voc", label: "VOC", color: "#4e9a5a", kind: "md", builtin: false, status: "active", weight: 0, count: 0 });
+    assert.deepEqual(byId.unclassified, { id: "unclassified", label: "미분류", color: "#8a8f98", kind: "md", builtin: true, status: "active", weight: 0, count: 0 });
 
     assert.equal((await t.admin("POST", "/api/docs/db-schema", dbSchemaDoc())).statusCode, 201);
     const counted = (await t.call("reader", "GET", "/api/types")).json().types;
@@ -122,6 +122,7 @@ test("PUT /api/types/:id: admin registers an md type before unclassified in one 
       kind: "md",
       builtin: false,
       status: "active",
+      weight: 0,
       count: 0,
     });
     assert.match(r.json().rev, /^[0-9a-f]{40}$/);
@@ -161,6 +162,62 @@ test("PUT /api/types/:id: admin registers an md type before unclassified in one 
     assert.equal((await register(t, "notes", { label: " ", color: "#000000" })).statusCode, 400);
     assert.equal((await register(t, "notes", { label: "노트", color: "#000000", status: "archived" })).statusCode, 400);
     assert.equal((await register(t, "notes2", { label: "노트", color: "#7a4bd7" })).statusCode, 201, "colors may repeat; digits in an id");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("PUT /api/types/:id weight: a code type takes weight alone, an md type keeps it on edit; store · rendered · GET carry it", async () => {
+  const t = await setup();
+  try {
+    const before = t.commits();
+    const code = await t.admin("PUT", "/api/types/manual", { weight: 0.5 });
+    assert.equal(code.statusCode, 200, code.body);
+    assert.equal(t.commits(), before + 1);
+    assert.equal(t.lastMessage(), "타입 고침 manual");
+    const stored = JSON.parse(readFileSync(t.file("types.json"), "utf8"));
+    assert.deepEqual(stored.weights, { manual: 0.5 });
+    assert.deepEqual(stored.order, DEFAULT_ORDER.slice(0, -1), "the defaults are written as they were");
+    const byId = Object.fromEntries((await t.user("GET", "/api/types")).json().types.map((x) => [x.id, x]));
+    assert.equal(byId.manual.weight, 0.5);
+    assert.equal(byId.domain.weight, 0, "no weight reads as 0");
+    assert.equal(byId.voc.weight, 0);
+    assert.equal(byId.unclassified.weight, 0);
+    assert.equal(byId.manual.label, "매뉴얼", "a code type's label stays the code's");
+    const rendered = JSON.parse(readFileSync(t.file("rendered/types.json"), "utf8"));
+    assert.equal(rendered.types.find((x) => x.id === "manual").weight, 0.5);
+
+    const audit = (await t.user("GET", "/api/audit")).json().entries;
+    assert.equal(audit[0].message, "타입 고침 manual");
+
+    const created = await register(t, "notes", { label: "노트", color: "#7a4bd7", weight: -0.3 });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(created.json().types.find((x) => x.id === "notes").weight, -0.3);
+    const kept = await register(t, "notes", { label: "노트2", color: "#7a4bd7" });
+    assert.equal(kept.json().types.find((x) => x.id === "notes").weight, -0.3, "an edit without weight keeps it");
+    const changed = await register(t, "notes", { label: "노트2", color: "#7a4bd7", weight: 1 });
+    assert.equal(changed.json().types.find((x) => x.id === "notes").weight, 1);
+    const voc = await register(t, "voc", { label: "VOC", color: "#4e9a5a", weight: -1 });
+    assert.equal(voc.json().types.find((x) => x.id === "voc").weight, -1);
+
+    for (const weight of [1.1, -1.5, "0.5", null, true, [0.5]]) {
+      const b = await t.admin("PUT", "/api/types/manual", { weight });
+      assert.equal(b.statusCode, 400, JSON.stringify(weight));
+      assert.equal(b.json().error, "invalid_body");
+      const m = await register(t, "notes", { label: "노트", color: "#7a4bd7", weight });
+      assert.equal(m.statusCode, 400, JSON.stringify(weight));
+      assert.equal(m.json().error, "invalid_body");
+    }
+    for (const body of [{ weight: 0.5, label: "x" }, { label: "x", color: "#000000" }, {}]) {
+      const b = await t.admin("PUT", "/api/types/manual", body);
+      assert.equal(b.statusCode, 400, JSON.stringify(body));
+      assert.equal(b.json().error, "builtin_type");
+    }
+    assert.equal((await t.admin("PUT", "/api/types/unclassified", { weight: 0.5 })).json().error, "builtin_type");
+    assert.equal((await t.user("PUT", "/api/types/manual", { weight: 0.5 })).statusCode, 403);
+    const stale = await t.admin("PUT", "/api/types/manual", { weight: 0 }, { "if-match": code.json().rev });
+    assert.equal(stale.statusCode, 409);
+    assert.equal((await t.user("GET", "/api/types")).json().types.find((x) => x.id === "manual").weight, 0.5);
   } finally {
     await t.cleanup();
   }
