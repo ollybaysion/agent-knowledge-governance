@@ -1568,6 +1568,26 @@ h6.md-h {
   padding: 0;
   background: none;
 }
+/* ```sql 의 복사(md.mjs sqlBlock): 코드 오른쪽 위, 코드 위에 한 줄을 비워 가리지 않는다 */
+.md-code-wrap {
+  position: relative;
+}
+.md-code.has-copy {
+  padding-top: 38px;
+}
+.md-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+@media print {
+  .md-copy {
+    display: none;
+  }
+  .md-code.has-copy {
+    padding-top: 12px;
+  }
+}
 /* SQL 토큰(sql.mjs) — 키워드 · 문자열 · 숫자 · 주석 · 바인드, 표 · 열 바로가기 */
 .sql-kw {
   color: var(--primary-active);

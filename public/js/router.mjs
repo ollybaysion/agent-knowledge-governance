@@ -22,6 +22,17 @@ window.addEventListener("hashchange", () => {
   current = location.hash;
   route();
 });
+/**
+ * The boot's first screen. An address with ?from · ?embed · ?section (a link
+ * from FE) opens as it came. Any other address opens the overview: the hash
+ * the browser kept from the last visit is dropped.
+ */
+export function startAtHome() {
+  const q = new URLSearchParams(location.search);
+  if (["from", "embed", "section"].some((k) => q.has(k))) return;
+  if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
+  current = location.hash;
+}
 window.addEventListener("beforeunload", (e) => {
   if (guard?.()) {
     e.preventDefault();

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { FAVORITE_CAP, RECENT_CAP, isFavorite, liveShelf, readShelf, toggleFavorite, touchRecent, writeShelf } from "../../public/lib/shelf.mjs";
-import { deleteConfirmText, docRows, move, rowTier, typeRows } from "../../public/lib/miller.mjs";
+import { deleteConfirmText, docRows, keepOrder, move, nextAfterDelete, rowTier, typeRows } from "../../public/lib/miller.mjs";
 
 function memory() {
   const m = new Map();
@@ -114,4 +114,20 @@ test("the 삭제 confirm names the title, the type and the documents whose links
     deleteConfirmText("알람 이력", "DB 스키마", 3),
     '"알람 이력"(DB 스키마) 을 삭제합니다. 저장소에서 파일이 지워지고 git 이력에만 남습니다. 이 문서를 가리키는 문서 3개의 연결을 함께 지웁니다.',
   );
+});
+
+test("a reload keeps the rows in the order the list drew them; a new row goes first", () => {
+  const rows = [{ id: "c" }, { id: "new" }, { id: "a" }, { id: "b" }];
+  assert.deepEqual(keepOrder(rows, ["a", "b", "c"]).map((d) => d.id), ["new", "a", "b", "c"]);
+  // A row gone since the last draw drops out; the others keep their places.
+  assert.deepEqual(keepOrder([{ id: "c" }, { id: "a" }], ["a", "b", "c"]).map((d) => d.id), ["a", "c"]);
+  assert.equal(keepOrder(rows, null), rows);
+});
+
+test("삭제 opens the row under the deleted one, else the one above; the last one opens nothing", () => {
+  const keys = ["voc/a", "voc/b", "voc/c"];
+  assert.equal(nextAfterDelete(keys, "voc/b"), "voc/c");
+  assert.equal(nextAfterDelete(keys, "voc/c"), "voc/b");
+  assert.equal(nextAfterDelete(["voc/a"], "voc/a"), null);
+  assert.equal(nextAfterDelete(keys, "voc/z"), null);
 });

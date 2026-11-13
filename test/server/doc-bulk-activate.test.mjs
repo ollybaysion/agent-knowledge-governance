@@ -1,5 +1,6 @@
-// POST /api/docs/:type/activate — the 문서 list's 활성화: several documents
-// of one type on at once, the ones that pass in one commit.
+// POST /api/docs/:type/activate · …/deactivate — the 문서 list's 활성화 ·
+// 비활성화: several documents of one type on or off at once, the ones that
+// pass in one commit.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -59,10 +60,10 @@ async function create(app, payload) {
   return res.json().rev;
 }
 
-const activate = (app, payload, token = "adtok", type = "db-schema") =>
+const activate = (app, payload, token = "adtok", type = "db-schema", action = "activate") =>
   app.inject({
     method: "POST",
-    url: `/api/docs/${type}/activate`,
+    url: `/api/docs/${type}/${action}`,
     headers: as(token),
     payload,
   });
@@ -108,6 +109,7 @@ test("activateItems takes 1 to ACTIVATE_MAX distinct {id, rev}", () => {
 test("the screen splits at the server's limit; a commit message lists 20 ids, then how many more", () => {
   assert.equal(ACTIVATE_MAX, ACTIVATE_CHUNK);
   assert.equal(activateMessage("db-schema", ["a", "b"]), "activate 2 db-schema: a, b");
+  assert.equal(activateMessage("db-schema", ["a"], "deactivate"), "deactivate 1 db-schema: a");
   const many = Array.from({ length: 25 }, (_, i) => `d${i}`);
   assert.equal(
     activateMessage("voc", many),
@@ -230,6 +232,59 @@ test("an archived document is refused as the single route refuses it; nothing to
       activated: 0,
     });
     assert.equal(commits(storeDir), before);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("비활성화: the active ones go off in one commit; a stale rev, an inactive one, an archived one and a missing one come back in results", async () => {
+  const { app, storeDir, cleanup } = await setup();
+  try {
+    const a = await create(app, doc("a", "active"));
+    const b = await create(app, doc("b", "active"));
+    await create(app, doc("c", "active"));
+    const d = await create(app, doc("d"));
+    const x = await create(app, doc("x", "archived"));
+    assert.equal((await activate(app, { items: [{ id: "a", rev: a }] }, "agtok", "db-schema", "deactivate")).statusCode, 403);
+    assert.equal((await activate(app, { items: [] }, "adtok", "db-schema", "deactivate")).json().error, "invalid_body");
+    const before = commits(storeDir);
+
+    const res = await activate(
+      app,
+      {
+        items: [
+          { id: "a", rev: a },
+          { id: "c", rev: "0".repeat(40) },
+          { id: "d", rev: d },
+          { id: "x", rev: x },
+          { id: "b", rev: b },
+          { id: "zz", rev: a },
+        ],
+      },
+      "adtok",
+      "db-schema",
+      "deactivate",
+    );
+    assert.equal(res.statusCode, 200, res.payload);
+    const body = res.json();
+    assert.equal(body.deactivated, 2);
+    assert.deepEqual(
+      body.results.map(({ id, status, error }) => ({ id, status, ...(error ? { error } : {}) })),
+      [
+        { id: "a", status: "inactive" },
+        { id: "c", status: "error", error: "unknown_base_rev" },
+        { id: "d", status: "skipped", error: "already_inactive" },
+        { id: "x", status: "error", error: "doc_archived" },
+        { id: "b", status: "inactive" },
+        { id: "zz", status: "error", error: "not_found" },
+      ],
+    );
+    assert.equal(commits(storeDir), before + 1);
+    const message = spawnSync("git", ["-C", storeDir, "log", "-1", "--format=%s"], { encoding: "utf8" }).stdout.trim();
+    assert.equal(message, "deactivate 2 db-schema: a, b");
+    assert.equal(md(storeDir, "a"), false);
+    assert.equal(md(storeDir, "b"), false);
+    assert.equal(md(storeDir, "c"), true);
   } finally {
     await cleanup();
   }

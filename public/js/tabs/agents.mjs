@@ -11,11 +11,16 @@ import { draftLinks } from "./docs.mjs";
 
 export const isMain = (d) => d.type === "domain-skill" && (d.role ?? "main") === "main";
 
-/** The agent list panel; `selected` = the open agent's id. */
-export function agentPanel(selected, draftId = null) {
+/**
+ * The agent list panel; `selected` = the open agent's id. `kept` = the search
+ * and the list's scroll before a reload ({@link keepAgentPanel}), drawn back.
+ */
+export function agentPanel(selected, draftId = null, kept = null) {
   const list = el("ul", { class: "alist", "aria-label": "에이전트" });
   const count = el("span", { class: "count-pill" });
+  const scroller = el("div", { class: "panel-scroll" }, [draftLinks("domain-skill", { role: "main", current: draftId }), list]);
   const search = el("input", { type: "search", class: "psearch", placeholder: "에이전트 찾기 — id · 이름", "aria-label": "에이전트 찾기", autocomplete: "off" });
+  if (kept?.query) search.value = kept.query;
   let rows = [];
   function paint() {
     const q = search.value.trim().toLowerCase();
@@ -28,6 +33,7 @@ export function agentPanel(selected, draftId = null) {
             return el("li", {}, el("a", {
               class: `arow${d.id === selected ? " on" : ""}${d.status === "inactive" ? " off" : ""}`,
               href: `#/doc/domain-skill/${encodeURIComponent(d.id)}`,
+              "data-key": `domain-skill/${d.id}`,
               ...(d.id === selected ? { "aria-current": "page" } : {}),
             }, [
               el("span", { class: "badge-main", text: "메인" }),
@@ -50,11 +56,12 @@ export function agentPanel(selected, draftId = null) {
     rows = docs.filter(isMain).sort((a, b) => a.id.localeCompare(b.id));
     count.textContent = String(rows.length);
     paint();
+    if (kept?.scrollTop) requestAnimationFrame(() => (scroller.scrollTop = kept.scrollTop));
   });
   return panel("left agent-panel", [
     el("div", { class: "psearch-w" }, [icon("search", 15), search]),
     el("div", { class: "plabel agent-h" }, [el("span", {}, ["에이전트 ", count]), el("span", { class: "dim mono", text: "domain-skill · main" })]),
-    el("div", { class: "panel-scroll" }, [draftLinks("domain-skill", { role: "main", current: draftId }), list]),
+    scroller,
     el("div", { class: "panel-foot" }, [
       el("div", { class: "legend-score" }, [
         el("span", { class: "dim", text: "점 = Score 구간" }),
@@ -67,6 +74,15 @@ export function agentPanel(selected, draftId = null) {
     ]),
   ], "에이전트 목록");
 }
+
+/** The agent panel's rows as drawn, as keys "domain-skill/id". */
+export const agentKeys = (node) => [...node.querySelectorAll(".alist [data-key]")].map((n) => n.dataset.key);
+
+/** What a reload keeps of an agent panel: the search and the list's scroll. */
+export const keepAgentPanel = (node) => ({
+  query: node.querySelector("input.psearch")?.value ?? "",
+  scrollTop: node.querySelector(".panel-scroll")?.scrollTop ?? 0,
+});
 
 /** #/agents: the first agent opens; with none, an empty body beside the list. */
 export async function renderAgents() {

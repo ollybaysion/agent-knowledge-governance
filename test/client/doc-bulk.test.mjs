@@ -6,6 +6,7 @@ import {
   DIALOG_NAMES,
   activateRequests,
   activateToast,
+  bulkActions,
   dialogNames,
   headState,
   pickable,
@@ -40,31 +41,39 @@ const TAGGED = [
   row("t3", "inactive", { type: "db-schema" }),
 ];
 
-test("only an inactive row gets a box; a pick is kept under type/id", () => {
+test("an active or inactive row gets a box, an archived one none; a pick is kept under type/id", () => {
   assert.deepEqual(
     ROWS.map((d) => pickable(d)),
-    [true, false, true, false, true],
+    [true, true, true, false, true],
   );
-  assert.deepEqual(pickableKeys(ROWS), ["voc/a", "voc/c", "voc/e"]);
+  assert.deepEqual(pickableKeys(ROWS), ["voc/a", "voc/b", "voc/c", "voc/e"]);
   assert.equal(rowKey(TAGGED[2]), "manual/a");
-  assert.deepEqual(pickableKeys(TAGGED), ["voc/a", "db-schema/t1", "manual/a", "db-schema/t3"]);
+  assert.deepEqual(pickableKeys(TAGGED), ["voc/a", "db-schema/t1", "manual/a", "db-schema/t2", "db-schema/t3"]);
 });
 
-test("the head box: none · some (indeterminate) · all over the visible inactive rows", () => {
+test("the head box: none · some (indeterminate) · all over the visible active and inactive rows", () => {
   assert.equal(headState(ROWS, new Set()), "none");
   assert.equal(headState(ROWS, new Set(["voc/c"])), "some");
-  assert.equal(headState(ROWS, new Set(["voc/a", "voc/c", "voc/e"])), "all");
-  assert.equal(headState([row("b", "active")], new Set()), "none");
+  assert.equal(headState(ROWS, new Set(["voc/a", "voc/c", "voc/e"])), "some");
+  assert.equal(headState(ROWS, new Set(["voc/a", "voc/b", "voc/c", "voc/e"])), "all");
+  assert.equal(headState([row("d", "archived")], new Set()), "none");
 });
 
-test("a press on the head box picks every visible inactive row, the next one drops them", () => {
+test("a press on the head box picks every visible active and inactive row, the next one drops them", () => {
   const all = toggleAll(ROWS, new Set(["voc/c"]));
-  assert.deepEqual([...all], ["voc/a", "voc/c", "voc/e"]);
+  assert.deepEqual([...all], ["voc/a", "voc/b", "voc/c", "voc/e"]);
   assert.deepEqual([...toggleAll(ROWS, all)], []);
   // A tag or filter leaves fewer rows: the head box picks those only.
-  assert.deepEqual([...toggleAll([row("c"), row("b", "active")], new Set())], ["voc/c"]);
-  // A tag's list: the inactive rows of every type.
-  assert.deepEqual([...toggleAll(TAGGED, new Set())], ["voc/a", "db-schema/t1", "manual/a", "db-schema/t3"]);
+  assert.deepEqual([...toggleAll([row("c"), row("d", "archived")], new Set())], ["voc/c"]);
+  // A tag's list: the rows of every type.
+  assert.deepEqual([...toggleAll(TAGGED, new Set())], ["voc/a", "db-schema/t1", "manual/a", "db-schema/t2", "db-schema/t3"]);
+});
+
+test("the band shows 활성화 for a picked inactive row and 비활성화 for a picked active one", () => {
+  assert.deepEqual(bulkActions(ROWS, new Set()), []);
+  assert.deepEqual(bulkActions(ROWS, new Set(["voc/a", "voc/c"])), ["activate"]);
+  assert.deepEqual(bulkActions(ROWS, new Set(["voc/b"])), ["deactivate"]);
+  assert.deepEqual(bulkActions(ROWS, new Set(["voc/a", "voc/b"])), ["activate", "deactivate"]);
 });
 
 test("a row box toggles its key and leaves the old set alone", () => {
@@ -75,12 +84,12 @@ test("a row box toggles its key and leaves the old set alone", () => {
   assert.deepEqual([...togglePicked(after, "voc/a")], ["voc/c"]);
 });
 
-test("the picks drop when column 2 shows another list, and keep the still-inactive rows of the same one", () => {
+test("the picks drop when column 2 shows another list, and keep the still-pickable rows of the same one", () => {
   const prev = { scope: "voc", keys: new Set(["voc/a", "voc/c"]) };
   assert.deepEqual([...picksFor(prev, "manual", ROWS).keys], []);
   assert.equal(picksFor(prev, "manual", ROWS).scope, "manual");
-  // c went active meanwhile: the same type keeps a only.
-  const now = [row("a"), row("c", "active")];
+  // c was archived meanwhile: the same type keeps a only.
+  const now = [row("a"), row("c", "archived")];
   assert.deepEqual([...picksFor(prev, "voc", now).keys], ["voc/a"]);
   assert.deepEqual([...picksFor(null, "voc", ROWS).keys], []);
   // A tag's list is its own scope: leaving it for a type starts empty, coming back keeps.
@@ -113,9 +122,19 @@ test("the requests: one per type in the list's order, each row's id and list rev
   assert.deepEqual(activateRequests(ROWS, new Set()), []);
 });
 
+test("비활성화 sends the picked active rows only, to …/deactivate one per type", () => {
+  assert.deepEqual(activateRequests(ROWS, new Set(["voc/a", "voc/b"]), "deactivate"), [
+    { type: "voc", items: [{ id: "b", rev: "rev-b" }] },
+  ]);
+  assert.deepEqual(activateRequests(TAGGED, new Set(pickableKeys(TAGGED)), "deactivate"), [
+    { type: "db-schema", items: [{ id: "t2", rev: "rev-t2" }] },
+  ]);
+  assert.deepEqual(activateRequests(ROWS, new Set(["voc/a"]), "deactivate"), []);
+});
+
 test("more rows of a type than one request carries go in turns of the chunk", () => {
   const many = Array.from({ length: 2 * ACTIVATE_CHUNK + 3 }, (_, i) => row(`d${i}`));
-  const reqs = activateRequests(many, new Set(pickableKeys(many)));
+  const reqs = activateRequests(many, new Set(pickableKeys(many)), "activate");
   assert.deepEqual(
     reqs.map((r) => [r.type, r.items.length]),
     [
@@ -126,7 +145,7 @@ test("more rows of a type than one request carries go in turns of the chunk", ()
   );
   assert.equal(reqs[1].items[0].id, `d${ACTIVATE_CHUNK}`);
   // A small chunk, to see the order kept across the turns.
-  const few = activateRequests(many.slice(0, 5), new Set(pickableKeys(many.slice(0, 5))), 2);
+  const few = activateRequests(many.slice(0, 5), new Set(pickableKeys(many.slice(0, 5))), "activate", 2);
   assert.deepEqual(
     few.map((r) => r.items.map((it) => it.id)),
     [["d0", "d1"], ["d2", "d3"], ["d4"]],
@@ -237,4 +256,27 @@ test("the toast adds the answers of several requests up; one refused says so and
     ]).text,
     "1 개 활성 · 1 개 실패 — 목록을 다시 읽으세요",
   );
+});
+
+test("the 비활성화 toast counts `deactivated` and names the state the rows end in", () => {
+  const ok = (results, deactivated) => ({ status: 200, data: { results, deactivated } });
+  assert.deepEqual(
+    activateToast(
+      [
+        ok(
+          [
+            { id: "b", status: "inactive" },
+            { id: "c", status: "skipped", error: "already_inactive" },
+          ],
+          1,
+        ),
+      ],
+      "deactivate",
+    ),
+    { text: "1 개 비활성 · 1 개는 이미 비활성 — 다음 동기화부터 빠집니다.", error: false },
+  );
+  assert.deepEqual(activateToast([{ status: 403, data: { error: "forbidden" } }], "deactivate"), {
+    text: "비활성화 실패 (403) — forbidden",
+    error: true,
+  });
 });

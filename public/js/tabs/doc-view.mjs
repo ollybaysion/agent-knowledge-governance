@@ -7,7 +7,7 @@
 // A long db-schema floats 맨 위 · 맨 아래 at the bottom right.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
-import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
+import { inline, mdNodes, pictureFig, sqlBlock, wikiResolver } from "../md.mjs";
 import { assetsSection } from "/lib/doc-assets.mjs";
 import { examplesSection, msgFormatSections } from "/lib/msg-examples.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
@@ -16,7 +16,6 @@ import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableC
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { inferredColumns, pickButton, slotFailText, TIER_FILTERS, tierCounts, tierShown, togglePick, withObject } from "/lib/column-bulk.mjs";
-import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
   evidence,
@@ -33,7 +32,7 @@ import {
 } from "../shared.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { answerSection, activeMdTypes, embed, canEdit as userCanEdit, currentUser, isAdmin, isMdType, loadTypes, setLastDoc, TYPE_LABEL, typeColor } from "../state.mjs";
-import { agentPanel } from "./agents.mjs";
+import { agentKeys, agentPanel, keepAgentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
@@ -41,7 +40,7 @@ import { pathPanel, showTag, typeLabel } from "./docs.mjs";
 import { addTag } from "/lib/tags.mjs";
 import { deleteDraftsOf } from "../drafts.mjs";
 import { refreshReviewCount } from "../review-count.mjs";
-import { deleteConfirmText } from "/lib/miller.mjs";
+import { deleteConfirmText, nextAfterDelete } from "/lib/miller.mjs";
 import { openLinksDialog } from "../links-edit.mjs";
 import { touch } from "../shelf.mjs";
 
@@ -50,6 +49,8 @@ const enc = encodeURIComponent;
 
 // The right panel tab the next open starts on (the graph opens 연결).
 let pendingTab = null;
+// The left list 삭제 hands to the document it opens next: {key, kept}.
+let pendingLeft = null;
 export function openDocWithPanel(type, id, tab) {
   pendingTab = tab;
   location.hash = `#/doc/${type}/${enc(id)}`;
@@ -72,8 +73,9 @@ export function docTitle(type, doc) {
 
 /**
  * Open a document. `opts.tab` = the right panel's first tab; `opts.keepScroll`
- * keeps the page where it was (a reload after a save); `opts.col` = a db-schema
- * column to scroll to and flash.
+ * keeps the page where it was (a reload after a save); `opts.left` = the left
+ * list as a reload found it (its order · scroll · search); `opts.col` = a
+ * db-schema column to scroll to and flash.
  */
 export async function renderDocScreen(type, id, opts = {}) {
   const ticket = ++docTicket;
@@ -81,6 +83,8 @@ export async function renderDocScreen(type, id, opts = {}) {
     opts = { ...opts, tab: pendingTab };
     pendingTab = null;
   }
+  if (opts.left === undefined && pendingLeft?.key === `${type}/${id}`) opts = { ...opts, left: pendingLeft.kept };
+  pendingLeft = null;
   const [res, docs] = await Promise.all([api(`/api/docs/${type}/${enc(id)}`), allDocs()]);
   if (ticket !== docTicket) return;
   if (!res.ok) {
@@ -109,12 +113,15 @@ export async function renderDocScreen(type, id, opts = {}) {
 
   const scrollY = opts.keepScroll ? window.scrollY : 0;
   async function reload(tabAfter) {
+    const kept = keepLeft();
     invalidateDocs();
-    await renderDocScreen(type, id, { tab: tabAfter ?? panel.current, keepScroll: true });
+    await renderDocScreen(type, id, { tab: tabAfter ?? panel.current, keepScroll: true, left: kept });
   }
 
   const main = el("main", { class: "main doc-main", "aria-label": title });
-  const left = isAgent ? agentPanel(id) : pathPanel(type, id, docs);
+  const left = isAgent ? agentPanel(id, null, opts.left) : pathPanel(type, id, docs, null, opts.left);
+  const keepLeft = () => (isAgent ? keepAgentPanel(left) : left.keep());
+  const leftKeys = () => (isAgent ? agentKeys(left) : left.shown());
   const panel = docPanel({
     type,
     id,
@@ -146,6 +153,8 @@ export async function renderDocScreen(type, id, opts = {}) {
     md: data.md,
     canEdit,
     reload,
+    keepLeft,
+    leftKeys,
     wiki: wikiResolver(data.wikilinks, docs),
     editSection: (key) => (location.hash = `#/edit/${type}/${enc(id)}${key ? `/${enc(key)}` : ""}`),
     setDocRev(d, r) {
@@ -377,7 +386,11 @@ function floatJumpBar(type, layout) {
   requestAnimationFrame(paint);
 }
 
-/** DELETE with If-Match after a confirm, then the type's list (an agent: the 에이전트 tab). */
+/**
+ * DELETE with If-Match after a confirm, then the left list's next document
+ * (else the one above it), the list kept as it was. The last of its type
+ * goes to the type's list (an agent: the 에이전트 tab).
+ */
 async function deleteDoc(ctx, title, isAgent) {
   const { type, doc, data } = ctx;
   if (!confirm(deleteConfirmText(title, isAgent ? "에이전트" : typeLabel(type), (data.backlinks || []).length))) return;
@@ -390,7 +403,14 @@ async function deleteDoc(ctx, title, isAgent) {
   toast("삭제했습니다");
   invalidateDocs();
   refreshReviewCount();
-  location.hash = isAgent ? "#/agents" : `#/docs/${type}`;
+  const next = nextAfterDelete(ctx.leftKeys(), `${type}/${doc.id}`);
+  if (!next) {
+    location.hash = isAgent ? "#/agents" : `#/docs/${type}`;
+    return;
+  }
+  pendingLeft = { key: next, kept: ctx.keepLeft() };
+  const cut = next.indexOf("/");
+  location.hash = `#/doc/${next.slice(0, cut)}/${enc(next.slice(cut + 1))}`;
 }
 
 /** POST …/retype to `to` with If-Match, then open the moved document. */
@@ -1514,7 +1534,7 @@ function slotBody(ctx, host) {
           sec({
             key: "쓰는 법",
             title: "쓰는 법",
-            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), el("pre", { class: "md-code lang-sql" }, sqlCode(q.sql))]),
+            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), sqlBlock(q.sql)]),
           }),
         );
     } else {

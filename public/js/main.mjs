@@ -1,8 +1,8 @@
 // Boot: the theme, the FE address, who is signed in, the type list, then the
-// frame and the first screen.
+// frame and the first screen (the overview, unless FE's link names a document).
 import { bindCmdk } from "./cmdk.mjs";
 import { refreshReviewCount } from "./review-count.mjs";
-import { route } from "./router.mjs";
+import { route, startAtHome } from "./router.mjs";
 import { applyTheme, gateMessage, mountShell, readTheme, rememberAnswer, showGate } from "./shell.mjs";
 import { loadTypes, setConfig, setUser } from "./state.mjs";
 
@@ -25,6 +25,7 @@ import { loadTypes, setConfig, setUser } from "./state.mjs";
   await loadTypes();
   mountShell();
   bindCmdk();
+  startAtHome();
   route();
   refreshReviewCount();
 })();

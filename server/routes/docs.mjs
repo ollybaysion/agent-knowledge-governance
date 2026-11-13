@@ -126,7 +126,7 @@ export function queryKey(query) {
 }
 
 /**
- * Most documents one POST /api/docs/:type/activate takes: a tag's few hundred
+ * Most documents one POST /api/docs/:type/activate (or …/deactivate) takes: a tag's few hundred
  * go in one request, and the screen splits anything larger (doc-bulk.mjs
  * ACTIVATE_CHUNK, the same number).
  */
@@ -134,13 +134,13 @@ export const ACTIVATE_MAX = 1000;
 
 /** The ids a bulk commit message lists: the first MESSAGE_IDS, then how many more. */
 const MESSAGE_IDS = 20;
-export const activateMessage = (type, ids) =>
-  `activate ${ids.length} ${type}: ${
+export const activateMessage = (type, ids, action = "activate") =>
+  `${action} ${ids.length} ${type}: ${
     ids.length > MESSAGE_IDS ? `${ids.slice(0, MESSAGE_IDS).join(", ")} … 외 ${ids.length - MESSAGE_IDS}` : ids.join(", ")
   }`;
 
 /**
- * POST /api/docs/:type/activate's body → its items [{id, rev}], or null when
+ * POST /api/docs/:type/activate's (and …/deactivate's) body → its items [{id, rev}], or null when
  * it is not 1 to ACTIVATE_MAX items, each a valid id and a rev, no id twice.
  */
 export function activateItems(body) {
@@ -1347,81 +1347,89 @@ export function registerDocsRoutes(app) {
     );
   }
 
-  // The 문서 list's 활성화: several documents of one type on at once. Each one
-  // passes the checks of …/:id/activate (rev · archived · validation · flow);
-  // the ones that pass go on in one commit, the others come back with their
-  // error, so one stale row does not send the admin back to pick them all.
-  app.post(
-    "/api/docs/:type/activate",
-    { config: { roles: ["admin"] } },
-    async (request, reply) => {
-      const { type } = request.params;
-      if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
-      const items = activateItems(request.body);
-      if (!items) return reply.code(400).send({ error: "invalid_body" });
+  // The 문서 list's 활성화 · 비활성화: several documents of one type on or off
+  // at once. Each one passes the checks of …/:id/activate or …/:id/deactivate
+  // (rev · archived · validation · flow); the ones that pass change in one
+  // commit, the others come back with their error, so one stale row does not
+  // send the admin back to pick them all.
+  for (const [action, target] of [
+    ["activate", "active"],
+    ["deactivate", "inactive"],
+  ]) {
+    app.post(
+      `/api/docs/:type/${action}`,
+      { config: { roles: ["admin"] } },
+      async (request, reply) => {
+        const { type } = request.params;
+        if (!types.bodySchema(type)) return reply.code(400).send({ error: "unknown_type" });
+        const items = activateItems(request.body);
+        if (!items) return reply.code(400).send({ error: "invalid_body" });
 
-      const result = await queue.enqueue(
-        async () => {
-          const closed = closedType(type);
-          if (closed) return closed;
-          // The agent mds and starters as the commit will leave them: each
-          // one turned on joins, so the next one's flow check sees it.
-          const registry = isRegistryType(type) ? agentRegistry(storeDir) : null;
-          const results = [];
-          const docs = [];
-          for (const { id, rev } of items) {
-            const relpath = `${type}/${id}.json`;
-            const doc = readJson(storeDir, relpath);
-            if (!doc) {
-              results.push({ id, status: "error", error: "not_found" });
-              continue;
+        const result = await queue.enqueue(
+          async () => {
+            const closed = action === "activate" ? closedType(type) : null;
+            if (closed) return closed;
+            // The agent mds and starters as the commit will leave them: each
+            // one turned on joins and each one turned off leaves, so the next
+            // one's flow check sees it.
+            let registry = isRegistryType(type) ? agentRegistry(storeDir) : null;
+            const results = [];
+            const docs = [];
+            for (const { id, rev } of items) {
+              const relpath = `${type}/${id}.json`;
+              const doc = readJson(storeDir, relpath);
+              if (!doc) {
+                results.push({ id, status: "error", error: "not_found" });
+                continue;
+              }
+              const currentRev = revOfPath(storeDir, relpath);
+              if (rev !== currentRev) {
+                results.push({ id, status: "error", error: "unknown_base_rev", currentRev });
+                continue;
+              }
+              if (doc.status === "archived") {
+                results.push({ id, status: "error", error: "doc_archived" });
+                continue;
+              }
+              if (doc.status === target) {
+                results.push({ id, status: "skipped", error: `already_${target}` });
+                continue;
+              }
+              const newDoc = { ...doc, status: target };
+              const errors = validateForStore(newDoc, refs, inStore);
+              if (errors.length) {
+                results.push({ id, status: "error", error: "validation_failed", details: errors });
+                continue;
+              }
+              const markdown = typeof newDoc.body?.markdown === "string" ? newDoc.body.markdown : null;
+              const flow = registry ? saveCheck(registry, { type, id, markdown, active: target === "active" }) : null;
+              const refused = flowRefusal(flow);
+              if (refused) {
+                results.push({ id, status: "error", error: "flow_rejected", details: refused.body.details });
+                continue;
+              }
+              if (registry && target === "active" && markdown != null) registry.push({ type, id, markdown });
+              if (registry && target === "inactive") registry = registry.filter((d) => d.type !== type || d.id !== id);
+              docs.push(newDoc);
+              results.push({ id, status: target, ...flowWarnings(flow) });
             }
-            const currentRev = revOfPath(storeDir, relpath);
-            if (rev !== currentRev) {
-              results.push({ id, status: "error", error: "unknown_base_rev", currentRev });
-              continue;
+            if (docs.length) {
+              const { writes, removes } = docsWrites(storeDir, type, docs);
+              await commitFiles(storeDir, {
+                author: request.user.id,
+                message: activateMessage(type, docs.map((d) => d.id), action),
+                writes,
+                removes,
+              });
             }
-            if (doc.status === "archived") {
-              results.push({ id, status: "error", error: "doc_archived" });
-              continue;
-            }
-            if (doc.status === "active") {
-              results.push({ id, status: "skipped", error: "already_active" });
-              continue;
-            }
-            const newDoc = { ...doc, status: "active" };
-            const errors = validateForStore(newDoc, refs, inStore);
-            if (errors.length) {
-              results.push({ id, status: "error", error: "validation_failed", details: errors });
-              continue;
-            }
-            const markdown = typeof newDoc.body?.markdown === "string" ? newDoc.body.markdown : null;
-            const flow = registry ? saveCheck(registry, { type, id, markdown, active: true }) : null;
-            const refused = flowRefusal(flow);
-            if (refused) {
-              results.push({ id, status: "error", error: "flow_rejected", details: refused.body.details });
-              continue;
-            }
-            if (registry && markdown != null) registry.push({ type, id, markdown });
-            docs.push(newDoc);
-            results.push({ id, status: "active", ...flowWarnings(flow) });
-          }
-          if (docs.length) {
-            const { writes, removes } = docsWrites(storeDir, type, docs);
-            await commitFiles(storeDir, {
-              author: request.user.id,
-              message: activateMessage(type, docs.map((d) => d.id)),
-              writes,
-              removes,
-            });
-          }
-          return { status: 200, body: { results, activated: docs.length } };
-        },
-        { priority: priorityOf(request.user) },
-      );
-      return reply.code(result.status).send(result.body);
-    },
-  );
+            return { status: 200, body: { results, [`${action}d`]: docs.length } };
+          },
+          { priority: priorityOf(request.user) },
+        );
+        return reply.code(result.status).send(result.body);
+      },
+    );
+  }
 
   // The envelope's origin — the original the document was taken from. PUT
   // /api/docs/:type/:id carries a body only, so it gets its own write, with
