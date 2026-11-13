@@ -7,7 +7,7 @@
 // A long db-schema floats 맨 위 · 맨 아래 at the bottom right.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
-import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
+import { inline, mdNodes, pictureFig, sqlBlock, wikiResolver } from "../md.mjs";
 import { assetsSection } from "/lib/doc-assets.mjs";
 import { examplesSection, msgFormatSections } from "/lib/msg-examples.mjs";
 import { scrollToNode, scrollToSec, sec, isAnswerSection } from "../sec.mjs";
@@ -16,7 +16,6 @@ import { findColumn, moveName, orderColumns, orderSteps, slotRowPlan, slotTableC
 import { floatJumps, floatRight, jumpState, jumpTo } from "/lib/float-jumps.mjs";
 import { isUnused, toggleUnused, unusedSummary } from "/lib/unused-columns.mjs";
 import { inferredColumns, pickButton, slotFailText, TIER_FILTERS, tierCounts, tierShown, togglePick, withObject } from "/lib/column-bulk.mjs";
-import { sqlCode } from "../sql.mjs";
 import {
   coverageBar,
   evidence,
@@ -1535,7 +1534,7 @@ function slotBody(ctx, host) {
           sec({
             key: "쓰는 법",
             title: "쓰는 법",
-            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), el("pre", { class: "md-code lang-sql" }, sqlCode(q.sql))]),
+            children: b().queries.flatMap((q, i) => [slotRow(slotByAddr(`queries[${i}].note`), "ps"), sqlBlock(q.sql)]),
           }),
         );
     } else {

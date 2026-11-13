@@ -5,7 +5,7 @@
 // line is a figure in the same frame, with the 글 as its caption; inside a
 // line it is a picture one line high. A click opens the picture in a new tab.
 // A ```chart fence is one small line — 그래프 line · x ts · y value.
-import { el } from "./dom.mjs";
+import { el, icon, toast } from "./dom.mjs";
 import { assetIndex, figureOf } from "/lib/doc-assets.mjs";
 import { inlineRuns, parseBlocks } from "/lib/md-parse.mjs";
 import { isMermaid } from "/lib/mermaid-src.mjs";
@@ -13,6 +13,22 @@ import { mermaidFig } from "./mermaid.mjs";
 import { sqlCode } from "./sql.mjs";
 import { LANG as CHART, chartLine } from "/lib/shared/flow/chart-fence.mjs";
 import { TYPE_LABEL, typeColor } from "./state.mjs";
+
+/** A ```sql fence (and a db-schema's 쓰는 법 query): the coloured code, and 복사 at its top right copying the fence's text as written. */
+export function sqlBlock(text) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("SQL 을 복사했습니다");
+    } catch {
+      toast("복사하지 못했습니다 — 코드를 직접 골라 복사하세요", "error");
+    }
+  };
+  return el("div", { class: "md-code-wrap" }, [
+    el("pre", { class: "md-code lang-sql has-copy" }, sqlCode(text)),
+    el("button", { type: "button", class: "btn sm ghost md-copy", "aria-label": "SQL 복사", onclick: copy }, [icon("copy", 13), "복사"]),
+  ]);
+}
 
 /** The short tag a chip carries: 표 · msg · 메인 · 도메인 · 매뉴얼 … */
 export function kindTag(type, role) {
@@ -139,7 +155,8 @@ export function mdNodes(markdown, ctx = {}) {
       case "code":
         // A query item's ```chart fence: one small line, the graph it draws.
         if (b.lang.toLowerCase() === CHART) return el("p", { class: "dim small", text: chartLine(b.text) });
-        return el("pre", { class: `md-code${b.lang ? ` lang-${b.lang}` : ""}` }, b.lang === "sql" ? sqlCode(b.text) : el("code", {}, b.text));
+        if (b.lang === "sql") return sqlBlock(b.text);
+        return el("pre", { class: `md-code${b.lang ? ` lang-${b.lang}` : ""}` }, el("code", {}, b.text));
       case "table":
         return el("div", { class: "tbl-wrap md-table" }, el("table", {}, [
           el("thead", {}, el("tr", {}, b.head.map((h) => el("th", { scope: "col" }, inline(h, ctx))))),
