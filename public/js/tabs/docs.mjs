@@ -8,7 +8,7 @@ import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
-import { SUB_LABEL, docRows, inDocsTab, move, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
+import { SUB_LABEL, docRows, inDocsTab, keepOrder, move, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
 import { tagRows, withTag } from "/lib/tags.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
@@ -120,9 +120,13 @@ function setFolded(v) {
   }
 }
 
-/** The path column of an open document: {node, collapsed, bind(layout)}. */
-export function pathPanel(type, id, docs, draftId = null) {
-  const rows = docRows(docs, type);
+/**
+ * The path column of an open document: {node, collapsed, bind(layout), keep()}.
+ * `kept` = what keep() measured before a reload: the rows' order and the
+ * list's scroll, drawn back.
+ */
+export function pathPanel(type, id, docs, draftId = null, kept = null) {
+  const rows = keepOrder(docRows(docs, type), kept?.order);
   const color = typeColor(type);
   // db-schema: the browser's 중요도 · 성격 chips and 주요 → 기타 groups, the
   // same filter (sessionStorage) as the browser.
@@ -212,7 +216,14 @@ export function pathPanel(type, id, docs, draftId = null) {
   }
   const isFolded = folded();
   paint(isFolded);
-  return { node, collapsed: isFolded, bind: (l) => (layout = l) };
+  const scroller = () => node.querySelector(".panel-scroll");
+  if (kept?.scrollTop) requestAnimationFrame(() => scroller() && (scroller().scrollTop = kept.scrollTop));
+  return {
+    node,
+    collapsed: isFolded,
+    bind: (l) => (layout = l),
+    keep: () => ({ order: rows.map((d) => d.id), scrollTop: scroller()?.scrollTop ?? 0 }),
+  };
 }
 
 // ---------- 탐색: 태그 패널 + 밀러 열 ----------

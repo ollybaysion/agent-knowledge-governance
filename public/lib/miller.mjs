@@ -35,6 +35,17 @@ export function docRows(docs, type) {
     .sort(byChange);
 }
 
+/**
+ * `rows` in `order` (the ids as the list last drew them), so a reload after a
+ * change keeps each row in its place. A row not in `order` goes first, as the
+ * newest. No `order` = `rows` as they are.
+ */
+export function keepOrder(rows, order) {
+  if (!order) return rows;
+  const at = new Map(order.map((id, i) => [id, i]));
+  return [...rows].sort((a, b) => (at.get(a.id) ?? -1) - (at.get(b.id) ?? -1));
+}
+
 const byChange = (a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")) || a.id.localeCompare(b.id);
 
 /**

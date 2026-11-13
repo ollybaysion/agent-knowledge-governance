@@ -33,7 +33,7 @@ import {
 } from "../shared.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { answerSection, activeMdTypes, embed, canEdit as userCanEdit, currentUser, isAdmin, isMdType, loadTypes, setLastDoc, TYPE_LABEL, typeColor } from "../state.mjs";
-import { agentPanel } from "./agents.mjs";
+import { agentPanel, keepAgentPanel } from "./agents.mjs";
 import { docPanel } from "./doc-panel.mjs";
 import { skillBody, summaryOf, titleOf } from "./doc-skill.mjs";
 import { manualBody } from "./doc-manual.mjs";
@@ -72,8 +72,9 @@ export function docTitle(type, doc) {
 
 /**
  * Open a document. `opts.tab` = the right panel's first tab; `opts.keepScroll`
- * keeps the page where it was (a reload after a save); `opts.col` = a db-schema
- * column to scroll to and flash.
+ * keeps the page where it was (a reload after a save); `opts.left` = the left
+ * list as a reload found it (its order · scroll · search); `opts.col` = a
+ * db-schema column to scroll to and flash.
  */
 export async function renderDocScreen(type, id, opts = {}) {
   const ticket = ++docTicket;
@@ -109,12 +110,14 @@ export async function renderDocScreen(type, id, opts = {}) {
 
   const scrollY = opts.keepScroll ? window.scrollY : 0;
   async function reload(tabAfter) {
+    const kept = keepLeft();
     invalidateDocs();
-    await renderDocScreen(type, id, { tab: tabAfter ?? panel.current, keepScroll: true });
+    await renderDocScreen(type, id, { tab: tabAfter ?? panel.current, keepScroll: true, left: kept });
   }
 
   const main = el("main", { class: "main doc-main", "aria-label": title });
-  const left = isAgent ? agentPanel(id) : pathPanel(type, id, docs);
+  const left = isAgent ? agentPanel(id, null, opts.left) : pathPanel(type, id, docs, null, opts.left);
+  const keepLeft = () => (isAgent ? keepAgentPanel(left) : left.keep());
   const panel = docPanel({
     type,
     id,
