@@ -214,11 +214,11 @@ export function registerDocsRoutes(app) {
     const list = queryWarnings(type, doc.body?.markdown, tableKinds(catalog));
     return list.length ? { queryWarnings: list } : {};
   };
-  // A starter document's items and presets for its doc view.
+  // A starter document's items for its doc view.
   const starterOf = (doc) => {
     if (typeof doc.body?.markdown !== "string") return {};
-    const { items, presets } = starterView(doc.body.markdown, tableKinds(catalog));
-    return { starter: { items, presets } };
+    const { items } = starterView(doc.body.markdown, tableKinds(catalog));
+    return { starter: { items } };
   };
   // The piece ids a 정답 can name: this skill's and its linked skills' (LINK1 · LINK2).
   const knownPieces = (id, doc) =>

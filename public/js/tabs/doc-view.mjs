@@ -656,7 +656,7 @@ function queryWarnBox(list, title = "조회 경고") {
 // ---------- starter(첫 선택 데이터): md 본문 + 조회 항목 표 ----------
 async function starterBody(ctx, host) {
   const built = await mdBody(ctx, host);
-  const { items = [], presets = [] } = ctx.data.starter ?? {};
+  const { items = [] } = ctx.data.starter ?? {};
   const tables = new Set(ctx.docs.filter((d) => d.type === "db-schema").map((d) => d.id));
   const tableChip = (t) =>
     tables.has(t.toLowerCase())
@@ -673,7 +673,6 @@ async function starterBody(ctx, host) {
       el("td", {}, warnList(it.warnings)),
     ]),
   );
-  const presetWarnings = presets.flatMap((p) => p.warnings);
   const section = sec({
     key: "조회 항목",
     title: "조회 항목",
@@ -686,10 +685,6 @@ async function starterBody(ctx, host) {
             el("tbody", {}, rows),
           ]))
         : el("p", { class: "dim", text: "## 데이터 에 ### 항목이 아직 없습니다." }),
-      presets.length
-        ? el("dl", { class: "kv" }, presets.flatMap((p) => [el("dt", { text: `프리셋 ${p.name}` }), el("dd", { class: "mono", text: p.items.join(", ") || "—" })]))
-        : null,
-      queryWarnBox(presetWarnings, "프리셋 경고"),
     ],
   });
   host.append(section);

@@ -2,8 +2,7 @@
 //
 // A starter document writes its items in the agent md's grammar: each
 // `### <id> — <title>` of `## 데이터` with its first ```sql fence
-// (src/skill-data-ids.mjs). `## 프리셋` holds `- <name>: <id>, <id>` lines.
-// An item's kind is not written in the document. It comes from the tables
+// (src/skill-data-ids.mjs). An item's kind is not written in the document. It comes from the tables
 // the query reads (FROM · JOIN, src/table-class.mjs): data when one of them
 // has an active db-schema document of kind data, info otherwise — an empty
 // kind and a table without a document read as info (user decision
@@ -11,38 +10,14 @@
 // 설비 and reuses that table whatever the binds, so an info query that takes
 // a bind other than 설비 · 라인 is warned about, in every type with 조회.
 // Pure: the caller passes the kinds (server/data-ids.mjs tableKinds).
-import { normalizeHeading, scan } from "./skill-sections.mjs";
 import { skillDataIds } from "./skill-data-ids.mjs";
 import { isEqpBind, isLineBind, varsOf } from "./sql-bind.mjs";
 import { tablesOfSql } from "./table-class.mjs";
 
 export const STARTER = "starter";
 const SKILL_TYPES = ["domain-skill", "domain"];
-const PRESET_SECTION = "프리셋";
-const PRESET_LINE = /^\s*[-*+]\s+(.+?)\s*:\s*(.*?)\s*$/;
 
 const code = (s) => `\`${s}\``;
-
-/**
- * The `## 프리셋` list lines, skipping fenced code: the text before the first
- * `:` is the name, the comma-separated rest the item ids. Another line is
- * prose. No section, no presets.
- * @returns {{name: string, items: string[], line: number}[]} line is 1-based
- */
-export function starterPresets(markdown) {
-  const out = [];
-  let inPresets = false;
-  scan(markdown).forEach(({ line, heading, fenced }, i) => {
-    if (heading !== null) {
-      inPresets = normalizeHeading(heading) === PRESET_SECTION;
-      return;
-    }
-    if (!inPresets || fenced) return;
-    const m = PRESET_LINE.exec(line);
-    if (m) out.push({ name: m[1], items: m[2].split(",").map((s) => s.trim()).filter(Boolean), line: i + 1 });
-  });
-  return out;
-}
 
 /**
  * A query's kind from the tables it reads: data when one of them is data,
@@ -64,13 +39,12 @@ function infoBindWarning(id, sql, kind) {
 
 /**
  * The starter document as the doc view shows it: each item with the tables
- * it reads, its kind (null without a ```sql fence), its binds and warnings,
- * then the presets. `warnings` is every warning in that order.
+ * it reads, its kind (null without a ```sql fence), its binds and warnings.
+ * `warnings` is every warning in that order.
  * @param {string} markdown
  * @param {Map<string, string|undefined>} kinds
  * @returns {{
  *   items: {id: string, title: string|null, line: number, tables: string[], kind: "info"|"data"|null, binds: string[], warnings: string[]}[],
- *   presets: {name: string, items: string[], line: number, warnings: string[]}[],
  *   warnings: string[],
  * }}
  */
@@ -86,16 +60,11 @@ export function starterView(markdown, kinds) {
     if (bind) warnings.push(bind);
     return { id: item.id, title: item.title, line: item.line, tables, kind, binds: item.sql ? varsOf(item.sql) : [], warnings };
   });
-  const known = new Set(items.map((i) => i.id));
-  const presets = starterPresets(markdown).map((p) => ({
-    ...p,
-    warnings: p.items.filter((id) => !known.has(id)).map((id) => `프리셋 ${code(p.name)} 이 없는 항목 ${code(id)} 를 가리킨다.`),
-  }));
-  return { items, presets, warnings: [...items.flatMap((i) => i.warnings), ...presets.flatMap((p) => p.warnings)] };
+  return { items, warnings: items.flatMap((i) => i.warnings) };
 }
 
 /**
- * The save warnings of a document's 조회: a starter's four kinds
+ * The save warnings of a document's 조회: a starter's three kinds
  * ({@link starterView}), the info-bind one for a domain-skill or domain
  * document's ```sql items, none for another type.
  * @returns {string[]}

@@ -541,11 +541,11 @@ export function draftStarter(body, persist) {
       eField(() => body.markdown, (v) => (body.markdown = v), {
         area: true,
         mono: true,
-        placeholder: "md 를 여기에 — # 이름 / ## 데이터 (### id — 제목 + ```sql) / ## 프리셋 (- 이름: id, id)",
+        placeholder: "md 를 여기에 — # 이름 / ## 데이터 (### id — 제목 + ```sql)",
         onChange: persist,
       }),
     ),
-    el("p", { class: "fhint", text: "## 데이터 의 ### 항목 하나가 첫 화면의 고를 거리 하나입니다. 항목은 에이전트 문서와 같은 문법으로 쓰고, 항목 id 는 모든 에이전트 · 도메인 · 첫 선택 데이터 문서를 통틀어 하나뿐입니다. ## 프리셋 의 줄은 - 프리셋 이름: id, id 입니다. 활성화하려면 본문이 있어야 합니다." }),
+    el("p", { class: "fhint", text: "## 데이터 의 ### 항목 하나가 첫 화면의 고를 거리 하나입니다. 항목은 에이전트 문서와 같은 문법으로 쓰고, 항목 id 는 모든 에이전트 · 도메인 · 첫 선택 데이터 문서를 통틀어 하나뿐입니다. 활성화하려면 본문이 있어야 합니다." }),
   );
   return wrap;
 }

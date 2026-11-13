@@ -10,6 +10,6 @@
   "status": "active",
   "body": {
     "name": "eqp-basics",
-    "markdown": "# 설비 바탕 데이터\n\n설비를 고르면 먼저 읽어 두는 데이터.\n\n## 데이터\n\n### eqp_info — 설비 정보\n\n설비 한 대의 바탕 정보.\n\n```sql\nSELECT * FROM FDC_EQUIPMENT WHERE EQP_ID = :eqp_id\n```\n\n### chamber_info — 챔버 정보\n\n```sql\nSELECT * FROM FDC_CHAMBER WHERE EQP_ID = :eqp_id\n```\n\n### setup_events — 셋업 이벤트 이력\n\n```sql\nSELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time\n```\n\n## 프리셋\n\n- 기본 점검: eqp_info, chamber_info\n"
+    "markdown": "# 설비 바탕 데이터\n\n설비를 고르면 먼저 읽어 두는 데이터.\n\n## 데이터\n\n### eqp_info — 설비 정보\n\n설비 한 대의 바탕 정보.\n\n```sql\nSELECT * FROM FDC_EQUIPMENT WHERE EQP_ID = :eqp_id\n```\n\n### chamber_info — 챔버 정보\n\n```sql\nSELECT * FROM FDC_CHAMBER WHERE EQP_ID = :eqp_id\n```\n\n### setup_events — 셋업 이벤트 이력\n\n```sql\nSELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time\n```\n"
   }
 }

@@ -455,8 +455,8 @@ const SEMANTIC_CHECKS = {
     checkSkillMarkdown(doc, errors);
   },
   // The id and the item ids. The rest of a starter document — a missing
-  // ```sql fence, a table without a db-schema document, a preset's unknown
-  // id, an info query's bind — is a save warning (src/starter.mjs).
+  // ```sql fence, a table without a db-schema document, an info query's
+  // bind — is a save warning (src/starter.mjs).
   "starter/v1"(doc, errors) {
     checkDerivedId(doc, errors);
     checkSkillDataIds(doc, errors);
