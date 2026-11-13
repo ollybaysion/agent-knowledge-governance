@@ -14,7 +14,7 @@ import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
 import { coverageBar, kindBadge, shortRev, tierBadge } from "../shared.mjs";
 import { DEFAULT_FILTER, TABLE_FILTERS, kindOf, pathGroups, readFilter, tableGroups } from "/lib/table-class.mjs";
-import { activateRequests, activateToast, dialogNames, headState, pickable, pickableKeys, pickedRows, picksFor, rowKey, toggleAll, togglePicked, typeCounts } from "/lib/doc-bulk.mjs";
+import { ACTIONS, activateRequests, activateToast, bulkActions, dialogNames, headState, pickable, pickableKeys, pickedRows, picksFor, rowKey, toggleAll, togglePicked, typeCounts } from "/lib/doc-bulk.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TIER_LABEL, TYPES, TYPE_LABEL, canEdit, typeColor } from "../state.mjs";
 
@@ -286,7 +286,7 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
   if (state.col === 2 && !listOf(state.i1).length) state.col = 1;
   // A doc row in column 1 shows its own type's list in column 2, itself picked.
   let picked = null;
-  // 여러 문서 활성화 (admin): the list that holds the boxes (a type, or "#tag"
+  // 여러 문서 활성화 · 비활성화 (admin): the list that holds the boxes (a type, or "#tag"
   // for a tag's documents across the types) and the row keys picked in it.
   const admin = canEdit();
   let bulk = { scope: null, keys: new Set() };
@@ -364,14 +364,14 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     if (state.i1 >= 0) c1.setAttribute("aria-activedescendant", `m1-${state.i1}`);
     else c1.removeAttribute("aria-activedescendant");
   }
-  // 여러 문서 활성화 (admin): the box in front of each inactive row, the head
-  // box over the list, and the band with 활성화 — the same in a type's list
-  // and in a tag's. `scope` names the list the picks belong to; `repaint`
+  // 여러 문서 활성화 · 비활성화 (admin): the box in front of each active or
+  // inactive row, the head box over the list, and the band with 활성화 and/or
+  // 비활성화 — the same in a type's list and in a tag's. `scope` names the list the picks belong to; `repaint`
   // redraws column 2 and puts the focus back on the box pressed.
   function pickUi(scope, list, repaint) {
     if (!admin) return { box: () => null, has: () => false, headBox: null, bar: document.createTextNode("") };
     bulk = picksFor(bulk, scope, list);
-    // An inactive row's box; any other row keeps the box's place empty.
+    // An active or inactive row's box; an archived row keeps the box's place empty.
     const box = (d) => {
       if (!pickable(d)) return el("span", { class: "mrow-pick", "aria-hidden": "true" });
       const key = rowKey(d);
@@ -387,7 +387,7 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       return input;
     };
     const st = headState(list, bulk.keys);
-    const headBox = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": "보이는 비활성 전부 고르기", "data-pick-all": "" });
+    const headBox = el("input", { type: "checkbox", class: "mrow-pick", "aria-label": "보이는 문서 전부 고르기", "data-pick-all": "" });
     headBox.checked = st === "all";
     headBox.indeterminate = st === "some";
     headBox.disabled = !pickableKeys(list).length;
@@ -399,7 +399,9 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       ? el("div", { class: "mcol-sub" }, el("div", { class: "selbar", role: "group", "aria-label": "고른 문서" }, [
           el("span", {}, [el("b", { text: String(bulk.keys.size) }), " 골라짐"]),
           el("span", { class: "sp" }),
-          el("button", { type: "button", class: "btn primary sm", "data-bulk-go": "", text: "활성화", onclick: () => confirmActivate(scope, list, bulk.keys) }),
+          ...bulkActions(list, bulk.keys).map((action) =>
+            el("button", { type: "button", class: "btn primary sm", "data-bulk-go": action, text: ACTIONS[action].label, onclick: () => confirmActivate(scope, list, bulk.keys, action) }),
+          ),
           el("button", { type: "button", class: "btn ghost sm", text: "풀기", onclick: () => {
             bulk.keys = new Set();
             repaint("[data-pick-all]");
@@ -518,20 +520,21 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     );
     c2.setAttribute("aria-activedescendant", `m2-${state.i2}`);
   }
-  // 활성화 → this dialog: how many, their types, their names, then one
-  // POST /api/docs/:type/activate per type (ACTIVATE_CHUNK rows at most each)
-  // with each row's list rev.
-  function confirmActivate(scope, list, keys) {
-    const rows = pickedRows(list, keys);
+  // 활성화 · 비활성화 → this dialog: how many, their types, their names, then
+  // one POST /api/docs/:type/<action> per type (ACTIVATE_CHUNK rows at most
+  // each) with each row's list rev.
+  function confirmActivate(scope, list, keys, action) {
+    const { label, done, next } = ACTIONS[action];
+    const rows = pickedRows(list, keys, action);
     const { names, more } = dialogNames(rows);
     const kinds = typeCounts(rows);
     const cancel = el("button", { type: "button", class: "btn ghost", text: "취소" });
-    const go = el("button", { type: "button", class: "btn primary", text: `${rows.length} 개 활성화` });
+    const go = el("button", { type: "button", class: "btn primary", text: `${rows.length} 개 ${label}` });
     const dlg = el("dialog", { class: "dlg bulk-dlg", "aria-labelledby": "bulk-dlg-h" }, [
-      el("div", { class: "dlg-h" }, el("h3", { id: "bulk-dlg-h", text: `문서 ${rows.length} 개를 활성화합니다` })),
-      el("p", { class: "dlg-p", text: "활성 — 다음 동기화부터 주입됩니다." }),
+      el("div", { class: "dlg-h" }, el("h3", { id: "bulk-dlg-h", text: `문서 ${rows.length} 개를 ${label}합니다` })),
+      el("p", { class: "dlg-p", text: `${done} — ${next}` }),
       kinds.length > 1 ? el("p", { class: "dlg-p dim", text: kinds.map(({ type, n }) => `${typeLabel(type)} ${n}`).join(" · ") }) : null,
-      el("ul", { class: "bulk-dlg-docs", "aria-label": "활성화할 문서" }, [
+      el("ul", { class: "bulk-dlg-docs", "aria-label": `${label}할 문서` }, [
         ...names.map((n) => el("li", { text: n })),
         more ? el("li", { class: "more", text: `… 외 ${more}` }) : null,
       ]),
@@ -546,18 +549,18 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
     });
     dlg.addEventListener("close", () => {
       dlg.remove();
-      c2.querySelector("[data-bulk-go]")?.focus();
+      c2.querySelector(`[data-bulk-go="${action}"]`)?.focus();
     });
     go.addEventListener("click", async () => {
       go.disabled = true;
       cancel.disabled = true;
       // One request per type, in turn: the server's write queue is serial anyway.
       const responses = [];
-      for (const { type, items } of activateRequests(list, keys)) {
-        const r = await api(`/api/docs/${enc(type)}/activate`, { method: "POST", body: { items } });
+      for (const { type, items } of activateRequests(list, keys, action)) {
+        const r = await api(`/api/docs/${enc(type)}/${action}`, { method: "POST", body: { items } });
         responses.push({ type, status: r.status, data: r.data });
       }
-      const t = activateToast(responses);
+      const t = activateToast(responses, action);
       dlg.close();
       toast(t.text, t.error ? "error" : undefined);
       invalidateDocs();
