@@ -33,6 +33,7 @@ export function agentPanel(selected, draftId = null, kept = null) {
             return el("li", {}, el("a", {
               class: `arow${d.id === selected ? " on" : ""}${d.status === "inactive" ? " off" : ""}`,
               href: `#/doc/domain-skill/${encodeURIComponent(d.id)}`,
+              "data-key": `domain-skill/${d.id}`,
               ...(d.id === selected ? { "aria-current": "page" } : {}),
             }, [
               el("span", { class: "badge-main", text: "메인" }),
@@ -73,6 +74,9 @@ export function agentPanel(selected, draftId = null, kept = null) {
     ]),
   ], "에이전트 목록");
 }
+
+/** The agent panel's rows as drawn, as keys "domain-skill/id". */
+export const agentKeys = (node) => [...node.querySelectorAll(".alist [data-key]")].map((n) => n.dataset.key);
 
 /** What a reload keeps of an agent panel: the search and the list's scroll. */
 export const keepAgentPanel = (node) => ({

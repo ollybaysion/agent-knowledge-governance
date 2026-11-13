@@ -71,6 +71,17 @@ export function deleteConfirmText(title, typeName, backlinks) {
   return `"${title}"(${typeName}) 을 삭제합니다. 저장소에서 파일이 지워지고 git 이력에만 남습니다. 이 문서를 가리키는 문서 ${backlinks}개의 연결을 함께 지웁니다.`;
 }
 
+/**
+ * The document 삭제 opens next: the row under `key` in the left list's
+ * `keys` (as drawn), else the one above it; null when `key` stood alone or
+ * is not in the list.
+ */
+export function nextAfterDelete(keys, key) {
+  const i = keys.indexOf(key);
+  if (i === -1) return null;
+  return keys[i + 1] ?? keys[i - 1] ?? null;
+}
+
 /** The tier a row shows: 추정 while any slot waits, else 확정, else 빈칸; null without slots. */
 export function rowTier(tiers) {
   if (!tiers) return null;

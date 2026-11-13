@@ -121,7 +121,8 @@ function setFolded(v) {
 }
 
 /**
- * The path column of an open document: {node, collapsed, bind(layout), keep()}.
+ * The path column of an open document: {node, collapsed, bind(layout), keep(), shown()}.
+ * shown() = the rows' keys "type/id" in the order the column draws them.
  * `kept` = what keep() measured before a reload: the rows' order and the
  * list's scroll, drawn back.
  */
@@ -223,6 +224,7 @@ export function pathPanel(type, id, docs, draftId = null, kept = null) {
     collapsed: isFolded,
     bind: (l) => (layout = l),
     keep: () => ({ order: rows.map((d) => d.id), scrollTop: scroller()?.scrollTop ?? 0 }),
+    shown: () => (isTable ? pathGroups(rows, tableFilter, id).order : rows).map((d) => `${d.type}/${d.id}`),
   };
 }
 

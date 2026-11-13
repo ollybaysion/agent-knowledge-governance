@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { FAVORITE_CAP, RECENT_CAP, isFavorite, liveShelf, readShelf, toggleFavorite, touchRecent, writeShelf } from "../../public/lib/shelf.mjs";
-import { deleteConfirmText, docRows, keepOrder, move, rowTier, typeRows } from "../../public/lib/miller.mjs";
+import { deleteConfirmText, docRows, keepOrder, move, nextAfterDelete, rowTier, typeRows } from "../../public/lib/miller.mjs";
 
 function memory() {
   const m = new Map();
@@ -122,4 +122,12 @@ test("a reload keeps the rows in the order the list drew them; a new row goes fi
   // A row gone since the last draw drops out; the others keep their places.
   assert.deepEqual(keepOrder([{ id: "c" }, { id: "a" }], ["a", "b", "c"]).map((d) => d.id), ["a", "c"]);
   assert.equal(keepOrder(rows, null), rows);
+});
+
+test("삭제 opens the row under the deleted one, else the one above; the last one opens nothing", () => {
+  const keys = ["voc/a", "voc/b", "voc/c"];
+  assert.equal(nextAfterDelete(keys, "voc/b"), "voc/c");
+  assert.equal(nextAfterDelete(keys, "voc/c"), "voc/b");
+  assert.equal(nextAfterDelete(["voc/a"], "voc/a"), null);
+  assert.equal(nextAfterDelete(keys, "voc/z"), null);
 });
