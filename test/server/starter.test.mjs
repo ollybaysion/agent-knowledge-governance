@@ -1,5 +1,5 @@
 // The starter type (첫 선택 데이터) through the routes: write · render · list ·
-// doc view, the query ids it shares with domain-skill and domain, the four
+// doc view, the query ids it shares with domain-skill and domain, the three
 // save warnings, and the info-bind warning on an agent md.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -84,7 +84,7 @@ test("starter: the example is stored, rendered to rendered/starter/<name>/STARTE
         { id: "setup_events", title: "셋업 이벤트 이력", tables: ["FDC_SETUP_EVENT"], kind: "data" },
       ],
     );
-    assert.deepEqual(view.starter.presets, [{ name: "기본 점검", items: ["eqp_info", "chamber_info"], line: 29, warnings: [] }]);
+    assert.deepEqual(Object.keys(view.starter), ["items"]);
 
     // Off: the rendered md leaves the bundle.
     const { rev } = view;
@@ -95,12 +95,12 @@ test("starter: the example is stored, rendered to rendered/starter/<name>/STARTE
   }
 });
 
-test("starter: the four warnings come back on POST, PUT and GET, and the document is saved", async () => {
+test("starter: the three warnings come back on POST, PUT and GET, and the document is saved", async () => {
   const t = await setup();
   try {
     await withTables(t);
     const md = [
-      "# 경고 넷",
+      "# 경고 셋",
       "",
       "## 데이터",
       "",
@@ -116,16 +116,11 @@ test("starter: the four warnings come back on POST, PUT and GET, and the documen
       "",
       "글",
       "",
-      "## 프리셋",
-      "",
-      "- 기본: sensor_one, nowhere",
-      "",
     ].join("\n");
     const want = [
       "info 조회 `sensor_one` 가 바인드 `snsr_id` 를 받는다. info 조회는 설비마다 한 번만 돌고 그 뒤에는 바인드 값이 달라도 첫 표를 다시 쓴다.",
       "항목 `ghost_rows` 가 읽는 표 `FDC_GHOST` 에 활성 DB 스키마 문서가 없다. 이 표는 info 로 센다.",
       "항목 `no_sql` 에 ```sql 펜스가 없다.",
-      "프리셋 `기본` 이 없는 항목 `nowhere` 를 가리킨다.",
     ];
     const created = await t.call("POST", "/api/docs/starter", starter("warn", md));
     assert.equal(created.statusCode, 201, created.body);
@@ -133,10 +128,28 @@ test("starter: the four warnings come back on POST, PUT and GET, and the documen
     const got = (await t.call("GET", "/api/docs/starter/warn")).json();
     assert.deepEqual(got.queryWarnings, want);
     assert.deepEqual(got.starter.items.map((i) => i.warnings.length), [1, 1, 1]);
-    assert.deepEqual(got.starter.presets[0].warnings, [want[3]]);
-    const edited = await t.put("starter", "warn", { name: "warn", markdown: md.replace(", nowhere", "") });
+    const edited = await t.put("starter", "warn", { name: "warn", markdown: md.replace(" AND SNSR_ID = :snsr_id", "") });
     assert.equal(edited.statusCode, 200, edited.body);
-    assert.deepEqual(edited.json().queryWarnings, want.slice(0, 3));
+    assert.deepEqual(edited.json().queryWarnings, want.slice(1));
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("starter: an old document with a ## 프리셋 section is saved verbatim and shows its items only", async () => {
+  const t = await setup();
+  try {
+    await withTables(t);
+    const doc = example("starter/eqp-basics.json");
+    doc.body.markdown += "\n## 프리셋\n\n- 기본 점검: eqp_info, nowhere\n";
+    const r = await t.call("POST", "/api/docs/starter", doc);
+    assert.equal(r.statusCode, 201, r.body);
+    assert.equal(r.json().queryWarnings, undefined);
+    const rendered = join(t.storeDir, "rendered", "starter", "eqp-basics", "STARTER.md");
+    assert.equal(readFileSync(rendered, "utf8"), doc.body.markdown);
+    const view = (await t.call("GET", "/api/docs/starter/eqp-basics")).json();
+    assert.deepEqual(Object.keys(view.starter), ["items"]);
+    assert.deepEqual(view.starter.items.map((i) => i.id), ["eqp_info", "chamber_info", "setup_events"]);
   } finally {
     await t.cleanup();
   }

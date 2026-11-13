@@ -1,9 +1,9 @@
-// src/starter.mjs: a starter document's items · presets · kinds and the four
+// src/starter.mjs: a starter document's items · kinds and the three
 // save warnings, and the info-bind warning on an agent md's 조회.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { infoBinds, queryKind, queryWarnings, starterPresets, starterView } from "../src/starter.mjs";
+import { infoBinds, queryKind, queryWarnings, starterView } from "../src/starter.mjs";
 
 const fence = (sql) => "```sql\n" + sql + "\n```";
 
@@ -50,14 +50,6 @@ const DOC = [
   "```",
 ].join("\n");
 
-test("starterPresets: the - name: id, id lines of ## 프리셋, fenced code skipped; no section, no presets", () => {
-  assert.deepEqual(starterPresets(DOC), [
-    { name: "기본 점검", items: ["eqp_info", "chamber_row"], line: 35 },
-    { name: "이력 보기", items: ["setup_events", "missing_one"], line: 36 },
-  ]);
-  assert.deepEqual(starterPresets("# s\n\n## 데이터\n\n- 기본: a\n"), []);
-});
-
 test("queryKind: data when one table is data; info for info, an empty kind and a table without a document", () => {
   assert.equal(queryKind(["FDC_EQUIPMENT", "FDC_SETUP_EVENT"], KINDS), "data");
   assert.equal(queryKind(["FDC_EQUIPMENT"], KINDS), "info");
@@ -70,7 +62,7 @@ test("infoBinds: 설비 (eqp_id · equipment · eqp) and 라인 (line) binds, an
   assert.deepEqual(infoBinds("SELECT 1 FROM T WHERE A = :EQP_ID AND B = :Equipment AND C = :eqp AND D = :Line AND E = :snsr_id AND F = ':no'"), ["snsr_id"]);
 });
 
-test("starterView: each item's tables · kind · binds · warnings in document order, then the presets", () => {
+test("starterView: each item's tables · kind · binds · warnings in document order; an old ## 프리셋 section is prose", () => {
   const view = starterView(DOC, KINDS);
   assert.deepEqual(
     view.items.map(({ id, title, tables, kind, binds }) => ({ id, title, tables, kind, binds })),
@@ -89,14 +81,11 @@ test("starterView: each item's tables · kind · binds · warnings in document o
   assert.deepEqual(view.items[2].warnings, [], "a data query keeps its binds");
   assert.deepEqual(view.items[3].warnings, ["항목 `ghost_row` 가 읽는 표 `FDC_GHOST` 에 활성 DB 스키마 문서가 없다. 이 표는 info 로 센다."]);
   assert.deepEqual(view.items[4].warnings, ["항목 `note_only` 에 ```sql 펜스가 없다."]);
-  assert.deepEqual(view.presets.map((p) => p.warnings), [[], ["프리셋 `이력 보기` 이 없는 항목 `missing_one` 를 가리킨다."]]);
-  assert.deepEqual(view.warnings, [
-    ...view.items.flatMap((i) => i.warnings),
-    "프리셋 `이력 보기` 이 없는 항목 `missing_one` 를 가리킨다.",
-  ]);
+  assert.deepEqual(Object.keys(view), ["items", "warnings"]);
+  assert.deepEqual(view.warnings, view.items.flatMap((i) => i.warnings));
 });
 
-test("queryWarnings: a starter's four kinds; an agent md's info-bind ones; none for another type or no markdown", () => {
+test("queryWarnings: a starter's three kinds; an agent md's info-bind ones; none for another type or no markdown", () => {
   assert.deepEqual(queryWarnings("starter", DOC, KINDS), starterView(DOC, KINDS).warnings);
   const agent = [
     "# a",

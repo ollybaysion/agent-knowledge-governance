@@ -337,7 +337,7 @@ export function docPanel(ctx) {
   return { node, setSummary, show, get current() { return current; } };
 }
 
-/** The type's own facts: a table's columns · tier · key · collected; a starter's items · presets; an md's length · origin. */
+/** The type's own facts: a table's columns · tier · key · collected; a starter's items; an md's length · origin. */
 function typeFacts(type, doc, tiers, data) {
   const b = doc.body ?? {};
   const rows = [];
@@ -360,7 +360,6 @@ function typeFacts(type, doc, tiers, data) {
     rows.push(["코드", b.code || "—"]);
   } else if (type === "starter") {
     rows.push(["조회 항목", String(data?.starter?.items?.length ?? 0)]);
-    rows.push(["프리셋", String(data?.starter?.presets?.length ?? 0)]);
   } else if (isMdType(type) || type === "domain") {
     rows.push(["글자 수", String((b.markdown ?? "").length)]);
   }
