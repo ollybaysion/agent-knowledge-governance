@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { dataIdConflicts, TAG_PATTERN, unknownAssets, validateForStore } from "../../src/envelope.mjs";
 import { errorReport } from "../../src/flow/flow-error.mjs";
-import { saveCheck } from "../../src/flow/agent-md.mjs";
+import { registeredQueries, saveCheck } from "../../src/flow/agent-md.mjs";
 import {
   checkVerifySet,
   fromVerificationSet,
@@ -54,7 +54,7 @@ import {
 import { columnsOf } from "../catalog.mjs";
 import { tableUses } from "../../src/table-class.mjs";
 import { addOwner, agentRegistry, dataIdOwners, isRegistryType, tableClass, tableClassOf, tableKinds } from "../data-ids.mjs";
-import { queryWarnings, STARTER, starterView } from "../../src/starter.mjs";
+import { queryWarnings, SCREEN_MAP, screenData, STARTER, starterView } from "../../src/starter.mjs";
 import { hasGroup } from "../auth.mjs";
 import { etagOf, noneMatchHits } from "../etag.mjs";
 import { TYPES_PATH, UNCLASSIFIED } from "../types.mjs";
@@ -210,9 +210,17 @@ export function registerDocsRoutes(app) {
   };
   // The 조회 warnings (src/starter.mjs): saved anyway, shown beside the
   // document. The kinds are the active db-schema documents' as they stand.
+  // A screen-map's are its `data` ids no registered query has.
   const queryWarningsOf = (type, doc) => {
-    const list = queryWarnings(type, doc.body?.markdown, tableKinds(catalog));
+    const list =
+      type === SCREEN_MAP ? screenDataOf(doc).warnings : queryWarnings(type, doc.body?.markdown, tableKinds(catalog));
     return list.length ? { queryWarnings: list } : {};
+  };
+  // A screen-map's `data` against the registered queries (src/starter.mjs
+  // screenData); the store is read only when there is `data`.
+  const screenDataOf = (doc) => {
+    const data = doc.body?.data;
+    return screenData(data, Array.isArray(data) && data.length ? registeredQueries(agentRegistry(storeDir)) : new Map());
   };
   // A starter document's items for its doc view.
   const starterOf = (doc) => {
@@ -277,6 +285,7 @@ export function registerDocsRoutes(app) {
   const docView = (type, id, doc, rev) => {
     const bodySchema = types.bodySchema(type);
     const typeIds = types.ids();
+    const screen = type === SCREEN_MAP ? screenDataOf(doc) : null;
     return {
       json: doc,
       md: docMd(storeDir, type, doc, types.isMd(type)),
@@ -293,7 +302,9 @@ export function registerDocsRoutes(app) {
       backlinks: backlinksOf(catalog, typeIds, type, id),
       wikilinks: resolveWikilinks(catalog, typeIds, type, doc),
       ...warningsOf(type, doc),
-      ...queryWarningsOf(type, doc),
+      ...(screen
+        ? { screenData: screen.items, ...(screen.warnings.length ? { queryWarnings: screen.warnings } : {}) }
+        : queryWarningsOf(type, doc)),
       ...(type === STARTER ? starterOf(doc) : {}),
       ...(type === "db-schema" ? tableClassOf(doc, tableUses(catalog.agents())) : {}),
     };

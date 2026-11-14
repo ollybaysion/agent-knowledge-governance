@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { infoBinds, queryKind, queryWarnings, starterView } from "../src/starter.mjs";
+import { infoBinds, queryKind, queryWarnings, screenData, starterView } from "../src/starter.mjs";
 
 const fence = (sql) => "```sql\n" + sql + "\n```";
 
@@ -109,4 +109,21 @@ test("queryWarnings: a starter's three kinds; an agent md's info-bind ones; none
   assert.deepEqual(queryWarnings("domain", agent, KINDS), want);
   assert.deepEqual(queryWarnings("voc", agent, KINDS), []);
   assert.deepEqual(queryWarnings("starter", undefined, KINDS), []);
+});
+
+test("screenData: each data id in run order with its document; an unregistered id is null and warned once", () => {
+  const queries = new Map([
+    ["eqp_info", { type: "starter", id: "eqp-basics" }],
+    ["sensor_row", { type: "domain-skill", id: "fdc-explain-sensor-origin" }],
+  ]);
+  const r = screenData(["sensor_row", "ghost_rows", "eqp_info"], queries);
+  assert.deepEqual(r.items, [
+    { id: "sensor_row", doc: { type: "domain-skill", id: "fdc-explain-sensor-origin" } },
+    { id: "ghost_rows", doc: null },
+    { id: "eqp_info", doc: { type: "starter", id: "eqp-basics" } },
+  ]);
+  assert.deepEqual(r.warnings, [
+    "screen_data_unknown: 화면 데이터 `ghost_rows` 는 등재된 조회가 아니다. 활성 첫 선택 데이터 문서의 항목에도, 에이전트 문서의 조회에도 없다.",
+  ]);
+  assert.deepEqual(screenData(undefined, queries), { items: [], warnings: [] }, "a screen without data");
 });

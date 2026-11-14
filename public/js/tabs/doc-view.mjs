@@ -697,12 +697,30 @@ function screenBody(ctx, host) {
   const cols = b.expectedColumns || {};
   const list = (items) =>
     items && items.length ? el("ul", { class: "md-list" }, items.map((t) => el("li", { text: t }))) : el("p", { class: "dim", text: "없음" });
+  // 데이터: the registered queries that build this screen, run order. A chip
+  // opens the document that registers it; an unregistered id is dim.
+  const data = ctx.data.screenData ?? [];
+  const dataChip = (it) =>
+    it.doc
+      ? el("a", { class: "chip mono", href: `#/doc/${it.doc.type}/${enc(it.doc.id)}`, title: `${TYPE_LABEL[it.doc.type] ?? it.doc.type} ${it.doc.id}`, text: it.id })
+      : el("span", { class: "chip mono dim", title: "등재된 조회가 아님", text: it.id });
   const sections = [
     { key: "보이는 모습", title: "보이는 모습" },
+    { key: "데이터", title: "데이터" },
     { key: "컬럼", title: "표에 있어야 할 컬럼" },
   ];
   host.replaceChildren(
+    ...[queryWarnBox(ctx.data.queryWarnings)].filter(Boolean),
     sec({ key: "보이는 모습", title: "보이는 모습", children: [list(b.hints)] }),
+    sec({
+      key: "데이터",
+      title: "데이터",
+      extra: el("span", { class: "count-pill", text: String(data.length) }),
+      children: [
+        el("p", { class: "dim small", text: "이 화면을 만드는 조회입니다. 도는 순서대로 적습니다. 첫 화면에서 이 화면을 고르면 이 조회가 첫 선택 데이터로 켜집니다." }),
+        data.length ? el("div", { class: "chiprow" }, data.map(dataChip)) : el("p", { class: "dim", text: "없음" }),
+      ],
+    }),
     sec({
       key: "컬럼",
       title: "표에 있어야 할 컬럼",

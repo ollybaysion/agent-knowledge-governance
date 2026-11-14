@@ -653,6 +653,23 @@ test("screen-map: unknown keys are rejected", () => {
   assert.ok(errors.some((e) => e.includes("route")));
 });
 
+test("screen-map: data is the query ids that build the screen — a list of item ids, no id twice", () => {
+  const doc = screenMapDoc();
+  doc.body.data = ["sensor_row", "eqp_info"];
+  assert.deepEqual(validateDocument(doc, refs), []);
+  doc.body.data = [];
+  assert.deepEqual(validateDocument(doc, refs), [], "an empty list is a screen with no query yet");
+
+  doc.body.data = ["eqp_info", "eqp_info"];
+  assert.ok(validateDocument(doc, refs).some((e) => e.includes("$.body.data[1]") && e.includes("uniqueItems")));
+  for (const bad of ["eqp-info", "1st_row", "", "eqp info"]) {
+    doc.body.data = [bad];
+    assert.ok(validateDocument(doc, refs).some((e) => e.includes("$.body.data[0]")), bad);
+  }
+  doc.body.data = "eqp_info";
+  assert.ok(validateDocument(doc, refs).some((e) => e.includes("$.body.data")));
+});
+
 test("screen-map: the shipped example validates", () => {
   // 이 문서는 BE 번들(src/main/resources/screen-maps/)의 같은 화면과 짝이다 —
   // 예제가 깨지면 사내 저작자가 베낄 견본이 없다.

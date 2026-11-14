@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFiles, flowRejections, readAgentMd, readStarter, saveCheck, INPUT_HINT } from "../../src/flow/agent-md.mjs";
+import { checkFiles, flowRejections, readAgentMd, readStarter, registeredQueries, saveCheck, INPUT_HINT } from "../../src/flow/agent-md.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "flow");
 const file = (rel) => ({ path: rel.split("/").pop(), text: readFileSync(join(FIXTURES, rel), "utf8") });
@@ -323,6 +323,23 @@ test("저장 검사: 조회 노드가 starter 항목을 가리키면 통과하�
   // a starter is no md a flow node points at
   const asFlow = check.markdown.replace("eqp-scope --> eqp_info", "eqp-scope --> eqp_info\n  eqp-basics[[설비 바탕]] --> interlock_data");
   assert.deepEqual(flowCodes(saveCheck([scope, basics], { ...check, markdown: asFlow, active: true })), ["UNKNOWN_ID"]);
+});
+
+test("등재 조회: starter 항목과 에이전트 문서 조회를 문서와 함께 싣고, 같은 id 는 먼저 온 것이다", () => {
+  const { scope, basics, check } = starterRef();
+  const twin = doc("twin", "# 둘\n\n## 데이터\n\n### eqp_info — 또\n\n```sql\nselect 1 from dual\n```\n", "starter");
+  assert.deepEqual(
+    [...registeredQueries([scope, basics, check, twin])],
+    [
+      ["eqp_info", { type: "starter", id: "eqp-basics" }],
+      ["interlock_data", { type: "domain-skill", id: "interlock-check" }],
+    ],
+  );
+});
+
+test("등재 조회: BE 가 거부하는 문서의 조회는 싣지 않는다", () => {
+  const noSql = doc("bare", "# 빈\n\n## 데이터\n\n### lone_row — sql 없음\n\n글\n", "starter");
+  assert.deepEqual([...registeredQueries([noSql])], []);
 });
 
 test("저장 검사: 참조한 starter 항목의 바인드는 이 문서의 흐름에서 채운다 — 앞줄이 없으면 UNSOURCED_VAR", () => {
