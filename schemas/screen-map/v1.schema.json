@@ -38,6 +38,15 @@
         "pattern": "^(?![#\\-*>|])[^\\n]*\\S[^\\n]*$"
       }
     },
+    "data": {
+      "type": "array",
+      "description": "The registered queries that build this screen, in run order. Each id is a starter item or an agent document query id; the starter picks them when a person starts from this screen.",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      }
+    },
     "expectedColumns": {
       "type": "object",
       "description": "What a table extracted from this screen should contain. Not consumed yet — the extraction step (fdc-agent-be#63 follow-up) reads it; the classifier ignores it.",
