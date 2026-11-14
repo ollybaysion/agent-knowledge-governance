@@ -63,6 +63,26 @@ export function starterView(markdown, kinds) {
   return { items, warnings: items.flatMap((i) => i.warnings) };
 }
 
+/** The screen-map document type: its `data` names registered queries ({@link screenData}). */
+export const SCREEN_MAP = "screen-map";
+
+/**
+ * A screen-map document's `data` as the doc view shows it: each id in run
+ * order with the document that registers it, null when no registered query
+ * has that id. `warnings` has one `screen_data_unknown` line per such id. The
+ * save keeps the document: a screen may come in before its queries do.
+ * @param {unknown} data the body's `data`
+ * @param {Map<string, {type: string, id: string}>} queries registered query id → its document
+ * @returns {{items: {id: string, doc: {type: string, id: string}|null}[], warnings: string[]}}
+ */
+export function screenData(data, queries) {
+  const items = (Array.isArray(data) ? data : []).filter((id) => typeof id === "string").map((id) => ({ id, doc: queries.get(id) ?? null }));
+  const warnings = items
+    .filter((it) => it.doc === null)
+    .map((it) => `screen_data_unknown: 화면 데이터 ${code(it.id)} 는 등재된 조회가 아니다. 활성 첫 선택 데이터 문서의 항목에도, 에이전트 문서의 조회에도 없다.`);
+  return { items, warnings };
+}
+
 /**
  * The save warnings of a document's 조회: a starter's three kinds
  * ({@link starterView}), the info-bind one for a domain-skill or domain

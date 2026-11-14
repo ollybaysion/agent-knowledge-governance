@@ -325,6 +325,28 @@ export function flowRejections(specs) {
   }
 }
 
+// A registry document as BE reads it: a starter with readStarter, an agent md with readAgentMd.
+const readDoc = (d) => (d.type === STARTER ? readStarter : readAgentMd)(d.id, d.markdown);
+// The registry documents BE registers (no rejection), read, in order.
+const registered = (docs) => docs.map(readDoc).filter((s) => s.rejection === null);
+
+/**
+ * The registered queries — the pool {@link flowErrors} checks flow nodes
+ * against: every query of a registered agent md or starter, first id wins.
+ * @param {{type: string, id: string, markdown: string}[]} registry the active
+ *   agent mds and starters, in store order
+ * @returns {Map<string, {type: string, id: string}>} query id → the document that holds it
+ */
+export function registeredQueries(registry) {
+  const out = new Map();
+  for (const d of registry) {
+    const spec = readDoc(d);
+    if (spec.rejection !== null) continue;
+    for (const q of spec.queries) if (!out.has(q.id)) out.set(q.id, { type: d.type, id: d.id });
+  }
+  return out;
+}
+
 /**
  * A save of one agent md or starter checked against the registered ones —
  * what BE would leave out once the store holds the save.
@@ -338,8 +360,6 @@ export function flowRejections(specs) {
  */
 export function saveCheck(registry, self) {
   const isSelf = (d) => d.type === self.type && d.id === self.id;
-  const read = (d) => (d.type === STARTER ? readStarter : readAgentMd)(d.id, d.markdown);
-  const registered = (docs) => docs.map(read).filter((s) => s.rejection === null);
   const before = flowRejections(registered(registry));
   const docs = registry.filter((d) => !isSelf(d) || self.active).map((d) => (isSelf(d) ? self : d));
   if (self.active && !registry.some(isSelf)) docs.push(self);
