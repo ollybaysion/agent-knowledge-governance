@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import * as skill from "../../src/skill-sections.mjs";
-import { changedKeys, headingPaths, joinBlocks, lineRanges, normSection, sameSection, splitBlocks, withBlock } from "../../public/lib/sections.mjs";
+import { changedKeys, headingPaths, joinBlocks, lineRanges, normSection, sameSection, splitBlocks, withBlock, withHead } from "../../public/lib/sections.mjs";
 import { knowledgePaths } from "../../src/verify-set.mjs";
 
 const SKILL = skill.joinSkill(
@@ -24,6 +24,23 @@ test("a skill md splits into its sections and joins back with joinSkill, unchang
   assert.equal(joinBlocks(split, split.blocks, opts), SKILL);
   const viaJoinSkill = skill.joinSkill(split.title, split.blocks, skill.SKILL_SECTIONS);
   assert.equal(joinBlocks(split, split.blocks, opts), viaJoinSkill);
+});
+
+test("a skill's head is its # title line: a new head changes the title alone, 절 저장 keeps the saved one", () => {
+  const split = splitBlocks(SKILL, opts);
+  assert.equal(split.head, "# Interlock 에이전트");
+  const renamed = joinBlocks(withHead(split, "# 인터락 에이전트"), split.blocks, opts);
+  const again = splitBlocks(renamed, opts);
+  assert.equal(again.title, "인터락 에이전트");
+  assert.deepEqual(again.blocks, split.blocks);
+  assert.equal(renamed, SKILL.replace("# Interlock 에이전트", "# 인터락 에이전트"));
+  assert.equal(withHead(split, "# ").title, "");
+  assert.equal(splitBlocks(withBlock(split, "도메인 지식", "글", opts), opts).title, "Interlock 에이전트");
+});
+
+test("a plain md's new head is the head as typed", () => {
+  const split = splitBlocks("# 메모\n\n## 하나\n\n글\n");
+  assert.equal(joinBlocks(withHead(split, "# 점검 메모"), split.blocks), "# 점검 메모\n\n## 하나\n\n글\n");
 });
 
 test("절 저장 changes one section and leaves the others as saved", () => {

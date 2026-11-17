@@ -114,6 +114,14 @@ export function joinBlocks(split, blocks = split.blocks, { skill = null, order =
   return parts.join("\n\n") + "\n";
 }
 
+/**
+ * The split with its head replaced: what 문서 저장 joins. A skill's head is
+ * its `# title` line alone, so the title is read back from it.
+ */
+export function withHead(split, head) {
+  return split.mode === "skill" ? { ...split, head, title: head.replace(/^#\s*/, "").trim() } : { ...split, head };
+}
+
 /** The md with only `key`'s body replaced: what 절 저장 sends. */
 export function withBlock(split, key, body, opts = {}) {
   return joinBlocks(
