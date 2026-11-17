@@ -657,6 +657,10 @@ curl -s -H "Authorization: Bearer $TOKEN" "$AKG/api/docs/voc/line-alarm?format=m
 - 그림: md 의 그림은 `![글](asset:<sha256>)` 한 줄이다. 앱은 `GET /api/assets/<sha256>` 를 토큰과
   함께 fetch 로 받고, `URL.createObjectURL(blob)` 로 그린다. 같은 sha256 은 늘 같은 그림이다
   (`Cache-Control: immutable`). 앱은 sha256 을 키로 캐시한다.
+- 그림 형식: PNG · JPEG · WebP · SVG 다(`Content-Type` 이 형식을 말한다). SVG 는 `<img>` 로 그린다.
+  `<img>` 는 SVG 의 스크립트를 돌리지 않는다. 문서에 SVG 글자를 그대로 끼워 넣지 않는다.
+  AKG 는 올릴 때 script · 이벤트 속성 · 파일 밖 주소가 있는 SVG 를 거절하고(400 `unsafe_svg`),
+  내줄 때 `Content-Security-Policy: … sandbox` 를 붙인다. 그림 주소를 중계하는 앱도 SVG 에는 같은 머리를 붙인다.
 - 첨부 그림: 상세의 `assets[]` 는 본문에 나오지 않는 그림도 담는다. AKG 화면은 본문 아래 `그림` 절에
   `assets[]` 의 그림을 순서대로 모두 보인다. WorkBench 도 같은 절을 그린다.
 - 문서 사이 링크: `[[type/id]]` 는 그 문서를 가리킨다. `[[id]]` 는 `GET /api/docs` 목록에서 id 로

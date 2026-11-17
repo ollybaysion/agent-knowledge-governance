@@ -4,6 +4,7 @@
 // asset never changes — which is what lets GET hand out an immutable cache.
 import { createHash } from "node:crypto";
 import { imageHead } from "../../src/image-head.mjs";
+import { SVG_MEDIA_TYPE, svgProblems } from "../../src/svg-image.mjs";
 import {
   assetPaths,
   commitFiles,
@@ -15,7 +16,11 @@ import {
 import { priorityOf } from "./docs.mjs";
 
 export const ASSET_LIMIT = 2 * 1024 * 1024;
-const MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", SVG_MEDIA_TYPE];
+// An SVG opened at its own address is a document, not a picture: nothing in it
+// may run or load. sandbox takes its scripts and its origin, default-src the
+// rest; inline style and the bytes it carries itself are what a figure needs.
+export const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
 
 export function registerAssetsRoutes(app) {
   const { storeDir, queue } = app.akg;
@@ -41,6 +46,7 @@ export function registerAssetsRoutes(app) {
       reply.header("cache-control", "public, max-age=31536000, immutable");
       reply.header("etag", etag);
       if (request.headers["if-none-match"] === etag) return reply.code(304).send();
+      if (meta.mediaType === SVG_MEDIA_TYPE) reply.header("content-security-policy", SVG_CSP);
       reply.type(meta.mediaType);
       return reply.send(bytes);
     },
@@ -63,6 +69,10 @@ export function registerAssetsRoutes(app) {
           claimed,
           detected: head.mediaType,
         });
+      if (head.mediaType === SVG_MEDIA_TYPE) {
+        const problems = svgProblems(bytes);
+        if (problems.length) return reply.code(400).send({ error: "unsafe_svg", details: problems });
+      }
 
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const { mediaType, width, height } = head;

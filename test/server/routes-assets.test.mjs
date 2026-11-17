@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { buildApp } from "../../server/app.mjs";
 import { signIn, as } from "../sign-in.mjs";
 import { git } from "../../server/git.mjs";
-import { jpegBytes, pngBytes } from "../fixtures/images.mjs";
+import { jpegBytes, pngBytes, svgBytes } from "../fixtures/images.mjs";
 
 async function setup() {
   const home = mkdtempSync(join(tmpdir(), "akg-assets-test-"));
@@ -130,3 +130,50 @@ test("GET: 400 for a non-hex name, 404 when absent, bytes with type · immutable
     await cleanup();
   }
 });
+
+test("SVG: stored with the size its root tag says; served as image/svg+xml under the sandbox policy; a raster keeps the page policy", async () => {
+  const { app, cleanup } = await setup();
+  try {
+    const svg = svgBytes(640, 360);
+    const first = await upload(app, svg, "image/svg+xml");
+    assert.equal(first.statusCode, 201, first.body);
+    assert.deepEqual(first.json(), { sha256: sha(svg), mediaType: "image/svg+xml", width: 640, height: 360, existed: false });
+
+    const got = await app.inject({ headers: as("reader"), method: "GET", url: `/api/assets/${sha(svg)}` });
+    assert.equal(got.statusCode, 200);
+    assert.match(got.headers["content-type"], /^image\/svg\+xml/);
+    assert.equal(got.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox");
+    assert.equal(got.headers["x-content-type-options"], "nosniff");
+    assert.deepEqual(got.rawPayload, svg);
+
+    const png = pngBytes(8, 8);
+    await upload(app, png, "image/png");
+    const raster = await app.inject({ headers: as("reader"), method: "GET", url: `/api/assets/${sha(png)}` });
+    assert.match(raster.headers["content-security-policy"], /^default-src 'self'/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("SVG: refused with its reasons when it carries code or reaches outside; a claimed type that is not the bytes' is a mismatch", async () => {
+  const { app, storeDir, cleanup } = await setup();
+  try {
+    const bad = svgBytes(100, 50, `<script>alert(1)</script><image href="https://example.com/a.png"/>`);
+    const refused = await upload(app, bad, "image/svg+xml");
+    assert.equal(refused.statusCode, 400);
+    assert.equal(refused.json().error, "unsafe_svg");
+    assert.equal(refused.json().details.length, 2);
+    assert.equal(existsSync(join(storeDir, "assets", sha(bad))), false);
+
+    const sizeless = await upload(app, Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"/>`), "image/svg+xml");
+    assert.equal(sizeless.statusCode, 400);
+    assert.equal(sizeless.json().error, "unreadable_image");
+
+    const mismatch = await upload(app, svgBytes(10, 10), "image/png");
+    assert.equal(mismatch.statusCode, 400);
+    assert.equal(mismatch.json().detected, "image/svg+xml");
+  } finally {
+    await cleanup();
+  }
+});
+
