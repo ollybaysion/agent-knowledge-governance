@@ -3,6 +3,7 @@
 // 누르면 원문의 그 블록이 펼쳐진다(4-7). 왼쪽 48 띠를 펼치면 절 목록(4-8).
 // 읽기 화면의 절 [편집] 은 그 블록만 펼친 채로(4-5), [전체 편집] 은 전부 펼쳐 연다.
 // 저장은 절 저장도 문서 저장도 문서 전체 PUT(If-Match rev) 한 번이다.
+// # 제목 줄은 맨 위 칸에서 고치고 문서 저장으로 저장한다.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { el, icon, toast } from "../dom.mjs";
 import { mdNodes, wikiResolver } from "../md.mjs";
@@ -10,7 +11,7 @@ import { setLeaveGuard } from "../router.mjs";
 import { VERIFY_KEY, dataIdConflictText, flowLib, shortRev, skillSectionsLib } from "../shared.mjs";
 import { screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { TYPE_LABEL, canEdit, typeColor } from "../state.mjs";
-import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock } from "/lib/sections.mjs";
+import { changedKeys, joinBlocks, lineRanges, splitBlocks, withBlock, withHead } from "/lib/sections.mjs";
 import { docTitle, isMdBodyType, isSkillType } from "./doc-view.mjs";
 import { typeLabel } from "./docs.mjs";
 
@@ -80,7 +81,8 @@ export async function renderEditor(type, id, focusKey) {
     }
   }
   let { split: saved, opts } = splitOf(doc.body?.markdown ?? "");
-  // Working copies: body per key, and the head (plain md only).
+  // Working copies: body per key, and the head (a skill's is its `# title` line).
+  const HEAD_NAME = () => (saved.mode === "skill" ? "제목" : "머리");
   const edited = new Map(saved.blocks.map((b) => [b.key, b.body]));
   let editedHead = saved.head;
   const open = new Set(focusKey ? [focusKey] : saved.blocks.map((b) => b.key));
@@ -97,7 +99,7 @@ export async function renderEditor(type, id, focusKey) {
   const registry = facts?.ok ? facts.data.mds : null;
   function flowNotes() {
     if (!flow || !registry || saved.mode !== "skill") return null;
-    const md = joinBlocks({ ...saved, head: editedHead }, blocksNow(), opts);
+    const md = joinBlocks(withHead(saved, editedHead), blocksNow(), opts);
     const mine = flow.readAgentMd(id, md);
     if (!mine.fence) return null;
     if (mine.flowErrors.length) return mine.flowErrors.map((e) => `${flow.mdLine(e, mine.fence.line)} 줄 ${e.code} ${e.message}`);
@@ -116,7 +118,7 @@ export async function renderEditor(type, id, focusKey) {
     toast(notes.length ? `${message} — ${notes.join(" — ")}` : message, notes.length ? "error" : undefined);
   };
   const dirtyKeys = () => changedKeys(saved.blocks, blocksNow());
-  const headDirty = () => saved.mode === "plain" && editedHead !== saved.head;
+  const headDirty = () => editedHead !== saved.head;
   const anyDirty = () => dirtyKeys().length > 0 || headDirty();
   setLeaveGuard(() => (anyDirty() ? "저장하지 않은 절이 있습니다. 버리고 나갈까요?" : null));
 
@@ -194,10 +196,12 @@ export async function renderEditor(type, id, focusKey) {
   async function saveDoc() {
     if (conflict) return toast("먼저 다시 읽기를 하세요.", "error");
     if (!anyDirty()) return toast("바뀐 절이 없습니다.");
+    const draft = withHead(saved, editedHead);
+    if (saved.mode === "skill" && headDirty() && draft.title === "") return toast("제목을 넣으세요.", "error");
     saveDocBtn.disabled = true;
     const changed = dirtyKeys();
-    const md = joinBlocks({ ...saved, head: editedHead }, blocksNow(), opts);
-    const ok = await put(md, `문서 저장: 바뀐 절 ${changed.length}${headDirty() ? " · 머리" : ""}`);
+    const md = joinBlocks(draft, blocksNow(), opts);
+    const ok = await put(md, `문서 저장: 바뀐 절 ${changed.length}${headDirty() ? ` · ${HEAD_NAME()}` : ""}`);
     saveDocBtn.disabled = false;
     if (!ok) return;
     setLeaveGuard(null);
@@ -308,11 +312,31 @@ export async function renderEditor(type, id, focusKey) {
   }
 
   function headNode() {
-    const onlyTitle = (h) => h.split("\n").every((l) => l.trim() === "" || /^#\s+/.test(l));
-    if (saved.mode !== "plain" || (onlyTitle(saved.head) && editedHead === saved.head)) {
-      return saved.title !== null
-        ? el("div", { class: "ed-title mono" }, [el("span", { class: "dim", text: "1 " }), `# ${saved.title}`])
-        : null;
+    if (saved.mode === "skill") {
+      const inp = el("input", { class: "ed-title-inp", type: "text", spellcheck: "false", "aria-label": "제목(# 줄)", placeholder: "제목" });
+      inp.value = withHead(saved, editedHead).title;
+      const row = el("label", { class: `ed-title mono${headDirty() ? " changed" : ""}` }, [
+        el("span", { class: "dim", text: "1 " }),
+        el("span", { text: "# " }),
+        inp,
+        el("span", { class: "dim ed-title-hint", text: "문서 저장으로 저장합니다" }),
+      ]);
+      inp.addEventListener("input", () => {
+        const t = inp.value.trim();
+        editedHead = t === "" && saved.head === "" ? "" : `# ${t}`;
+        row.classList.toggle("changed", headDirty());
+        paintStatus();
+      });
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+          e.preventDefault();
+          saveDoc();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+      return row;
     }
     const ta = el("textarea", { class: "ed-ta ed-head-ta", spellcheck: "false", "aria-label": "머리(# 제목과 첫 글)", rows: Math.max(2, editedHead.split("\n").length) });
     ta.value = editedHead;
@@ -348,7 +372,7 @@ export async function renderEditor(type, id, focusKey) {
   function paintStatus() {
     const keys = dirtyKeys();
     const n = keys.length + (headDirty() ? 1 : 0);
-    const names = keys.map((k) => saved.blocks.find((b) => b.key === k)?.heading ?? k);
+    const names = [...(headDirty() ? [HEAD_NAME()] : []), ...keys.map((k) => saved.blocks.find((b) => b.key === k)?.heading ?? k)];
     status.replaceChildren(
       el("span", { class: `chip ${n ? "warnchip" : ""}`, text: n ? `저장 안 됨 · 바뀐 절 ${n}` : "저장됨" }),
     );
