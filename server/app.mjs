@@ -191,7 +191,9 @@ export async function buildApp({ storeDir, auth: authConfig, schemasDir = SCHEMA
   // and style="" in its own document. Its scripts stay 'self'.
   const frameCsp = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors ${frameAncestors(auth.feUrl)}`;
   app.addHook("onSend", async (request, reply, payload) => {
-    reply.header("content-security-policy", request.routeOptions?.url === MERMAID_FRAME ? frameCsp : csp);
+    // A route that set its own policy keeps it (the asset route's SVG sandbox).
+    if (!reply.hasHeader("content-security-policy"))
+      reply.header("content-security-policy", request.routeOptions?.url === MERMAID_FRAME ? frameCsp : csp);
     reply.header("x-content-type-options", "nosniff");
     return payload;
   });

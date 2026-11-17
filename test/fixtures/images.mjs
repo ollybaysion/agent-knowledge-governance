@@ -37,3 +37,9 @@ export function webpBytes(chunk, width, height) {
   }
   return b;
 }
+
+// A whole SVG document. `inner` goes between the root tags (the refusal tests
+// put what the server refuses there), `attrs` replaces the size attributes.
+export function svgBytes(width, height, inner = "", attrs = `width="${width}" height="${height}"`) {
+  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" ${attrs}>${inner}<rect width="10" height="10"/></svg>\n`, "utf8");
+}

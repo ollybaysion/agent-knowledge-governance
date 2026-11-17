@@ -450,6 +450,18 @@ test("cli asset-push: prints sha256 width height; --alt adds the md line; a file
     const bad = await runCli(["asset-push", join(dir, "b.png")], { serverUrl });
     assert.equal(bad.status, 1);
     assert.match(bad.stderr, /PNG · JPEG · WebP/);
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><rect width="48" height="24"/></svg>`;
+    writeFileSync(join(dir, "fig.svg"), svg);
+    const drawn = await runCli(["asset-push", join(dir, "fig.svg")], { serverUrl });
+    assert.equal(drawn.status, 0, drawn.stderr);
+    assert.equal(drawn.stdout, `${createHash("sha256").update(svg).digest("hex")} 48 24\n`);
+
+    writeFileSync(join(dir, "run.svg"), svg.replace("<rect", `<script>alert(1)</script><rect`));
+    const unsafe = await runCli(["asset-push", join(dir, "run.svg")], { serverUrl });
+    assert.equal(unsafe.status, 1);
+    assert.match(unsafe.stderr, /SVG 에 받지 않는 것이 있습니다/);
+    assert.match(unsafe.stderr, /<script> 요소가 있습니다/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     await cleanup();

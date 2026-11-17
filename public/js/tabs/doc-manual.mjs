@@ -6,7 +6,7 @@ import { el, toast } from "../dom.mjs";
 import { inline } from "../md.mjs";
 import { sec } from "../sec.mjs";
 
-const CAPTURE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const CAPTURE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 const CAPTURE_LIMIT = 2 * 1024 * 1024;
 
 function captureImg(step, cls) {
@@ -22,13 +22,16 @@ function captureImg(step, cls) {
 }
 
 async function uploadCapture(file) {
-  if (!CAPTURE_TYPES.includes(file.type)) return { error: "PNG · JPEG · WebP 그림만 올립니다." };
+  if (!CAPTURE_TYPES.includes(file.type)) return { error: "PNG · JPEG · WebP · SVG 그림만 올립니다." };
   if (file.size > CAPTURE_LIMIT) return { error: "캡처는 2MB 까지 올립니다." };
   const r = await api("/api/assets", { method: "POST", headers: { "content-type": file.type }, raw: file });
   if (r.ok) return { step: { asset: r.data.sha256, width: r.data.width, height: r.data.height } };
   if (r.status === 403) return { error: "admin 만 할 수 있습니다." };
   if (r.status === 413) return { error: "캡처는 2MB 까지 올립니다." };
-  if (r.status === 400 || r.status === 415) return { error: "그림을 읽지 못했습니다 — PNG · JPEG · WebP 인지 보세요." };
+  // The server says why it refused an SVG (script, on* attributes, addresses that leave the file).
+  if (r.status === 400 && r.data?.error === "unsafe_svg") return { error: `SVG 에 받지 않는 것이 있습니다 — ${(r.data.details || []).join(" · ")}` };
+  if (r.status === 400 || r.status === 415)
+    return { error: "그림을 읽지 못했습니다 — PNG · JPEG · WebP · SVG 인지, SVG 는 크기(width · height 나 viewBox)가 있는지 보세요." };
   return { error: `올리기 실패 (${r.status || "네트워크"})` };
 }
 

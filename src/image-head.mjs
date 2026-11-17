@@ -1,10 +1,12 @@
 // Image format and pixel size read from the file's own header — the upload's
-// Content-Type is a claim, the magic bytes are the fact. PNG, JPEG and WebP
-// only, the three formats a capture arrives in; no decoder dependency.
+// Content-Type is a claim, the magic bytes are the fact. PNG, JPEG and WebP,
+// the three formats a capture arrives in, and SVG, the format a drawn figure
+// arrives in (its root tag is the fact: src/svg-image.mjs); no decoder dependency.
+import { svgHead } from "./svg-image.mjs";
 
 /** @returns {{mediaType: string, width: number, height: number} | null} null when not a readable image */
 export function imageHead(buf) {
-  const head = png(buf) ?? jpeg(buf) ?? webp(buf);
+  const head = png(buf) ?? jpeg(buf) ?? webp(buf) ?? svgHead(buf);
   return head && head.width > 0 && head.height > 0 ? head : null;
 }
 

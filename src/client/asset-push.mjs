@@ -4,6 +4,7 @@
 // refusal throws.
 import { readFileSync } from "node:fs";
 import { imageHead } from "../image-head.mjs";
+import { SVG_MEDIA_TYPE, svgProblems } from "../svg-image.mjs";
 import { AkgApiError } from "./errors.mjs";
 
 const base = (serverUrl) => String(serverUrl).replace(/\/+$/, "");
@@ -11,7 +12,7 @@ const base = (serverUrl) => String(serverUrl).replace(/\/+$/, "");
 /**
  * A local picture, read and checked before anything is written.
  * @returns {{path: string, bytes: Buffer, mediaType: string, width: number, height: number}}
- * @throws {AkgApiError} bad_file: unreadable, or not PNG · JPEG · WebP
+ * @throws {AkgApiError} bad_file: unreadable, not PNG · JPEG · WebP · SVG, or an SVG the server refuses
  */
 export function readImage(path, readFile = readFileSync) {
   let bytes;
@@ -22,7 +23,12 @@ export function readImage(path, readFile = readFileSync) {
   }
   const head = imageHead(bytes);
   if (!head)
-    throw new AkgApiError(`그림 파일이 PNG · JPEG · WebP 가 아닙니다: ${path}`, { status: 0, body: { error: "bad_file", details: [path] } });
+    throw new AkgApiError(`그림 파일이 PNG · JPEG · WebP · SVG 가 아닙니다: ${path}`, { status: 0, body: { error: "bad_file", details: [path] } });
+  if (head.mediaType === SVG_MEDIA_TYPE) {
+    const problems = svgProblems(bytes);
+    if (problems.length)
+      throw new AkgApiError(`SVG 에 받지 않는 것이 있습니다: ${path}`, { status: 0, body: { error: "bad_file", details: problems.map((p) => `${path}: ${p}`) } });
+  }
   return { path, bytes, ...head };
 }
 

@@ -29,7 +29,7 @@ const USAGE = `usage:
   akg push <type>/<id> <file.json|file.md> [--create] [--note <글>] [--rev <rev>] [--dry-run] [--server <url>] [--mirror <dir>]
   akg absorb-mark <type>/<id> [--rev <rev>] [--server <url>] [--mirror <dir>]
   akg list [<type>] [--stale-absorbed] [--tag <tag>] [--server <url>] [--mirror <dir>]
-  akg asset-push <file.png|.jpg|.webp> [--alt <글>] [--server <url>] [--mirror <dir>]
+  akg asset-push <file.png|.jpg|.webp|.svg> [--alt <글>] [--server <url>] [--mirror <dir>]
 
 push: agent 토큰으로 문서를 넣고 고친다. .json = 문서 전체(봉투 + body),
   .md = body 가 { name, markdown } 인 타입(md 타입 · domain-skill · domain · starter)의 본문 글.
@@ -44,7 +44,7 @@ absorb-mark: 문서의 지식을 1급 문서에 녹였다고 표시한다(absorb
 list: 문서 한 줄씩 "<type>/<id> <rev> <녹임 rev|->", 그림이 있으면 뒤에 "그림 <n>".
   --stale-absorbed = 녹임 rev 가 없거나 rev 와 다른 문서만.
   --tag = 그 태그를 단 문서만(a,b = 둘 다 단 문서).
-asset-push: 그림 하나를 저장소에 올린다(PNG · JPEG · WebP, 2MB 까지). 출력 "<sha256> <width> <height>".
+asset-push: 그림 하나를 저장소에 올린다(PNG · JPEG · WebP · SVG, 2MB 까지). SVG 는 script · 이벤트 속성 · 파일 밖 주소가 없어야 한다. 출력 "<sha256> <width> <height>".
   --alt 를 주면 다음 줄에 md 에 붙일 "![<글>](asset:<sha256>)".
 `;
 
