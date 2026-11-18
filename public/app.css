@@ -2919,6 +2919,9 @@ a.wiki {
 .starter-bind {
   margin: 0 4px 2px 0;
 }
+.starter-hidden {
+  margin-left: 6px;
+}
 .starter-warn {
   margin: 0;
   padding-left: 16px;

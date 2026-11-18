@@ -31,6 +31,20 @@ test("sql: the item's first ```sql fence (any case, ~~~ too), text: the prose, e
   ]);
 });
 
+test("a 숨김 line outside fences is hidden, not text; 아니오 is no line; hiddenLines counts them", () => {
+  const md = [
+    "## 데이터",
+    "### a — 가", "", "숨김: 예", "", "설명.", "```sql", "SELECT 1", "```",
+    "### b — 나", "숨김: 아니오", "```sql", "숨김: 예", "```",
+    "### c — 다", "숨김: 예", "숨김: 예", "```sql", "SELECT 3", "```",
+  ].join("\n");
+  assert.deepEqual(skillDataIds(md).map(({ id, sql, text, hidden, hiddenLines }) => ({ id, sql, text, hidden, hiddenLines })), [
+    { id: "a", sql: "SELECT 1", text: "설명.", hidden: true, hiddenLines: 1 },
+    { id: "b", sql: "숨김: 예", text: null, hidden: false, hiddenLines: 1 },
+    { id: "c", sql: "SELECT 3", text: null, hidden: true, hiddenLines: 2 },
+  ]);
+});
+
 test("kind: a ```map item is 변환 (map), a ```sql item 조회 (sql); both share the id pool", () => {
   const md = "## 데이터\n\n### q — 조회\n\n```sql\nSELECT 1\n```\n\n### m — 변환\n\n```map\nch_id = chamber_id\n\ngrade = v > 1 ? \"HIGH\" : \"OK\"\n```\n\n### none — 설명\n\n글.\n";
   assert.deepEqual(skillDataIds(md).map(({ id, kind, sql, map }) => ({ id, kind, sql, map })), [

@@ -1,6 +1,7 @@
 // The item ids of a skill md's `## 데이터` section — the keys the consumer
 // looks its queries and maps up by, so they must be unique across every
 // skill. The flow fence before the first `###` is no item (src/flow/agent-md.mjs reads it).
+import { HIDDEN } from "./flow/agent-md.mjs";
 import { normalizeHeading, scan } from "./skill-sections.mjs";
 
 const DATA_SECTION = "데이터";
@@ -21,8 +22,10 @@ const trimBlankLines = (lines) => {
  * fence, `map` its first ```map fence and `text` the prose outside fences,
  * each trimmed of blank lines the way the consumer reads them (null when
  * there is none). `kind` is "map" (변환) for an item with a ```map fence,
- * "sql" (조회) for one with a ```sql fence, null for neither.
- * @returns {{id: string, title: string|null, line: number, kind: "sql"|"map"|null, sql: string|null, map: string|null, text: string|null}[]} line is 1-based
+ * "sql" (조회) for one with a ```sql fence, null for neither. A `숨김: 예` ·
+ * `숨김: 아니오` prose line (agent-md HIDDEN) is not in `text`: `hidden` is
+ * true when the first one says 예, `hiddenLines` counts them (BE refuses two).
+ * @returns {{id: string, title: string|null, line: number, kind: "sql"|"map"|null, sql: string|null, map: string|null, text: string|null, hidden: boolean, hiddenLines: number}[]} line is 1-based
  */
 export function skillDataIds(markdown) {
   const out = [];
@@ -48,15 +51,17 @@ export function skillDataIds(markdown) {
     }
     const rest = /^###\s+(.*?)\s*$/.exec(line)?.[1];
     if (!rest) {
-      body?.prose.push(line);
+      const h = body ? HIDDEN.exec(line) : null;
+      if (h) body.hidden.push(h[1] === "예");
+      else body?.prose.push(line);
       return;
     }
     const m = /^(.*?)\s+[—–-]\s+(.*)$/.exec(rest);
     out.push(m ? { id: m[1].trim(), title: m[2].trim(), line: i + 1 } : { id: rest.split(/\s+/)[0], title: null, line: i + 1 });
-    bodies.push({ prose: [], fences: [] });
+    bodies.push({ prose: [], fences: [], hidden: [] });
   });
   return out.map((item, i) => {
-    const { prose, fences } = bodies[i];
+    const { prose, fences, hidden } = bodies[i];
     const sql = fences.find((x) => x.lang === "sql");
     const map = fences.find((x) => x.lang === "map");
     return {
@@ -65,6 +70,8 @@ export function skillDataIds(markdown) {
       sql: sql ? trimBlankLines(sql.lines) : null,
       map: map ? trimBlankLines(map.lines) : null,
       text: trimBlankLines(prose),
+      hidden: hidden[0] === true,
+      hiddenLines: hidden.length,
     };
   });
 }

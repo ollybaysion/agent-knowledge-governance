@@ -389,6 +389,19 @@ test("readStarter: BE 처럼 항목을 읽고, 변환 항목 · 빈 문서는 �
   assert.deepEqual(none.queries, []);
 });
 
+test("숨김 줄: BE SkillMarkdownTool 처럼 starter · 에이전트 md 항목의 '숨김: 예' 가 hidden 이고, 아니오는 없는 것과 같고, 둘이면 거부한다", () => {
+  const item = (id, lines) => `### ${id} — 항목\n\n${lines}\`\`\`sql\nselect a from t where eqp_id = :eqp_id\n\`\`\`\n\n`;
+  const starter = readStarter("s", `# s\n\n## 데이터\n\n${item("a", "숨김: 예\n\n")}${item("b", "숨김 :  아니오 \n설명.\n")}${item("c", "")}`);
+  assert.equal(starter.rejection, null);
+  assert.deepEqual(starter.queries.map((q) => [q.id, q.hidden]), [["a", true], ["b", false], ["c", false]]);
+  const inFence = readStarter("f", "# f\n\n## 데이터\n\n### a — 가\n\n```sql\n숨김: 예\n```\n");
+  assert.equal(inFence.queries[0].hidden, false, "a fenced line is the statement");
+  const agent = readAgentMd("x", `# x\n\n## 데이터\n\n\`\`\`mermaid\nflowchart TD\n  eqp_id([설비]) --> a\n\`\`\`\n\n${item("a", "숨김: 예\n")}`);
+  assert.equal(agent.rejection, null);
+  assert.deepEqual(agent.queries.map((q) => [q.id, q.hidden]), [["a", true]]);
+  assert.equal(readStarter("d", `# d\n\n## 데이터\n\n${item("a", "숨김: 예\n숨김: 아니오\n")}`).rejection, "d: 항목 `a` 의 숨김 줄은 하나다");
+});
+
 // ---- the map node (flow-map-node-spec.md): BE's map-node samples and their codes
 const MAP_EXPECTED = {
   "ok-rename.md": [],
