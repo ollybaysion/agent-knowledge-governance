@@ -40,11 +40,14 @@ function infoBindWarning(id, sql, kind) {
 /**
  * The starter document as the doc view shows it: each item with the tables
  * it reads, its kind (null without a ```sql fence), its binds and warnings.
+ * `hidden` is the item's `숨김: 예` line: the view marks it 「숨김」, and the
+ * first screen keeps it picked and shows no row for it. Two such lines are a
+ * warning (BE refuses the document).
  * `warnings` is every warning in that order.
  * @param {string} markdown
  * @param {Map<string, string|undefined>} kinds
  * @returns {{
- *   items: {id: string, title: string|null, line: number, tables: string[], kind: "info"|"data"|null, binds: string[], warnings: string[]}[],
+ *   items: {id: string, title: string|null, line: number, tables: string[], kind: "info"|"data"|null, binds: string[], hidden: boolean, warnings: string[]}[],
  *   warnings: string[],
  * }}
  */
@@ -54,11 +57,12 @@ export function starterView(markdown, kinds) {
     const kind = item.sql ? queryKind(tables, kinds) : null;
     const warnings = [];
     if (!item.sql) warnings.push(`항목 ${code(item.id)} 에 \`\`\`sql 펜스가 없다.`);
+    if (item.hiddenLines > 1) warnings.push(`항목 ${code(item.id)} 의 숨김 줄은 하나다. BE 가 이 문서를 읽지 않는다.`);
     for (const t of tables)
       if (!kinds.has(t)) warnings.push(`항목 ${code(item.id)} 가 읽는 표 ${code(t)} 에 활성 DB 스키마 문서가 없다. 이 표는 info 로 센다.`);
     const bind = infoBindWarning(item.id, item.sql, kind);
     if (bind) warnings.push(bind);
-    return { id: item.id, title: item.title, line: item.line, tables, kind, binds: item.sql ? varsOf(item.sql) : [], warnings };
+    return { id: item.id, title: item.title, line: item.line, tables, kind, binds: item.sql ? varsOf(item.sql) : [], hidden: item.hidden, warnings };
   });
   return { items, warnings: items.flatMap((i) => i.warnings) };
 }

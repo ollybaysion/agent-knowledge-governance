@@ -85,6 +85,14 @@ test("starterView: each item's tables · kind · binds · warnings in document o
   assert.deepEqual(view.warnings, view.items.flatMap((i) => i.warnings));
 });
 
+test("starterView: a 숨김: 예 item is hidden (the view's 「숨김」 mark); two 숨김 lines are a warning", () => {
+  const md = ["## 데이터", "### a — 가", "숨김: 예", fence("SELECT 1 FROM FDC_EQUIPMENT"), "### b — 나", fence("SELECT 2 FROM FDC_EQUIPMENT"), "### c — 다", "숨김: 예", "숨김: 아니오", fence("SELECT 3 FROM FDC_EQUIPMENT")].join("\n");
+  const view = starterView(md, KINDS);
+  assert.deepEqual(view.items.map((i) => [i.id, i.hidden]), [["a", true], ["b", false], ["c", true]]);
+  assert.deepEqual(view.items[2].warnings, ["항목 `c` 의 숨김 줄은 하나다. BE 가 이 문서를 읽지 않는다."]);
+  assert.deepEqual(view.warnings, view.items[2].warnings);
+});
+
 test("queryWarnings: a starter's three kinds; an agent md's info-bind ones; none for another type or no markdown", () => {
   assert.deepEqual(queryWarnings("starter", DOC, KINDS), starterView(DOC, KINDS).warnings);
   const agent = [
