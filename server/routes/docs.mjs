@@ -213,9 +213,20 @@ export function registerDocsRoutes(app) {
   // A screen-map's are its `data` ids no registered query has.
   const queryWarningsOf = (type, doc) => {
     const list =
-      type === SCREEN_MAP ? screenDataOf(doc).warnings : queryWarnings(type, doc.body?.markdown, tableKinds(catalog));
+      type === SCREEN_MAP
+        ? screenDataOf(doc).warnings
+        : queryWarnings(type, doc.body?.markdown, tableKinds(catalog), starterIdsOf(type, doc.id));
     return list.length ? { queryWarnings: list } : {};
   };
+  // The registered starters' item ids, a starter `id` itself left out: the
+  // starter half of the 구간 출처 check. The flow check reads the same pool
+  // (registeredQueries). The store is read only when the check asks.
+  const starterIdsOf = (type, id) => () =>
+    new Set(
+      [...registeredQueries(agentRegistry(storeDir))]
+        .filter(([, d]) => d.type === STARTER && !(type === STARTER && d.id === id))
+        .map(([q]) => q),
+    );
   // A screen-map's `data` against the registered queries (src/starter.mjs
   // screenData); the store is read only when there is `data`.
   const screenDataOf = (doc) => {
@@ -225,7 +236,7 @@ export function registerDocsRoutes(app) {
   // A starter document's items for its doc view.
   const starterOf = (doc) => {
     if (typeof doc.body?.markdown !== "string") return {};
-    const { items } = starterView(doc.body.markdown, tableKinds(catalog));
+    const { items } = starterView(doc.body.markdown, tableKinds(catalog), starterIdsOf(STARTER, doc.id));
     return { starter: { items } };
   };
   // The piece ids a 정답 can name: this skill's and its linked skills' (LINK1 · LINK2).

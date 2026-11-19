@@ -670,6 +670,7 @@ async function starterBody(ctx, host) {
         el("code", { text: it.id }),
         it.title ? el("span", { text: ` ${it.title}` }) : null,
         it.hidden ? el("span", { class: "b b-sc starter-hidden", title: "숨김: 예 — 첫 화면이 늘 고른 채로 두고 줄로 세우지 않는다", text: "숨김" }) : null,
+        it.windowSources?.length ? el("span", { class: "dim small starter-window", text: `구간 출처: ${it.windowSources.join(", ")}` }) : null,
       ]),
       el("td", {}, it.tables.length ? it.tables.map(tableChip) : [el("span", { class: "dim", text: "—" })]),
       el("td", {}, kindBadge(it.kind)),
@@ -682,7 +683,7 @@ async function starterBody(ctx, host) {
     title: "조회 항목",
     extra: el("span", { class: "count-pill", text: String(items.length) }),
     children: [
-      el("p", { class: "dim small", text: "## 데이터 의 항목마다 읽는 표와 kind 입니다. kind 는 읽는 표의 DB 스키마 문서 성격에서 나옵니다. data 표가 하나라도 있으면 data, 그 밖은 info 입니다. 「숨김」 은 산문에 `숨김: 예` 줄이 있는 항목입니다. 첫 화면이 늘 고른 채로 두고 줄로 세우지 않습니다." }),
+      el("p", { class: "dim small", text: "## 데이터 의 항목마다 읽는 표와 kind 입니다. kind 는 읽는 표의 DB 스키마 문서 성격에서 나옵니다. data 표가 하나라도 있으면 data, 그 밖은 info 입니다. 「숨김」 은 산문에 `숨김: 예` 줄이 있는 항목입니다. 첫 화면이 늘 고른 채로 두고 줄로 세우지 않습니다. 「구간 출처」 는 산문에 `구간 출처: id, id` 줄이 있는 항목입니다. BE 는 그 출처 표의 사건 구간마다 이 조회를 돌립니다." }),
       items.length
         ? el("div", { class: "tbl-wrap" }, el("table", { class: "cols-tbl starter-tbl" }, [
             el("thead", {}, el("tr", {}, ["항목", "읽는 표", "kind", "바인드", "경고"].map((t) => el("th", { text: t })))),

@@ -117,6 +117,7 @@ test("chart 펜스가 없는 옛 문서는 그대로 읽는다 — chart 키가 
     sql: "select ts, value from fdc_trace",
     vars: [],
     hidden: false,
+    windowSources: [],
   });
   assert.deepEqual(r.warnings, []);
   const two = readAgentMd(

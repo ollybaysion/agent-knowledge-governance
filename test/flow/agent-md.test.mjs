@@ -402,6 +402,27 @@ test("숨김 줄: BE SkillMarkdownTool 처럼 starter · 에이전트 md 항목�
   assert.equal(readStarter("d", `# d\n\n## 데이터\n\n${item("a", "숨김: 예\n숨김: 아니오\n")}`).rejection, "d: 항목 `a` 의 숨김 줄은 하나다");
 });
 
+test("구간 출처 줄: BE SkillMarkdownTool 처럼 starter · 에이전트 md 항목의 id 목록이 windowSources 이고, 펜스 안은 문장이고, 둘이면 거부한다", () => {
+  const item = (id, lines) =>
+    `### ${id} — 항목\n\n${lines}\`\`\`sql\nselect a from t where eqp_id = :eqp_id and t between :start_time and :end_time\n\`\`\`\n\n`;
+  const starter = readStarter("s", `# s\n\n## 데이터\n\n${item("a", "구간 출처: interlock_hist\n\n")}${item("b", "구간 출처 :  interlock_hist , lot_hist,, \n숨김: 예\n")}${item("c", "")}`);
+  assert.equal(starter.rejection, null);
+  assert.deepEqual(starter.queries.map((q) => [q.id, q.windowSources, q.hidden]), [
+    ["a", ["interlock_hist"], false],
+    ["b", ["interlock_hist", "lot_hist"], true],
+    ["c", [], false],
+  ]);
+  const inFence = readStarter("f", "# f\n\n## 데이터\n\n### a — 가\n\n```sql\n구간 출처: x\n```\n");
+  assert.deepEqual(inFence.queries[0].windowSources, [], "a fenced line is the statement");
+  const agent = readAgentMd(
+    "x",
+    `# x\n\n## 데이터\n\n\`\`\`mermaid\nflowchart TD\n  eqp_id([설비]) --> ev\n  eqp_id --> trend\n  duration([기간]) --> ev\n  duration --> trend\n\`\`\`\n\n${item("ev", "")}${item("trend", "구간 출처: ev\n")}`,
+  );
+  assert.equal(agent.rejection, null);
+  assert.deepEqual(agent.queries.map((q) => [q.id, q.windowSources]), [["ev", []], ["trend", ["ev"]]]);
+  assert.equal(readStarter("d", `# d\n\n## 데이터\n\n${item("a", "구간 출처: x\n구간 출처: y\n")}`).rejection, "d: 항목 `a` 의 구간 출처 줄은 하나다");
+});
+
 // ---- the map node (flow-map-node-spec.md): BE's map-node samples and their codes
 const MAP_EXPECTED = {
   "ok-rename.md": [],

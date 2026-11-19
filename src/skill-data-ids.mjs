@@ -1,7 +1,7 @@
 // The item ids of a skill md's `## 데이터` section — the keys the consumer
 // looks its queries and maps up by, so they must be unique across every
 // skill. The flow fence before the first `###` is no item (src/flow/agent-md.mjs reads it).
-import { HIDDEN } from "./flow/agent-md.mjs";
+import { HIDDEN, WINDOW_SOURCES, windowSourceIds } from "./flow/agent-md.mjs";
 import { normalizeHeading, scan } from "./skill-sections.mjs";
 
 const DATA_SECTION = "데이터";
@@ -25,7 +25,10 @@ const trimBlankLines = (lines) => {
  * "sql" (조회) for one with a ```sql fence, null for neither. A `숨김: 예` ·
  * `숨김: 아니오` prose line (agent-md HIDDEN) is not in `text`: `hidden` is
  * true when the first one says 예, `hiddenLines` counts them (BE refuses two).
- * @returns {{id: string, title: string|null, line: number, kind: "sql"|"map"|null, sql: string|null, map: string|null, text: string|null, hidden: boolean, hiddenLines: number}[]} line is 1-based
+ * A `구간 출처: a, b` prose line (agent-md WINDOW_SOURCES) is not in `text`
+ * either: `windowSources` is the first one's ids ([] without one),
+ * `windowSourcesLines` counts them (BE refuses two).
+ * @returns {{id: string, title: string|null, line: number, kind: "sql"|"map"|null, sql: string|null, map: string|null, text: string|null, hidden: boolean, hiddenLines: number, windowSources: string[], windowSourcesLines: number}[]} line is 1-based
  */
 export function skillDataIds(markdown) {
   const out = [];
@@ -52,16 +55,18 @@ export function skillDataIds(markdown) {
     const rest = /^###\s+(.*?)\s*$/.exec(line)?.[1];
     if (!rest) {
       const h = body ? HIDDEN.exec(line) : null;
+      const w = body && !h ? WINDOW_SOURCES.exec(line) : null;
       if (h) body.hidden.push(h[1] === "예");
+      else if (w) body.windowSources.push(windowSourceIds(w[1]));
       else body?.prose.push(line);
       return;
     }
     const m = /^(.*?)\s+[—–-]\s+(.*)$/.exec(rest);
     out.push(m ? { id: m[1].trim(), title: m[2].trim(), line: i + 1 } : { id: rest.split(/\s+/)[0], title: null, line: i + 1 });
-    bodies.push({ prose: [], fences: [], hidden: [] });
+    bodies.push({ prose: [], fences: [], hidden: [], windowSources: [] });
   });
   return out.map((item, i) => {
-    const { prose, fences, hidden } = bodies[i];
+    const { prose, fences, hidden, windowSources } = bodies[i];
     const sql = fences.find((x) => x.lang === "sql");
     const map = fences.find((x) => x.lang === "map");
     return {
@@ -72,6 +77,8 @@ export function skillDataIds(markdown) {
       text: trimBlankLines(prose),
       hidden: hidden[0] === true,
       hiddenLines: hidden.length,
+      windowSources: windowSources[0] ?? [],
+      windowSourcesLines: windowSources.length,
     };
   });
 }
