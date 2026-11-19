@@ -5,6 +5,7 @@ import { allDocs } from "./api.mjs";
 import { el, icon } from "./dom.mjs";
 import { kindTag } from "./md.mjs";
 import { groupOrder, matching, rankDocs, resultHash } from "/lib/cmdk.mjs";
+import { rowName } from "/lib/miller.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { shelf } from "./shelf.mjs";
 import { DOC_TYPES, TYPES, canEdit, canUpload, isAdmin, typeColor } from "./state.mjs";
@@ -116,12 +117,15 @@ export function openCmdk() {
     items[active].node.scrollIntoView({ block: "nearest" });
   }
   const groupHead = (label, ic, extra) => el("div", { class: "ck-g", role: "presentation" }, [ic ? icon(ic, 13) : null, ` ${label}`, extra ? el("span", { class: "dim", text: extra }) : null]);
-  // A table, a command and a skill-md document go by id; the rest by title.
-  const byId = (type) => ["db-schema", "msg-format", "domain-skill", "domain", "starter"].includes(type);
+  // The name as the 문서 탭 list shows it (rowName); an id is mono.
+  const nameSpan = (d, q) => {
+    const name = rowName(d);
+    return el("span", { class: `ck-name${name === d.id ? " mono" : ""}` }, marked(name, q));
+  };
   const docOption = (d, q, meta) =>
     option([
       el("span", { class: "chip ck-type" }, [el("span", { class: "tdot", style: { "--c": typeColor(d.type) } }), ` ${d.type === "domain-skill" ? "스킬 문서" : TYPES.find((t) => t.id === d.type)?.label ?? d.type}`]),
-      el("span", { class: `ck-name${byId(d.type) ? " mono" : ""}` }, marked(byId(d.type) ? d.id : d.title ?? d.id, q)),
+      nameSpan(d, q),
       meta?.section ? el("span", { class: "dim ck-sec", text: `› ${meta.section}` }) : null,
       el("span", { class: "sp" }),
       meta?.line ? el("span", { class: "dim ck-line" }, marked(clip(meta.line, q), q)) : meta?.when ? el("span", { class: "dim", text: meta.when }) : null,
@@ -129,7 +133,7 @@ export function openCmdk() {
   const shelfRow = (x) =>
     option([
       el("span", { class: "kind-badge", style: { "--c": typeColor(x.doc.type) }, text: kindTag(x.doc.type, x.doc.role) }),
-      el("span", { class: "ck-name mono", text: x.doc.id }),
+      nameSpan(x.doc, ""),
     ], (newTab) => go(`#/doc/${x.doc.type}/${enc(x.doc.id)}`, newTab));
 
   function paint() {

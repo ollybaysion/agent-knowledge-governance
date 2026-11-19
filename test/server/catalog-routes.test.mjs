@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { mdTitle } from "../../src/skill-sections.mjs";
 import { parseWikilinks, wikiTexts } from "../../src/wikilinks.mjs";
 import { buildApp } from "../../server/app.mjs";
 import { agentRegistry, tableClassOf } from "../../server/data-ids.mjs";
@@ -63,7 +64,7 @@ function oldList(storeDir, types, { type, tier, q, absorbed, tag } = {}) {
         tags: doc.tags ?? [],
         assetCount: (doc.assets ?? []).length,
         links: doc.links ?? [],
-        title: b.title ?? b.name ?? b.table ?? b.command ?? null,
+        title: (typeof b.markdown === "string" ? mdTitle(b.markdown) : null) ?? b.title ?? b.name ?? b.table ?? b.command ?? null,
         ...(doc.origin ? { origin: doc.origin } : {}),
         ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
         ...(t === "db-schema"
@@ -226,6 +227,32 @@ test("after create · edit · archive · delete · retype · tags · origin · l
     await call("DELETE", "/api/docs/db-schema/fdc_sensor", undefined, await ifMatch("db-schema", "fdc_sensor"));
     assert.equal(readJson(storeDir, "db-schema/fdc_chamber.json").links, undefined);
     await assertSameAsFiles("delete");
+  } finally {
+    await app.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("an md document's list title is its # title line, body.name without one; a PUT of a new line changes it; a table keeps its name", async () => {
+  const home = mkdtempSync(join(tmpdir(), "akg-catalog-title-test-"));
+  const auth = await signIn(home, [{ id: "renoir", group: "admin", token: "a" }]);
+  const app = await buildApp({ storeDir: join(home, "store"), auth });
+  const call = async (method, url, payload, headers = {}) => {
+    const res = await app.inject({ method, url, headers: { ...as("a"), ...headers }, ...(payload !== undefined ? { payload } : {}) });
+    assert.ok(res.statusCode < 300, `${method} ${url}: ${res.statusCode} ${res.body}`);
+    return res.json();
+  };
+  const titles = async () => Object.fromEntries((await call("GET", "/api/docs")).docs.map((d) => [`${d.type}/${d.id}`, d.title]));
+  try {
+    await call("POST", "/api/docs/voc", mdDoc("voc", "alarm-guide", "# 알람 안내\n\n## 원인\n\n센서\n"));
+    await call("POST", "/api/docs/voc", mdDoc("voc", "no-title", "## 원인\n\n센서\n"));
+    await call("POST", "/api/docs/db-schema", table("fdc_sensor"));
+    assert.deepEqual(await titles(), { "db-schema/fdc_sensor": "FDC_SENSOR", "voc/alarm-guide": "알람 안내", "voc/no-title": "no-title" });
+
+    const { rev, json } = await call("GET", "/api/docs/voc/alarm-guide");
+    await call("PUT", "/api/docs/voc/alarm-guide", { ...json.body, markdown: "# 알람 대응 안내\n\n## 원인\n\n센서\n" }, { "if-match": rev });
+    assert.equal((await titles())["voc/alarm-guide"], "알람 대응 안내");
+    assert.equal((await titles())["db-schema/fdc_sensor"], "FDC_SENSOR");
   } finally {
     await app.close();
     rmSync(home, { recursive: true, force: true });

@@ -8,7 +8,7 @@ import { allDocs, api, invalidateDocs } from "../api.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
-import { SUB_LABEL, docRows, inDocsTab, move, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
+import { SUB_LABEL, docRows, inDocsTab, move, rowName, rowTier, tagGroups, typeRows } from "/lib/miller.mjs";
 import { tagRows, withTag } from "/lib/tags.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { isFav, shelf, toggleFav } from "../shelf.mjs";
@@ -33,7 +33,6 @@ export function whenLabel(at) {
   if (diff === 1) return `어제 ${hm}`;
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-const rowName = (d) => (d.type === "db-schema" || d.type === "msg-format" ? d.id : d.title && d.title !== d.id ? d.title : d.id);
 // The docs tab holds a domain-skill's sub drafts only; its mains are the 에이전트 tab's.
 const draftRole = (type) => (type === "domain-skill" ? "sub" : null);
 const tierChip = (d) => {

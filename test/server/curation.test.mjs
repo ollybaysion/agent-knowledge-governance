@@ -137,7 +137,7 @@ test("POST duplicates: the key sorts the pair, the same pair again is updated, t
       { type: p.a.type, id: p.a.id, rev: p.a.rev, status: p.a.status, exists: p.a.exists, currentRev: p.a.currentRev },
       { type: "unclassified", id: "fdc-app--x-1a2b3c", rev: revU, status: "inactive", exists: true, currentRev: revU },
     );
-    assert.equal(p.b.title, "alarm-guide");
+    assert.equal(p.b.title, "알람 안내"); // the md's # title line
     assert.equal(p.b.status, "active");
     assert.equal(p.b.currentRev, revV);
     assert.ok(existsSync(join(t.storeDir, `curation/duplicates/${key}.json`)));

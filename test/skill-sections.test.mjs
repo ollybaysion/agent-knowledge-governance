@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { joinSkill, SkillSplitError, splitSkill } from "../src/skill-sections.mjs";
+import { joinSkill, mdTitle, SkillSplitError, splitSkill } from "../src/skill-sections.mjs";
 
 const example = JSON.parse(
   readFileSync(new URL("../examples/domain-skill/fdc-explain-sensor-origin.json", import.meta.url), "utf8"),
@@ -51,4 +51,14 @@ test("the 데이터 section keeps its flow fence before its first ### and its qu
   assert.ok(data.startsWith("```mermaid\nflowchart TD\n"), data);
   assert.ok(data.indexOf("```mermaid") < data.indexOf("### eqp_state") && data.indexOf("### eqp_state") < data.indexOf("### alarm_list"));
   assert.equal(joinSkill(title, sections), md);
+});
+
+test("mdTitle is the first # line outside a fence; none or a blank one is null", () => {
+  assert.equal(mdTitle("# 알람 대응 안내 ##\n\n## 원인\n"), "알람 대응 안내");
+  assert.equal(mdTitle("앞 글\r\n# 제목\r\n"), "제목");
+  assert.equal(mdTitle("```sh\n# 주석\n```\n\n# 진짜 제목\n"), "진짜 제목");
+  assert.equal(mdTitle("## 절만 있다\n"), null);
+  assert.equal(mdTitle("#\n본문\n"), null);
+  assert.equal(mdTitle("#   \n# 다음\n"), null);
+  assert.equal(mdTitle(undefined), null);
 });

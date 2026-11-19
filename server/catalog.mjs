@@ -3,6 +3,7 @@
 // (store.onCommit). The list, the tag panel, the type counts, backlinks and
 // the link and [[ ]] checks read this instead of every document file — a
 // store of 10,000 documents is 50 MB of JSON.
+import { mdTitle } from "../src/skill-sections.mjs";
 import { parseWikilinks, wikiTexts } from "../src/wikilinks.mjs";
 import { coverageOf } from "../src/table-class.mjs";
 import { tierSummary } from "./slots.mjs";
@@ -16,12 +17,15 @@ const NONE = Object.freeze([]);
 const listOf = (xs) => (Array.isArray(xs) && xs.length ? xs : NONE);
 
 /**
- * The name people know a document by, for the dashboard's search: a manual's
- * title, a screen's name, a skill's name, a table, a command.
+ * The name people know a document by, for the dashboard's list and search:
+ * an md body's `# title` line (the document page's head reads the same
+ * {@link mdTitle}), a manual's title, a screen's name, a skill's name, a
+ * table, a command.
  */
 export function titleOf(doc) {
   const b = doc.body ?? {};
-  return b.title ?? b.name ?? b.table ?? b.command ?? null;
+  const heading = typeof b.markdown === "string" ? mdTitle(b.markdown) : null;
+  return heading ?? b.title ?? b.name ?? b.table ?? b.command ?? null;
 }
 
 /**
