@@ -78,6 +78,19 @@ param_name([이름])
 param_name -.-> param_list`)), []);
 });
 
+test("기간 입력은 시간 바인드 하나만 쓴 조회도 채운다", () => {
+  const recent = pool(q("recent_alarm", ["eqp_id", "end_time"], ["alarm_time"]), q("since_setup", ["eqp_id", "START_TIME"], ["evt_time"]));
+  const own = flow(`eqp_id([설비])
+duration([기간])
+eqp_id --> recent_alarm
+duration --> recent_alarm
+eqp_id --> since_setup
+duration --> since_setup`);
+  const ids = ["recent_alarm", "since_setup"];
+  const f = facts("recent", ids, recent, new Map([["recent", md("recent", own, ids)]]));
+  assert.deepEqual(check(own, f), []);
+});
+
 test("공통 md 의 끝 조회 출력도 이름으로 흘러든다", () => {
   const byLine = md("eqp-by-line", flow("line([라인])\nline --> eqp_by_line"), ["eqp_by_line"]);
   assert.deepEqual(codesOf(checkBody(`eqp-by-line[[라인의 설비]]
