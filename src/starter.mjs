@@ -40,8 +40,9 @@ function infoBindWarning(id, sql, kind) {
 /**
  * A document's `구간 출처` check, one per document: `of(item)` gives an item's
  * warnings. A source id must be a ```sql item of the same document or an item
- * of a registered starter. The item's SQL must take both :start_time and
- * :end_time (any case). BE warns the same way and leaves the line out.
+ * of a registered starter. The item's SQL must take :start_time, :end_time
+ * or both (any case). With one of them, the SQL itself sets the window's
+ * length. BE warns the same way and leaves the line out.
  * @param {ReturnType<typeof skillDataIds>} items the document's items
  * @param {() => Set<string>} starterIds the registered starters' item ids;
  *   called once, at the first source the document does not hold
@@ -54,7 +55,7 @@ function windowCheck(items, starterIds) {
     if (!item.windowSources.length) return [];
     const out = item.windowSources.filter((s) => !known(s)).map((s) => `항목 ${code(item.id)} 의 구간 출처 ${code(s)} 를 찾을 수 없다.`);
     const vars = new Set(item.sql ? varsOf(item.sql).map((v) => v.toLowerCase()) : []);
-    if (item.sql && !(vars.has(START_TIME) && vars.has(END_TIME)))
+    if (item.sql && !vars.has(START_TIME) && !vars.has(END_TIME))
       out.push(`항목 ${code(item.id)} 는 시간 바인드가 없어 구간 출처 줄을 쓸 수 없다.`);
     return out;
   };

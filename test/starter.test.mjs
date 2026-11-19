@@ -93,7 +93,7 @@ test("starterView: a 숨김: 예 item is hidden (the view's 「숨김」 mark); 
   assert.deepEqual(view.warnings, view.items[2].warnings);
 });
 
-test("starterView: a 구간 출처 item's windowSources; an unknown source, a query without both time binds and two lines are warnings", () => {
+test("starterView: a 구간 출처 item's windowSources; an unknown source, a query without a time bind and two lines are warnings", () => {
   const events = fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time");
   const md = [
     "## 데이터",
@@ -101,6 +101,8 @@ test("starterView: a 구간 출처 item's windowSources; an unknown source, a qu
     "### trend — 추이", "구간 출처: setup_events, interlock_hist", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :START_TIME AND :End_Time"),
     "### late — 늦은", "구간 출처: lot_hist", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME > :start_time"),
     "### twice — 둘", "구간 출처: setup_events", "구간 출처: setup_events", events,
+    "### flat — 시간 없음", "구간 출처: setup_events", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id"),
+    "### tail — 끝만", "구간 출처: setup_events", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :End_Time - 1/144 AND :End_Time"),
   ].join("\n");
   const view = starterView(md, KINDS, () => new Set(["interlock_hist"]));
   assert.deepEqual(view.items.map((i) => [i.id, i.windowSources]), [
@@ -108,13 +110,14 @@ test("starterView: a 구간 출처 item's windowSources; an unknown source, a qu
     ["trend", ["setup_events", "interlock_hist"]],
     ["late", ["lot_hist"]],
     ["twice", ["setup_events"]],
+    ["flat", ["setup_events"]],
+    ["tail", ["setup_events"]],
   ]);
   assert.deepEqual(view.items[1].warnings, [], "a source of this document and one of a registered starter; time binds in any case");
-  assert.deepEqual(view.items[2].warnings, [
-    "항목 `late` 의 구간 출처 `lot_hist` 를 찾을 수 없다.",
-    "항목 `late` 는 시간 바인드가 없어 구간 출처 줄을 쓸 수 없다.",
-  ]);
+  assert.deepEqual(view.items[2].warnings, ["항목 `late` 의 구간 출처 `lot_hist` 를 찾을 수 없다."], ":start_time alone is a time bind");
   assert.deepEqual(view.items[3].warnings, ["항목 `twice` 의 구간 출처 줄은 하나다. BE 가 이 문서를 읽지 않는다."]);
+  assert.deepEqual(view.items[4].warnings, ["항목 `flat` 는 시간 바인드가 없어 구간 출처 줄을 쓸 수 없다."]);
+  assert.deepEqual(view.items[5].warnings, [], ":end_time alone is a time bind, any case");
   assert.deepEqual(starterView(md, KINDS).items[1].warnings, ["항목 `trend` 의 구간 출처 `interlock_hist` 를 찾을 수 없다."], "no registered starter");
   let asked = 0;
   starterView(["## 데이터", "### setup_events — 셋업 이력", events, "### trend — 추이", "구간 출처: setup_events", events].join("\n"), KINDS, () => (asked++, new Set()));

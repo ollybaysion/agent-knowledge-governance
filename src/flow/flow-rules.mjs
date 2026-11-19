@@ -8,7 +8,7 @@ import { OPTION_HEAD, QueryFlow, edgeText } from "./flow-compiler.mjs";
 import { parseExpr, splitMapLine } from "./map-expr.mjs";
 import { EQP_BINDS, isEqpBind, isTimeBind } from "../sql-bind.mjs";
 
-/** The input that fills :start_time and :end_time at once — the one exception. */
+/** The input that fills a query's time binds (:start_time, :end_time or both) — the one exception. */
 export const DURATION = "duration";
 
 const error = (code, message, line = 0) => flowError(line, code, message);
