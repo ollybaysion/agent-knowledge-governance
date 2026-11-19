@@ -45,6 +45,20 @@ test("a 숨김 line outside fences is hidden, not text; 아니오 is no line; hi
   ]);
 });
 
+test("a 구간 출처 line outside fences is windowSources (comma-split, trimmed), not text; windowSourcesLines counts them", () => {
+  const md = [
+    "## 데이터",
+    "### a — 가", "", "구간 출처: interlock_hist, lot_hist ", "", "설명.", "```sql", "SELECT 1", "```",
+    "### b — 나", "```sql", "구간 출처: x", "```",
+    "### c — 다", "구간 출처 : x", "구간 출처: y", "```sql", "SELECT 3", "```",
+  ].join("\n");
+  assert.deepEqual(skillDataIds(md).map(({ id, sql, text, windowSources, windowSourcesLines }) => ({ id, sql, text, windowSources, windowSourcesLines })), [
+    { id: "a", sql: "SELECT 1", text: "설명.", windowSources: ["interlock_hist", "lot_hist"], windowSourcesLines: 1 },
+    { id: "b", sql: "구간 출처: x", text: null, windowSources: [], windowSourcesLines: 0 },
+    { id: "c", sql: "SELECT 3", text: null, windowSources: ["x"], windowSourcesLines: 2 },
+  ]);
+});
+
 test("kind: a ```map item is 변환 (map), a ```sql item 조회 (sql); both share the id pool", () => {
   const md = "## 데이터\n\n### q — 조회\n\n```sql\nSELECT 1\n```\n\n### m — 변환\n\n```map\nch_id = chamber_id\n\ngrade = v > 1 ? \"HIGH\" : \"OK\"\n```\n\n### none — 설명\n\n글.\n";
   assert.deepEqual(skillDataIds(md).map(({ id, kind, sql, map }) => ({ id, kind, sql, map })), [

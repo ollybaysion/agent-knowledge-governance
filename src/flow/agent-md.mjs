@@ -32,6 +32,10 @@ const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const FENCE = /^(`{3,}|~{3,})\s*([A-Za-z0-9_-]*)\s*$/;
 // BE SkillMarkdownTool.HIDDEN: an item's prose line outside fences; 예 makes it hidden, 아니오 is no line.
 export const HIDDEN = /^숨김\s*:\s*(예|아니오)\s*$/;
+// BE SkillMarkdownTool.WINDOW_SOURCES: an item's prose line outside fences; its value is query ids split by commas.
+export const WINDOW_SOURCES = /^구간 출처\s*:\s*(.+)$/;
+/** The ids of a {@link WINDOW_SOURCES} line's value: split by commas, each trimmed, the empty ones left out. */
+export const windowSourceIds = (value) => value.split(",").map((s) => s.trim()).filter(Boolean);
 const LINE_BREAK = /\r\n|[\n\v\f\r\x85\p{Zl}\p{Zp}]/u;
 // BE Query.varsOf: literals blanked, then every :name once, first-seen order.
 const BIND_VAR = /:([A-Za-z][A-Za-z0-9_]*)/g;
@@ -135,23 +139,31 @@ function itemFences(rows) {
   return { fences, unclosed: open !== null };
 }
 
-// The item's `숨김:` line outside its fences (BE SkillMarkdownTool.need): true
-// for 예. A second such line refuses the md.
-function hiddenOf(name, id, rows) {
+// The item's `숨김:` and `구간 출처:` lines outside its fences (BE
+// SkillMarkdownTool.need): hidden is true for 예, windowSources the source
+// ids ([] without the line). A second line of either kind refuses the md.
+function proseMarks(name, id, rows) {
   let open = null;
   let hidden = null;
+  let windowSources = null;
   for (const { text } of rows) {
     const f = FENCE.exec(text);
     if (open === null && f) open = f[1];
     else if (open !== null && text.trim().startsWith(open)) open = null;
     else if (open === null) {
       const h = HIDDEN.exec(text);
-      if (!h) continue;
-      if (hidden !== null) throw new Reject(`${name}: 항목 \`${id}\` 의 숨김 줄은 하나다`);
-      hidden = h[1] === "예";
+      if (h) {
+        if (hidden !== null) throw new Reject(`${name}: 항목 \`${id}\` 의 숨김 줄은 하나다`);
+        hidden = h[1] === "예";
+        continue;
+      }
+      const w = WINDOW_SOURCES.exec(text);
+      if (!w) continue;
+      if (windowSources !== null) throw new Reject(`${name}: 항목 \`${id}\` 의 구간 출처 줄은 하나다`);
+      windowSources = windowSourceIds(w[1]);
     }
   }
-  return hidden === true;
+  return { hidden: hidden === true, windowSources: windowSources ?? [] };
 }
 
 // One data item: a map item when a fence of it is ```map, or when a map node
@@ -170,7 +182,7 @@ function need(name, heading, at, rows, mapNodes, warnings) {
     const ok = fences.length === 1;
     return { kind: Kind.MAP, id, title, line: at, ok, rows: ok ? fences[0].rows : [] };
   }
-  const hidden = hiddenOf(name, id, rows);
+  const { hidden, windowSources } = proseMarks(name, id, rows);
   const statements = fences.filter((f) => f.lang !== CHART);
   const charts = fences.filter((f) => f.lang === CHART);
   if (statements.length > 1) throw new Reject(`${name} needs[${id}]: 펜스가 둘입니다 — 항목 하나에 문장 하나다`);
@@ -184,7 +196,7 @@ function need(name, heading, at, rows, mapNodes, warnings) {
       charts.slice(1).map((c) => flowError(c.line, Code.CHART_DUPLICATE, `항목 ${id} 에 chart 펜스가 ${charts.length} 개다 — 하나만 둔다`)),
     );
   const sql = trimBlank(statements[0].rows.map((r) => r.text));
-  const query = { kind: Kind.QUERY, id, title, sql, vars: varsOf(sql), hidden };
+  const query = { kind: Kind.QUERY, id, title, sql, vars: varsOf(sql), hidden, windowSources };
   if (!charts.length) return query;
   const read = readChart(query, charts[0], columnsOf(sql));
   if (read.warning) warnings.push(read.warning);
@@ -212,9 +224,10 @@ function needs(name, head, under, mapNodes, warnings) {
 
 /**
  * An agent md as BE reads it to register it.
- * - queries: the SQL items, written order ({id, title, sql, vars, hidden}, and `chart`
+ * - queries: the SQL items, written order ({id, title, sql, vars, hidden, windowSources}, and `chart`
  *   — chart-fence readChart's — when the item has a ```chart fence). `hidden`
- *   is the item's `숨김: 예` line ({@link HIDDEN}).
+ *   is the item's `숨김: 예` line ({@link HIDDEN}). `windowSources` is the ids
+ *   of its `구간 출처:` line ({@link WINDOW_SOURCES}), [] without one.
  * - maps: the map items, written order ({id, title, line, rows: {line, text}[]}):
  *   line is the `###` line, rows the map fence's lines, md lines.
  * - fence: the flow fence — the first ```mermaid fence under `## 데이터` before
@@ -279,7 +292,8 @@ export function readAgentMd(name, markdown) {
  * `## 데이터` items read like an agent md's, no flow. `starter` marks it:
  * its items are registered queries, the document is no md a flow points at.
  * An item with a `숨김: 예` line has `hidden` true: the first screen keeps it
- * picked and shows no row for it.
+ * picked and shows no row for it. `windowSources` is the ids of its
+ * `구간 출처:` line, as in readAgentMd.
  * - rejection: BE's reason for not reading it — a map item, no item, an item
  *   an agent md would be refused for; null when it reads.
  */

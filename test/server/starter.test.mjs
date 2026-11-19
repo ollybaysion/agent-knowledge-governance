@@ -221,6 +221,29 @@ test("agent md: an info query with a bind beyond 설비 · 라인 is warned abou
   }
 });
 
+test("구간 출처: a source in an active starter is found on POST and GET; an unknown one is warned about; the doc view carries windowSources", async () => {
+  const t = await setup();
+  try {
+    await withTables(t);
+    assert.equal((await t.call("POST", "/api/docs/starter", example("starter/eqp-basics.json"))).statusCode, 201);
+    const trend = "SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time";
+    const md = `# k\n\n## 데이터\n\n### trend — 추이\n\n구간 출처: setup_events, ghost_hist\n\n${fence(trend)}\n`;
+    const want = ["항목 `trend` 의 구간 출처 `ghost_hist` 를 찾을 수 없다."];
+    // Inactive: an active agent md with binds needs a flow fence, which this test is not about.
+    const created = await t.call("POST", "/api/docs/domain-skill", mdDoc("domain-skill/v1", "k", md, "inactive"));
+    assert.equal(created.statusCode, 201, created.body);
+    assert.deepEqual(created.json().queryWarnings, want);
+    assert.deepEqual((await t.call("GET", "/api/docs/domain-skill/k")).json().queryWarnings, want);
+    const s2 = await t.call("POST", "/api/docs/starter", starter("s2", `# s2\n\n## 데이터\n\n### s2_trend — 추이\n\n구간 출처: setup_events\n\n${fence(trend)}\n`));
+    assert.equal(s2.statusCode, 201, s2.body);
+    assert.equal(s2.json().queryWarnings, undefined, "another starter's item");
+    const view = (await t.call("GET", "/api/docs/starter/s2")).json();
+    assert.deepEqual(view.starter.items.map((i) => [i.id, i.windowSources]), [["s2_trend", ["setup_events"]]]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 test("starter: a table only a starter reads stays 기타 — 주요 · 쓰는 조회 count the agent mds", async () => {
   const t = await setup();
   try {

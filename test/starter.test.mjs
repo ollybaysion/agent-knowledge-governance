@@ -93,6 +93,44 @@ test("starterView: a 숨김: 예 item is hidden (the view's 「숨김」 mark); 
   assert.deepEqual(view.warnings, view.items[2].warnings);
 });
 
+test("starterView: a 구간 출처 item's windowSources; an unknown source, a query without both time binds and two lines are warnings", () => {
+  const events = fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time");
+  const md = [
+    "## 데이터",
+    "### setup_events — 셋업 이력", events,
+    "### trend — 추이", "구간 출처: setup_events, interlock_hist", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :START_TIME AND :End_Time"),
+    "### late — 늦은", "구간 출처: lot_hist", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME > :start_time"),
+    "### twice — 둘", "구간 출처: setup_events", "구간 출처: setup_events", events,
+  ].join("\n");
+  const view = starterView(md, KINDS, () => new Set(["interlock_hist"]));
+  assert.deepEqual(view.items.map((i) => [i.id, i.windowSources]), [
+    ["setup_events", []],
+    ["trend", ["setup_events", "interlock_hist"]],
+    ["late", ["lot_hist"]],
+    ["twice", ["setup_events"]],
+  ]);
+  assert.deepEqual(view.items[1].warnings, [], "a source of this document and one of a registered starter; time binds in any case");
+  assert.deepEqual(view.items[2].warnings, [
+    "항목 `late` 의 구간 출처 `lot_hist` 를 찾을 수 없다.",
+    "항목 `late` 는 시간 바인드가 없어 구간 출처 줄을 쓸 수 없다.",
+  ]);
+  assert.deepEqual(view.items[3].warnings, ["항목 `twice` 의 구간 출처 줄은 하나다. BE 가 이 문서를 읽지 않는다."]);
+  assert.deepEqual(starterView(md, KINDS).items[1].warnings, ["항목 `trend` 의 구간 출처 `interlock_hist` 를 찾을 수 없다."], "no registered starter");
+  let asked = 0;
+  starterView(["## 데이터", "### setup_events — 셋업 이력", events, "### trend — 추이", "구간 출처: setup_events", events].join("\n"), KINDS, () => (asked++, new Set()));
+  assert.equal(asked, 0, "every source is in this document: the store is not read");
+});
+
+test("queryWarnings: an agent md's 구간 출처 sources are its own ```sql items or starter items", () => {
+  const agent = [
+    "## 데이터",
+    "### interlock_hist — 인터락 이력", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time"),
+    "### note — 설명", "글만 있다.",
+    "### trend — 추이", "구간 출처: interlock_hist, setup_events, note", fence("SELECT * FROM FDC_SETUP_EVENT WHERE EQP_ID = :eqp_id AND EVT_TIME BETWEEN :start_time AND :end_time"),
+  ].join("\n");
+  assert.deepEqual(queryWarnings("domain-skill", agent, KINDS, () => new Set(["setup_events"])), ["항목 `trend` 의 구간 출처 `note` 를 찾을 수 없다."]);
+});
+
 test("queryWarnings: a starter's three kinds; an agent md's info-bind ones; none for another type or no markdown", () => {
   assert.deepEqual(queryWarnings("starter", DOC, KINDS), starterView(DOC, KINDS).warnings);
   const agent = [

@@ -2919,7 +2919,8 @@ a.wiki {
 .starter-bind {
   margin: 0 4px 2px 0;
 }
-.starter-hidden {
+.starter-hidden,
+.starter-window {
   margin-left: 6px;
 }
 .starter-warn {
