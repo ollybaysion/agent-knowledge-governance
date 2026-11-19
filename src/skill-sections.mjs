@@ -43,6 +43,20 @@ export function scan(markdown) {
   return out;
 }
 
+/**
+ * The md's first `# title` line outside a fence, as its text. Null when the
+ * md has no such line or the line is blank. The catalog's list title
+ * (server/catalog.mjs titleOf) and the document page's head both read it.
+ */
+export function mdTitle(markdown) {
+  for (const { line, fenced } of scan(markdown)) {
+    if (fenced) continue;
+    const m = /^#[ \t]+(.*?)[ \t]*#*[ \t]*$/.exec(line);
+    if (m) return m[1].trim() || null;
+  }
+  return null;
+}
+
 /** The `##` headings of a markdown text, skipping fenced code blocks. */
 export function skillSections(markdown) {
   return scan(markdown)

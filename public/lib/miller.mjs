@@ -4,6 +4,13 @@
 /** domain-skill shows in this tab only as the documents whose role is sub. */
 export const inDocsTab = (d) => d.type !== "domain-skill" || d.role === "sub";
 
+/**
+ * The name a list row shows: a table's or a command's id; for the rest the
+ * title the server gives (an md body's `# title` line), the id when the
+ * title is missing or the same as the id.
+ */
+export const rowName = (d) => (d.type === "db-schema" || d.type === "msg-format" ? d.id : d.title && d.title !== d.id ? d.title : d.id);
+
 /** The 문서 탭 name of the domain-skill row: it holds the role sub domain-skill documents. */
 export const SUB_LABEL = "도메인 스킬";
 

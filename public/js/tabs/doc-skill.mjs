@@ -35,8 +35,8 @@ export function summaryOf(markdown) {
   return "";
 }
 
-/** The md's `# title` line, or null. */
-export const titleOf = (markdown) => /^#\s+(.+?)\s*#*\s*$/m.exec(String(markdown ?? ""))?.[1] ?? null;
+/** The md's `# title` line, or null: the server's mdTitle, so the head and the list title match. */
+export { mdTitle as titleOf } from "/lib/shared/skill-sections.mjs";
 
 const questionKey = (kind, text) => `${kind}\n${text}`;
 /** The last machine and human line of each question, by kind + text. */

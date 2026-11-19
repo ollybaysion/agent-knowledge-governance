@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { FAVORITE_CAP, RECENT_CAP, isFavorite, liveShelf, readShelf, toggleFavorite, touchRecent, writeShelf } from "../../public/lib/shelf.mjs";
-import { deleteConfirmText, docRows, move, rowTier, typeRows } from "../../public/lib/miller.mjs";
+import { deleteConfirmText, docRows, move, rowName, rowTier, typeRows } from "../../public/lib/miller.mjs";
 
 function memory() {
   const m = new Map();
@@ -114,4 +114,12 @@ test("the 삭제 confirm names the title, the type and the documents whose links
     deleteConfirmText("알람 이력", "DB 스키마", 3),
     '"알람 이력"(DB 스키마) 을 삭제합니다. 저장소에서 파일이 지워지고 git 이력에만 남습니다. 이 문서를 가리키는 문서 3개의 연결을 함께 지웁니다.',
   );
+});
+
+test("a row shows an md document's title; a table and a command show the id", () => {
+  assert.equal(rowName({ type: "voc", id: "alarm-guide", title: "알람 대응 안내" }), "알람 대응 안내");
+  assert.equal(rowName({ type: "voc", id: "alarm-guide", title: "alarm-guide" }), "alarm-guide");
+  assert.equal(rowName({ type: "voc", id: "alarm-guide", title: null }), "alarm-guide");
+  assert.equal(rowName({ type: "db-schema", id: "fdc_sensor", title: "FDC_SENSOR" }), "fdc_sensor");
+  assert.equal(rowName({ type: "msg-format", id: "cmd-start-lot", title: "START_LOT" }), "cmd-start-lot");
 });

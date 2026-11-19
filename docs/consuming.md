@@ -711,7 +711,8 @@ BE 는 에이전트 문서를 읽는 길과 같은 길로 읽는다.
 3. 줄의 `rev` 가 앞 판과 같으면 앞 판을 그대로 쓴다.
 4. 본문은 줄의 `json.body.markdown` 이다. `json` 이 없는 줄은 `GET /api/docs/starter/:id` 의 `json.body.markdown` 으로 받는다.
 
-줄의 칸 가운데 BE 가 쓰는 것은 `type` · `id` · `status` · `rev` · `json` 이다. `title` 은 `body.name` 이다.
+줄의 칸 가운데 BE 가 쓰는 것은 `type` · `id` · `status` · `rev` · `json` 이다.
+`title` 은 md 본문의 첫 `# 제목` 줄 글이다. 그 줄이 없거나 비면 `title` 은 `body.name` 이다.
 
 ```jsonc
 // GET /api/docs?type=starter&fields=body 의 한 토막
@@ -722,7 +723,7 @@ BE 는 에이전트 문서를 읽는 길과 같은 길로 읽는다.
       "id": "eqp-basics",
       "status": "active",
       "rev": "4c1e…",
-      "title": "eqp-basics",
+      "title": "설비 바탕 데이터",
       "updatedAt": "2026-11-10T03:10:00.000Z",
       "json": {
         "schema": "starter/v1",
@@ -870,12 +871,13 @@ agent 토큰으로 AKG 에 붙는다(9절). 한 번 돌 때 세 일을 한다.
   "runId": "curator:2026-11-11T03:30",
   "firstSeenAt": "2026-11-11T03:30:12.000Z",
   "seenAt": "2026-11-11T03:30:12.000Z",
-  "a": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "…", "exists": true, "title": "fdc-app--x-1a2b3c", "status": "inactive", "currentRev": "…" },
-  "b": { "type": "voc", "id": "alarm-guide", "rev": "…", "exists": true, "title": "alarm-guide", "status": "active", "currentRev": "…" }
+  "a": { "type": "unclassified", "id": "fdc-app--x-1a2b3c", "rev": "…", "exists": true, "title": "알람 화면 캡처 메모", "status": "inactive", "currentRev": "…" },
+  "b": { "type": "voc", "id": "alarm-guide", "rev": "…", "exists": true, "title": "알람 대응 안내", "status": "active", "currentRev": "…" }
 }
 ```
 
 `a` · `b` 의 `rev` 는 정리기가 본 rev, `currentRev` 는 지금 rev 다. `status` 는 문서의 활성 여부다.
+`title` 은 `GET /api/docs` 줄의 `title` 과 같다.
 문서가 없으면 `exists: false` 이고 `title` · `status` · `currentRev` 는 `null` 이다.
 
 `POST /api/curation/absorptions` 의 몸:

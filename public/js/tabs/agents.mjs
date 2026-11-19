@@ -8,6 +8,7 @@ import { cols, panel, screen, setActiveTab, setCrumbs } from "../shell.mjs";
 import { canEdit } from "../state.mjs";
 import { scoreDot } from "./doc-panel.mjs";
 import { draftLinks } from "./docs.mjs";
+import { rowName } from "/lib/miller.mjs";
 
 export const isMain = (d) => d.type === "domain-skill" && (d.role ?? "main") === "main";
 
@@ -31,7 +32,7 @@ export function agentPanel(selected, draftId = null) {
               ...(d.id === selected ? { "aria-current": "page" } : {}),
             }, [
               el("span", { class: "badge-main", text: "메인" }),
-              el("span", { class: "arow-id mono", text: d.id }),
+              el("span", { class: `arow-id${rowName(d) === d.id ? " mono" : ""}`, text: rowName(d), title: d.id }),
               d.status === "inactive" ? el("span", { class: "mini-off", text: "비활성" }) : null,
               dot,
             ]));
