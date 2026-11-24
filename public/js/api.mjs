@@ -55,7 +55,7 @@ let docsPromise = null;
 // schema index) reads again when this moves.
 export let docsVersion = 0;
 let everyPromise = null;
-/** 폐기 문서까지 든 목록: 건강 화면이 끊긴 연결의 대상을 가릴 때 읽는다. */
+/** 폐기 문서까지 든 목록: 진단 화면이 끊긴 연결의 대상을 가릴 때 읽는다. */
 export function everyDoc() {
   if (!everyPromise) everyPromise = api("/api/docs").then((r) => (r.ok ? r.data.docs : []));
   return everyPromise;

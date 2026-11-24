@@ -27,7 +27,7 @@ export let DOC_TYPES = TYPES.map((t) => t.id);
 export let TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.id, t.label]));
 export const typeInfo = (type) => TYPES.find((t) => t.id === type) ?? null;
 export const isMdType = (type) => typeInfo(type)?.kind === "md";
-/** md 타입의 id 들(폐기한 타입 포함): 건강 화면이 "제목이 id 와 같음" 을 가릴 때 읽는다. */
+/** md 타입의 id 들(폐기한 타입 포함): 진단 화면이 "제목이 id 와 같음" 을 가릴 때 읽는다. */
 export const mdTypeIds = () => TYPES.filter((t) => t.kind === "md").map((t) => t.id);
 export const activeMdTypes = () => TYPES.filter((t) => t.kind === "md" && t.status === "active");
 export const typeColor = (type) => typeInfo(type)?.color ?? "#8a8f98";
