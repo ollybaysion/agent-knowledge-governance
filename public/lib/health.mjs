@@ -1,4 +1,4 @@
-// 문서 건강: 문서 목록 응답(GET /api/docs 의 줄)만으로 세는 값들.
+// 문서 현황 진단: 문서 목록 응답(GET /api/docs 의 줄)만으로 세는 값들.
 // 줄마다 연결 수 · 끊긴 연결 · 나이 · 크기를 붙이고(docFacts), 검사 여덟과
 // 분포 둘, 타입 × 상태 표를 낸다. DOM 없이 계산만 한다.
 import { STALE_DAYS, ageDays } from "./freshness.mjs";

@@ -29,7 +29,7 @@ export function titleOf(doc) {
 }
 
 /**
- * 본문의 글자 수: 건강 화면의 짧은 문서 · 긴 문서와 표 보기의 크기 열이 읽는다.
+ * 본문의 글자 수: 진단 화면의 짧은 문서 · 긴 문서와 표 보기의 크기 열이 읽는다.
  * markdown 을 가진 본문은 그 글의 길이, 그 밖의 본문은 JSON 으로 적은 길이다.
  */
 export function sizeOf(body) {

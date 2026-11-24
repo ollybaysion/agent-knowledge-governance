@@ -1,4 +1,4 @@
-// 건강 탭 (#/health/<검사>): 문서 저장소를 한눈에. 위에 검사 카드 여덟(연결 없음 ·
+// 진단 탭 (#/health/<검사>): 문서 저장소를 한눈에. 위에 검사 카드 여덟(연결 없음 ·
 // 끊긴 연결 · 오래됨 · 짧음 · 긺 · 제목 없음 · 겹친 제목 · 최근), 가운데에 타입 × 상태
 // 표와 수정 · 크기 분포, 아래에 고른 검사의 문서 목록. 값은 문서 목록 응답에서 센다.
 import { everyDoc } from "../api.mjs";
@@ -70,8 +70,8 @@ function splitBar(m, max) {
 
 export async function renderHealth(pick = null) {
   setActiveTab("health");
-  setCrumbs([{ label: "건강" }]);
-  const page = el("section", { class: "page-card health", "aria-label": "문서 건강" }, el("p", { class: "loading", text: "불러오는 중…" }));
+  setCrumbs([{ label: "진단" }]);
+  const page = el("section", { class: "page-card health", "aria-label": "문서 현황 진단" }, el("p", { class: "loading", text: "불러오는 중…" }));
   screen().appendChild(cols({ main: el("main", { class: "main wide" }, page), className: "wide" }));
 
   const all = docFacts(await everyDoc(), Date.now(), { mdTypes: mdTypeIds() });
@@ -262,7 +262,7 @@ export async function renderHealth(pick = null) {
     page.replaceChildren(
       el("header", { class: "hl-head" }, [
         el("div", {}, [
-          el("h2", { class: "hl-title", text: "문서 건강" }),
+          el("h2", { class: "hl-title", text: "문서 현황 진단" }),
           el("p", { class: "dim hl-sub", text: `문서 ${num(all.length)} · 활성 ${num(active)} · 비활성 ${num(all.length - active)}` }),
         ]),
         el("span", { class: "sp" }),
