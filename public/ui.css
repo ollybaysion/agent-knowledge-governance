@@ -2789,7 +2789,7 @@ a.sql-col:focus-visible {
 }
 
 /* ==========================================================================
- * 그래프 탭 5-v2 — 필터 패널 · 맞춘 전체 그래프 · 연결 없음 · 미니맵
+ * 그래프 탭 5-v3 — 문서 찾기 · 둘레 보기(카드) · 전체 보기(점) · 목록 · 범례 = 필터
  * ========================================================================== */
 .cols.graph-cols {
   grid-template-columns: 288px minmax(0, 1fr);
@@ -2797,35 +2797,126 @@ a.sql-col:focus-visible {
 .gpanel {
   padding: 0 16px 12px;
 }
-.gf-row {
+.gbar [hidden],
+.gstage [hidden],
+.gpanel [hidden] {
+  display: none !important;
+}
+/* 목록 줄: 모양 · 이름 · 오른쪽 수 — 찾기 결과 · 시작 화면 · 왼쪽 목록이 같이 쓴다 */
+.gglyph {
+  flex: none;
+  overflow: visible;
+}
+.grow {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 26px;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
   font-size: 13px;
   color: var(--ink);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
 }
-.gf-n {
-  margin-left: auto;
+.grow:hover {
+  background-color: var(--hover);
+}
+.grow-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grow-n {
+  flex: none;
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+.grow-off {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.grow-miss {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px var(--mono);
+  color: var(--error-ink);
+}
+.gpick {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gpick.bars .grow {
+  background-image: linear-gradient(
+    to right,
+    var(--accent-soft) var(--bar, 0%),
+    transparent var(--bar, 0%)
+  );
+}
+
+/* 문서 찾기 */
+.gsearch {
+  position: relative;
+  flex: 0 1 280px;
+  min-width: 200px;
+}
+.gsearch .psearch-w {
+  margin: 0;
+  height: 32px;
+}
+.gsearch-list {
+  position: absolute;
+  z-index: 6;
+  inset: calc(100% + 6px) auto auto 0;
+  width: max(100%, 420px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--field);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.gsearch-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.gsearch-opt:hover {
+  background: var(--hover);
+}
+.gsearch-opt[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+.gsearch-id {
   font-size: 12px;
   color: var(--muted);
 }
-.gf-sub {
-  margin-top: 10px;
+.gsearch-note {
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  color: var(--muted);
 }
-.gf-roles {
-  display: flex;
-  gap: 16px;
-}
-.gf-subtag {
-  --c: var(--primary);
-}
-.gf-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 13px;
-}
+
+/* 왼쪽: 고른 문서 카드 */
 .gcard {
   border: 1px solid var(--hairline);
   border-radius: 10px;
@@ -2839,6 +2930,11 @@ a.sql-col:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+.gcard-id {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .gcard-t {
   font-size: 13px;
@@ -2861,14 +2957,57 @@ a.sql-col:focus-visible {
 .gopen {
   justify-content: center;
 }
-.gcard-note {
+
+/* 왼쪽: 범례 = 타입 필터 */
+.gleg-hint {
   font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.gleg-list {
+  list-style: none;
   margin: 0;
+  padding: 0;
+}
+.gleg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.gleg-row:hover {
+  background: var(--hover);
+}
+.gleg-row[aria-pressed="false"] {
+  color: var(--muted);
+}
+.gleg-row[aria-pressed="false"] .gglyph {
+  opacity: 0.3;
+}
+.gleg-row[aria-pressed="false"] .grow-name {
+  text-decoration: line-through;
+}
+.gleg-roles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-block: 4px 0;
+  padding-block: 4px 0;
+  border-block-start: 1px dashed var(--hairline-soft);
 }
 .gl-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
 }
 .gl-item {
   display: inline-flex;
@@ -2877,21 +3016,66 @@ a.sql-col:focus-visible {
   font-size: 12px;
   color: var(--body);
 }
-.gl-fill {
-  fill: var(--muted);
-}
 .gl-note {
   font-size: 11.5px;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
 }
+
+/* 왼쪽: 목록 — 허브 · 연결 없는 문서 · 끊긴 연결 */
+.gfold > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px 0 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+.gfold > summary::-webkit-details-marker {
+  display: none;
+}
+.gfold > summary:hover {
+  background: var(--hover);
+}
+.gfold > summary .ic {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.12s;
+}
+.gfold[open] > summary .ic {
+  transform: rotate(90deg);
+}
+.gfold.sub > summary {
+  font-weight: 500;
+}
+.gfold-in {
+  padding-left: 10px;
+}
+.gfold-in > .gl-note {
+  margin: 0 0 4px 8px;
+}
+.gfold .gpick {
+  padding-left: 10px;
+}
+.gfold .pnone {
+  padding: 2px 8px 6px 24px;
+}
+.gmore-btn {
+  margin: 4px 0 6px 18px;
+}
+
+/* 가운데: 띠 */
 .gmain.main {
-  padding-top: 0;
+  padding-block-start: 0;
 }
 .gbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 12px;
   min-height: 48px;
   padding: 8px 12px;
   border: 1px solid var(--hairline-soft);
@@ -2900,12 +3084,21 @@ a.sql-col:focus-visible {
   background: var(--panel);
   font-size: 12.5px;
 }
-.gsel-chip {
-  font-family: var(--sans);
-  background: var(--accent-soft);
-  border-color: transparent;
+.gdepth,
+.gzoom-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.gbar .seg {
+  flex: none;
 }
 .gbar-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
 }
 .gzoom {
@@ -2913,8 +3106,11 @@ a.sql-col:focus-visible {
   text-align: right;
   font-size: 12px;
 }
+
+/* 가운데: 지나온 문서 · 그림 */
 .gstage {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   height: calc(100vh - 72px - 48px);
   min-height: 360px;
   border: 1px solid var(--hairline-soft);
@@ -2922,19 +3118,96 @@ a.sql-col:focus-visible {
   background: var(--field);
   overflow: hidden;
 }
+.gtrail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px 0 6px;
+  border-bottom: 1px solid var(--hairline-soft);
+  font-size: 12.5px;
+}
+.gtrail:empty {
+  display: none;
+}
+.gback {
+  padding: 0 6px;
+}
+.gcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gcrumbs li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted-soft);
+}
+.gcrumb {
+  max-width: 190px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.gcrumb {
+  cursor: pointer;
+}
+button.gcrumb:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.gcrumb.now {
+  color: var(--ink);
+  font-weight: 600;
+}
+.gcrumb-gap {
+  padding: 0 4px;
+}
+.gview {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
 .gcanvas {
   position: absolute;
   inset: 0;
-  overflow: auto;
-  outline: none;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.gcanvas.dragging {
+  cursor: grabbing;
+}
+.gcanvas:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 .gsvg {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 .gcol-h {
-  font: 600 15px var(--sans);
+  font: 600 12.5px var(--sans);
   fill: var(--muted);
 }
+.gcol-h.mid {
+  fill: var(--ink);
+}
+
+/* 선: links · 본문 [[ ]] · rel screen · 끊긴 연결, 화살표는 가리키는 쪽 */
 .ge {
   fill: none;
   stroke: var(--muted-soft);
@@ -2951,123 +3224,268 @@ a.sql-col:focus-visible {
   stroke: var(--error);
   stroke-dasharray: 4 4;
 }
-.ge.on {
+.ge.far {
+  opacity: 0.45;
+}
+.ge.on,
+.ge.hl {
   stroke: var(--primary);
   stroke-width: 2.2;
+  opacity: 1;
 }
-.ge.on.body {
-  stroke-width: 1.4;
+.ge.on.body,
+.ge.hl.body {
+  stroke-width: 1.5;
 }
-.ge.on.scr {
+.ge.on.scr,
+.ge.hl.scr {
   stroke: var(--amber);
 }
-.ge.on.broken {
-  stroke: var(--error);
+.gmk {
+  fill: var(--muted-soft);
+  stroke: none;
 }
-.ge.dim {
-  opacity: 0.18;
+.gmk.on {
+  fill: var(--primary);
 }
-.gn {
+.gmk.scr {
+  fill: var(--amber);
+}
+.gmk.broken {
+  fill: var(--error);
+}
+
+/* 문서의 모양: 모양 · 색 = 타입, 빈 모양 = 비활성, 고리 = main */
+.gshape {
+  fill: var(--c);
+}
+.gshape.hollow {
+  fill: var(--field);
+  stroke: var(--c);
+  stroke-width: 1.8;
+}
+.gring {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.5;
+}
+.gn,
+.gmore {
   cursor: pointer;
   outline: none;
 }
-.gn .gsel-ring {
+
+/* 둘레 보기: 문서 카드 */
+.gcard-bg {
   fill: var(--field);
-  stroke: transparent;
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+.gcardn:hover .gcard-bg {
+  stroke: var(--primary);
+}
+.gcardn.center .gcard-bg {
+  fill: var(--accent-soft);
+  stroke: var(--primary);
   stroke-width: 2;
 }
-.gn.sel .gsel-ring,
-.gn.sel.kind-main .gsel-ring {
-  stroke: var(--primary);
+.gcardn.off .gcard-bg {
+  stroke-dasharray: 4 3;
 }
-.gn.sel:not(.kind-main) .gshape {
-  stroke: var(--primary);
-  stroke-width: 3;
-}
-.gn:focus-visible .gshape {
+.gcardn:focus-visible .gcard-bg,
+.gmore:focus-visible .gmore-bg {
   stroke: var(--primary);
   stroke-width: 3;
 }
-.gtag {
-  fill: color-mix(in srgb, var(--c) 20%, transparent);
-}
-.gtag-t {
-  font: 700 11px var(--sans);
+.gc-name {
+  font: 600 14px var(--sans);
   fill: var(--ink);
 }
-.gname {
-  font: 14px var(--mono);
-  fill: var(--ink);
-}
-.gn.sel .gname {
+.gcardn.center .gc-name {
   font-weight: 700;
 }
-.gn.dim {
-  opacity: 0.28;
+.gc-meta,
+.gc-off {
+  font: 12.5px var(--sans);
+  fill: var(--muted);
 }
-.gmissing {
-  fill: none;
-  stroke: var(--error);
-  stroke-dasharray: 3 2;
+.gc-open {
+  font: 600 12px var(--sans);
+  fill: var(--primary);
 }
-.gnoreg {
+.gmore-bg {
+  fill: var(--surface-soft);
+  stroke: var(--hairline);
+  stroke-dasharray: 5 4;
+}
+.gmore:hover .gmore-bg {
+  stroke: var(--primary);
+}
+.gmiss-bg {
   fill: var(--error-soft);
-  stroke: color-mix(in srgb, var(--error) 50%, transparent);
+  stroke: var(--error);
+  stroke-dasharray: 4 3;
 }
-.gnoreg-t {
-  font: 600 11px var(--sans);
+.gmiss-t {
   fill: var(--error-ink);
 }
-.gcorner {
+.gnone-bg {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-dasharray: 3 4;
+}
+.gsvg.ego.hovering .ge:not(.hl) {
+  opacity: 0.22;
+}
+.gsvg.ego.hovering .gcardn:not(.nb) {
+  opacity: 0.55;
+}
+
+/* 전체 보기: 문서 점. 점과 이름은 배율이 낮아도 읽히는 크기를 지킨다(--kg · --kl) */
+.gsvg.all .ge {
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  opacity: var(--ea, 0.4);
+}
+.gsvg.all .gone {
+  visibility: hidden;
+}
+.gsvg.all .ge.on,
+.gsvg.all .ge.hl {
+  stroke-width: 1.4;
+  opacity: 0.9;
+}
+.gsvg.all .gk {
+  transform: scale(var(--kg, 1));
+}
+.ghit {
+  fill: transparent;
+}
+.gsvg.all .glab {
+  display: none;
+  transform: translate(calc(var(--kg, 1) * 10px), 0) scale(var(--kl, 1));
+}
+.gsvg.all .gn.lab .glab,
+.gsvg.all .gn:hover .glab,
+.gsvg.all .gn:focus-visible .glab {
+  display: block;
+}
+.gover {
+  pointer-events: none;
+}
+.gsvg.all .gcol-hw {
+  transform: scale(var(--kl, 1));
+}
+.gname {
+  font: 13.5px var(--sans);
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--field);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+}
+.gdot.sel .gname,
+.gdot.kind-main .gname {
+  font-weight: 700;
+}
+.gdot.sel .gshape,
+.gdot:focus-visible .gshape {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+.gsvg.all.has-sel .gn:not(.on) {
+  opacity: 0.3;
+}
+.gsvg.all.has-sel .ge:not(.on) {
+  opacity: 0.1;
+}
+.gsvg.all.hovering .gn:not(.nb) {
+  opacity: 0.35;
+}
+.gsvg.all.hovering .ge:not(.hl) {
+  opacity: 0.08;
+}
+
+/* 시작 화면: 고른 문서가 없을 때 */
+.gstart {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 36px 32px 28px;
+}
+.gstart-in {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.gstart-h {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.gstart-p {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  color: var(--body);
+}
+.gstats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.gstat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.gstat b {
+  font: 600 20px var(--mono);
+  color: var(--ink);
+}
+.gstat span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.gstart-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.gstart-sec {
+  padding: 12px 8px 8px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+}
+.gstart-sec .plabel {
+  margin: 0 8px 6px;
+}
+.gstart-sec .gpick {
+  max-height: 340px;
+  overflow: auto;
+}
+.gstart-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-block-start: 18px;
+  font-size: 12.5px;
+}
+
+/* 미니맵 */
+.gmini {
   position: absolute;
   right: 14px;
   bottom: 14px;
-  display: flex;
-  align-items: flex-end;
-  gap: 14px;
-  pointer-events: none;
-}
-.gcorner > * {
-  pointer-events: auto;
-}
-.gorphans {
-  min-width: 220px;
-  max-width: 280px;
-  max-height: 160px;
-  overflow: auto;
-  padding: 10px 12px;
-  border: 1.5px dashed var(--hairline);
-  border-radius: 10px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
   background: var(--field);
-}
-.gorph-h {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-.gorphans ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.gorph {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 26px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.gorph:hover,
-.gorph.on {
-  background: var(--surface-card);
-  color: var(--ink);
 }
 .gmini-h {
   font-size: 11px;
@@ -3076,21 +3494,37 @@ a.sql-col:focus-visible {
 }
 .gmini svg {
   display: block;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--hairline-soft);
   border-radius: 6px;
   background: var(--canvas);
+  cursor: pointer;
+  touch-action: none;
 }
 .gmini-view {
   fill: var(--accent-soft);
   stroke: var(--primary);
   stroke-width: 1.5;
 }
+@media (max-width: 1280px) {
+  .gbar-hint {
+    display: none;
+  }
+}
 @media (max-width: 760px) {
   .cols.graph-cols {
     grid-template-columns: minmax(0, 1fr);
   }
-  .gcorner {
+  .gmini {
     display: none;
+  }
+  .gstats,
+  .gstart-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gfold > summary .ic {
+    transition: none;
   }
 }
 
