@@ -29,10 +29,20 @@ export function titleOf(doc) {
 }
 
 /**
+ * 본문의 글자 수: 건강 화면의 짧은 문서 · 긴 문서와 표 보기의 크기 열이 읽는다.
+ * markdown 을 가진 본문은 그 글의 길이, 그 밖의 본문은 JSON 으로 적은 길이다.
+ */
+export function sizeOf(body) {
+  if (typeof body?.markdown === "string") return body.markdown.length;
+  return body == null ? 0 : JSON.stringify(body).length;
+}
+
+/**
  * What the catalog keeps of one document. Field by field:
  * keywords · tags · links · status · origin · role as stored; tiers the slot
  * counts; title {@link titleOf}; assetCount the length of assets[];
- * wikis the body's `[[ ]]`, unresolved; absorbed the sidecar's mark.
+ * wikis the body's `[[ ]]`, unresolved; absorbed the sidecar's mark;
+ * size the body's length in characters ({@link sizeOf}).
  * db-schema only: kind · unusedColumns · table as in body, coverage
  * {@link coverageOf}, columns the catalog's column names ({@link columnsOf}).
  * domain-skill and domain only: markdown.
@@ -52,6 +62,7 @@ function project(type, id, doc, bodySchema, absorbed) {
     role: doc.role,
     wikis: listOf(parseWikilinks(wikiTexts(type, body))),
     absorbed,
+    size: sizeOf(body),
   };
   if (type === "db-schema") {
     entry.kind = body?.kind;

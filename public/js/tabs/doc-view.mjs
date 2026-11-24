@@ -6,6 +6,7 @@
 // or the path column (anything else). Right: 요약 · 연결 · 이력.
 // A long db-schema floats 맨 위 · 맨 아래 at the bottom right.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
+import { freshBadge } from "../doc-bits.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { inline, mdNodes, pictureFig, wikiResolver } from "../md.mjs";
 import { assetsSection } from "/lib/doc-assets.mjs";
@@ -225,11 +226,18 @@ function docHead(ctx, title, isAgent, { toggleJson }) {
     reload();
   }
   const metaRow = el("div", { class: "doc-meta-row" });
+  // 신선도 배지: 고친 시각은 문서 목록 응답의 줄에 있다.
+  const updated = el("span", { class: "fresh-slot" });
+  allDocs().then((docs) => {
+    const row = docs.find((d) => d.type === type && d.id === doc.id);
+    if (row?.updatedAt) updated.replaceChildren(freshBadge(row.updatedAt));
+  });
   const chips = [
     statusChip(doc, admin && doc.status !== "archived" ? statusAction : null),
     role ? roleChip(doc, rev, canEdit, () => reload()) : null,
     el("span", { class: "chip idc", text: doc.id }),
     el("span", { class: "chip rev", text: `rev ${shortRev(rev)}` }),
+    updated,
     doc.absorbed
       ? el("span", {
           class: "chip rev",

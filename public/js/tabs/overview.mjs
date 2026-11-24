@@ -1,14 +1,14 @@
 // 개요 탭: 소개 띠(티어의 일생 · 상태 다이어그램, index.html 의 template) ·
-// 통계 · 타입 칩 · 문서 표. 소개 띠의 문서 종류 표는 GET /api/types 로 그린다.
-import { allDocs } from "../api.mjs";
+// 통계 · 타입 칩 · 문서 표(표 보기와 같은 표). 소개 띠의 문서 종류 표는 GET /api/types 로 그린다.
+import { allDocs, everyDoc } from "../api.mjs";
 import { $, el } from "../dom.mjs";
-import { coverageBar, keywordChips, shortRev, stat, statusBadge, tierMeter, usedByText } from "../shared.mjs";
+import { coverageBar, stat, usedByText } from "../shared.mjs";
 import { coveragePercent, majorCoverage, userCount } from "/lib/table-class.mjs";
 import { cols, screen, setActiveTab, setCrumbs } from "../shell.mjs";
-import { DOC_TYPES, TYPES, TYPE_LABEL } from "../state.mjs";
-
-// How many rows of the document table one paint adds.
-const PAGE = 200;
+import { DOC_TYPES, TYPES, TYPE_LABEL, mdTypeIds } from "../state.mjs";
+import { docTable } from "./doc-table.mjs";
+import { DEFAULT_SORT, SORTS, sortRows, tableHash, toggleSort } from "/lib/doc-table.mjs";
+import { docFacts } from "/lib/health.mjs";
 
 // 주요 테이블 확정 커버리지: the sum, then the 주요 tables, the lowest first.
 function coverageBlock(all) {
@@ -60,6 +60,10 @@ export async function renderOverviewScreen() {
 
   page.querySelector("#ov-coverage").replaceChildren(...coverageBlock(all));
 
+  // 문서 표는 표 보기(#/table)와 같은 표다: 열 머리로 정렬하고, 타입 칩으로 좁힌다.
+  const facts = docFacts(await everyDoc(), Date.now(), { mdTypes: mdTypeIds() });
+  if (!page.isConnected) return;
+  let sort = { sort: DEFAULT_SORT, dir: SORTS[DEFAULT_SORT] };
   const counts = new Map();
   for (const d of all) counts.set(d.type, (counts.get(d.type) || 0) + 1);
   const chips = page.querySelector("#ov-typechips");
@@ -71,56 +75,18 @@ export async function renderOverviewScreen() {
       el("button", { type: "button", "aria-pressed": String(t === shown), "data-type": t, onclick: () => { shown = t; paint(); } }, label),
     ),
   );
-  const open = (d) => (location.hash = `#/doc/${d.type}/${encodeURIComponent(d.id)}`);
-  const rowOf = (d) =>
-    el("tr", { class: "nav-doc", tabindex: "0", onclick: () => open(d), onkeydown: (e) => e.key === "Enter" && open(d) }, [
-      el("td", {}, [el("b", { text: d.id }), " ", el("span", { class: "dim", text: d.type === "domain-skill" ? (d.role === "sub" ? "도메인 지식" : "에이전트") : TYPE_LABEL[d.type] })]),
-      el("td", {}, keywordChips(d.keywords || [])),
-      el("td", {}, tierMeter(d.tiers ?? {})),
-      el("td", {}, statusBadge(d.status)),
-      el("td", {}, el("span", { class: "chip rev", text: shortRev(d.rev) })),
-    ]);
-  // The rows go in PAGE at a time: the next ones when the empty row after the last comes into view.
-  let more = null;
   function paint() {
-    for (const c of chips.children) {
+    for (const c of chips.querySelectorAll("button")) {
       c.setAttribute("aria-pressed", String(c.dataset.type === shown));
       c.classList.toggle("on", c.dataset.type === shown);
     }
-    more?.disconnect();
-    more = null;
-    const rows = all.filter((d) => shown === "all" || d.type === shown);
-    if (!rows.length) {
-      tableHost.replaceChildren(el("p", { class: "loading", text: "문서가 없습니다." }));
-      return;
-    }
-    let drawn = Math.min(PAGE, rows.length);
-    const tbody = el("tbody", {}, rows.slice(0, drawn).map(rowOf));
-    tableHost.replaceChildren(
-      el("table", {}, [
-        el("thead", {}, el("tr", {}, ["문서", "키워드", "검토 상태", "상태", "rev"].map((t) => el("th", { scope: "col", text: t })))),
-        tbody,
-      ]),
-    );
-    if (drawn === rows.length || typeof IntersectionObserver === "undefined") {
-      if (drawn < rows.length) tbody.append(...rows.slice(drawn).map(rowOf));
-      return;
-    }
-    const watch = el("tr", { "aria-hidden": "true" });
-    tbody.appendChild(watch);
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return;
-      watch.before(...rows.slice(drawn, drawn + PAGE).map(rowOf));
-      drawn = Math.min(drawn + PAGE, rows.length);
-      observer.unobserve(watch);
-      if (drawn < rows.length) observer.observe(watch);
-      else {
-        watch.remove();
-        observer.disconnect();
-      }
-    }, { rootMargin: "0px 0px 800px 0px" });
-    observer.observe(watch);
-    more = observer;
+    const focused = document.activeElement?.dataset?.fk;
+    const rows = sortRows(facts.filter((r) => shown === "all" || r.doc.type === shown), sort.sort, sort.dir, DOC_TYPES);
+    toTable.href = tableHash({ ...sort, type: shown === "all" ? [] : [shown] });
+    tableHost.replaceChildren(docTable({ rows, state: sort, onSort: (id) => { sort = toggleSort(sort, id); paint(); } }));
+    if (focused) [...tableHost.querySelectorAll("[data-fk]")].find((n) => n.dataset.fk === focused)?.focus();
   }
+  const toTable = el("a", { class: "ov-to-table", href: "#/table", text: "표 보기에서 거르기 →" });
+  chips.append(el("span", { class: "sp" }), toTable);
   paint();
 }

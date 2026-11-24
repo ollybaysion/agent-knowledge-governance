@@ -54,13 +54,19 @@ let docsPromise = null;
 // Counts the writes: a module that keeps its own read of the store (the SQL
 // schema index) reads again when this moves.
 export let docsVersion = 0;
+let everyPromise = null;
+/** 폐기 문서까지 든 목록: 건강 화면이 끊긴 연결의 대상을 가릴 때 읽는다. */
+export function everyDoc() {
+  if (!everyPromise) everyPromise = api("/api/docs").then((r) => (r.ok ? r.data.docs : []));
+  return everyPromise;
+}
 export function allDocs() {
-  if (!docsPromise)
-    docsPromise = api("/api/docs").then((r) => (r.ok ? r.data.docs.filter((d) => d.status !== "archived") : []));
+  if (!docsPromise) docsPromise = everyDoc().then((docs) => docs.filter((d) => d.status !== "archived"));
   return docsPromise;
 }
 export function invalidateDocs() {
   docsPromise = null;
+  everyPromise = null;
   docsVersion++;
   scorePromises.clear();
 }

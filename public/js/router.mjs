@@ -60,6 +60,8 @@ const screens = {
   edit: () => import("./tabs/editor.mjs"),
   draft: () => import("./drafts.mjs"),
   graph: () => import("./tabs/graph.mjs"),
+  health: () => import("./tabs/health.mjs"),
+  table: () => import("./tabs/doc-table.mjs"),
   review: () => import("./tabs/review.mjs"),
   audit: () => import("./tabs/audit.mjs"),
   curation: () => import("./tabs/curation.mjs"),
@@ -98,6 +100,10 @@ export async function route() {
     if ((m = await load("docs"))) m.renderBrowse(parts[1] ?? null);
   } else if (head === "graph") {
     if ((m = await load("graph"))) m.renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null);
+  } else if (head === "health") {
+    if ((m = await load("health"))) m.renderHealth(parts[1] ?? null);
+  } else if (head === "table") {
+    if ((m = await load("table"))) m.renderDocTable();
   } else if (head === "review" || head === "queue") {
     if ((m = await load("review"))) m.renderReview();
   } else if (head === "curation") {

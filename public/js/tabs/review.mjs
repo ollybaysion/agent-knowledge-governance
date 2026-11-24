@@ -5,12 +5,44 @@ import { DOC_TYPES, currentUser } from "../state.mjs";
 import { refreshReviewCount } from "../review-count.mjs";
 import { pageSection } from "../shell.mjs";
 
+// 검토 탭의 키보드 처리기: 화면을 다시 그릴 때 앞의 것을 떼고 새로 단다.
+let queueKeys = null;
+
 // 검토 탭: 에이전트 제안 · 추정 슬롯(확정 대기) · 폐기 슬롯. 내용은 그대로, 새 틀의 카드 안.
 export async function renderQueue() {
   const section = $("queue");
   section.replaceChildren(
+    el("p", { class: "q-keys dim" }, [
+      el("kbd", { text: "j" }), el("kbd", { text: "k" }), " 다음 · 앞 항목 ",
+      el("kbd", { text: "1" }), " 추정으로 반영 ",
+      el("kbd", { text: "2" }), " 기각",
+    ]),
     el("h2", {}, ["에이전트 제안 ", el("span", { class: "n", id: "q-pend" })]),
   );
+  // 키보드: j · k 가 제안 카드와 슬롯 줄 사이를 옮기고, 제안 카드 위에서 1 · 2 가 반영 · 기각이다.
+  // 초점이 아직 큐 밖(본문)에 있어도 j 가 첫 항목을 잡는다.
+  const proposals = new Map(); // 카드 노드 → 제안
+  document.removeEventListener("keydown", queueKeys);
+  queueKeys = (e) => {
+    if (!section.isConnected) return document.removeEventListener("keydown", queueKeys);
+    if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || document.querySelector("dialog[open]")) return;
+    if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+    const here = e.target.closest(".prop, #queue tbody tr");
+    if (e.key === "j" || e.key === "k") {
+      const stops = [...section.querySelectorAll(".prop, tbody tr")];
+      if (!stops.length) return;
+      e.preventDefault();
+      const i = stops.indexOf(here);
+      const next = stops[i < 0 ? 0 : Math.max(0, Math.min(stops.length - 1, i + (e.key === "j" ? 1 : -1)))];
+      next.tabIndex = 0;
+      next.focus();
+      next.scrollIntoView({ block: "nearest" });
+    } else if ((e.key === "1" || e.key === "2") && proposals.has(here) && e.target === here) {
+      e.preventDefault();
+      (e.key === "1" ? adopt : reject)(proposals.get(here));
+    }
+  };
+  document.addEventListener("keydown", queueKeys);
 
   const propRes = await api("/api/proposals?state=pending");
   const propWrap = el("div", {});
@@ -57,7 +89,7 @@ export async function renderQueue() {
         ...evidence(v.evidence),
       ]),
     );
-    return el("div", { class: "prop" }, [
+    const card = el("div", { class: "prop", tabindex: "0", "aria-label": `제안 ${p.submittedBy} → ${p.type}/${p.docId}` }, [
       el("div", { class: "head" }, [
         el("span", { class: "agent", text: p.submittedBy }),
         el("span", { class: "dim", text: "→" }),
@@ -83,6 +115,8 @@ export async function renderQueue() {
         }),
       ]),
     ]);
+    proposals.set(card, p);
+    return card;
   }
   async function adopt(p) {
     const docRes = await api(

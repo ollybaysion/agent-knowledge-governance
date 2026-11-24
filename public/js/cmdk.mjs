@@ -4,7 +4,8 @@
 import { allDocs } from "./api.mjs";
 import { el, icon } from "./dom.mjs";
 import { kindTag } from "./md.mjs";
-import { groupOrder, matching, rankDocs, resultHash } from "/lib/cmdk.mjs";
+import { groupOrder, hasOperators, matching, operatorFilter, parseQuery, rankDocs, resultHash } from "/lib/cmdk.mjs";
+import { tableHash } from "/lib/doc-table.mjs";
 import { rowName } from "/lib/miller.mjs";
 import { liveShelf } from "/lib/shelf.mjs";
 import { shelf } from "./shelf.mjs";
@@ -163,9 +164,16 @@ export function openCmdk() {
     for (const g of groupOrder(q)) {
       if (g === "results") {
         const results = rankDocs(docs, q, { order: DOC_TYPES, bodies: new Map([...bodies].map(([k, v]) => [k, v.md])) });
+        // 연산자(type: · status:)가 걸리면 좁힌 문서 수를 같이 보이고, 같은 조건의 표 보기로 가는 줄을 단다.
+        const pq = parseQuery(q);
+        const narrowed = hasOperators(pq) ? operatorFilter(docs, pq) : null;
         count.textContent = `문서 ${results.length}`;
-        parts.push(groupHead(`결과 · 문서 ${results.length}`, null, "이름 · 열 · 본문 절"));
-        parts.push(results.length ? el("div", {}, results.map((r) => docOption(r.doc, q, r))) : el("p", { class: "dim ck-none", text: bodiesLoading ? "본문을 읽는 중…" : "찾는 문서가 없습니다." }));
+        parts.push(groupHead(`결과 · 문서 ${results.length}`, null, narrowed ? `연산자에 맞는 문서 ${narrowed.length}` : "이름 · 열 · 본문 절"));
+        parts.push(results.length ? el("div", {}, results.map((r) => docOption(r.doc, pq.text, r))) : el("p", { class: "dim ck-none", text: bodiesLoading ? "본문을 읽는 중…" : "찾는 문서가 없습니다." }));
+        if (narrowed?.length) {
+          const types = TYPES.map((t) => t.id).filter((id) => pq.type.some((v) => id.startsWith(v)));
+          parts.push(el("div", {}, option([icon("grid", 15), el("span", { class: "ck-name", text: "표 보기에서 열기" }), el("span", { class: "dim", text: `문서 ${narrowed.length}` })], (n) => go(tableHash({ type: types, status: pq.status, q: pq.text }), n))));
+        }
       } else if (g === "types") {
         const rows = matching(typeRows, q, (r) => `${r.t.label} ${r.t.id}`);
         if (!rows.length) continue;
@@ -174,7 +182,7 @@ export function openCmdk() {
           option([el("span", { class: "tdot", style: { "--c": r.t.color } }), ` ${r.t.id === "domain-skill" ? "스킬 문서" : r.t.label} `, el("span", { class: "dim", text: String(r.n) })], (n) => go(r.t.id === "domain-skill" ? "#/agents" : `#/docs/${r.t.id}`, n), { class: "ck-opt ck-typechip" }))));
       } else if (g === "shelf") {
         count.textContent = `문서 ${docs.length}`;
-        parts.push(el("p", { class: "dim ck-hint", text: "db-schema 는 열 이름으로도 찾습니다" }));
+        parts.push(el("p", { class: "dim ck-hint", text: "db-schema 는 열 이름으로도 찾습니다 · type:voc status:inactive 로 좁힙니다" }));
         parts.push(el("div", { class: "ck-shelf" }, [
           el("div", {}, [groupHead("즐겨찾기", "star"), sh.fav.length ? el("div", {}, sh.fav.map(shelfRow)) : el("p", { class: "dim ck-none", text: "없음 — 문서 탭 미리보기에서 ☆" })]),
           el("div", {}, [groupHead("최근", "clock"), sh.recent.length ? el("div", {}, sh.recent.slice(0, 5).map(shelfRow)) : el("p", { class: "dim ck-none", text: "없음" })]),
