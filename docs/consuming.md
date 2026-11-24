@@ -713,6 +713,7 @@ BE 는 에이전트 문서를 읽는 길과 같은 길로 읽는다.
 
 줄의 칸 가운데 BE 가 쓰는 것은 `type` · `id` · `status` · `rev` · `json` 이다.
 `title` 은 md 본문의 첫 `# 제목` 줄 글이다. 그 줄이 없거나 비면 `title` 은 `body.name` 이다.
+`size` 는 본문의 글자 수다. `body.markdown` 이 있으면 그 글의 길이, 그 밖의 본문은 JSON 으로 적은 길이다.
 
 ```jsonc
 // GET /api/docs?type=starter&fields=body 의 한 토막

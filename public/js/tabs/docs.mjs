@@ -5,6 +5,7 @@
 // left 288 is the path column (타입 › 문서 · ‹ 탐색으로 · same-type list),
 // which folds to a 48 band from the handle on its right edge.
 import { allDocs, api, invalidateDocs } from "../api.mjs";
+import { freshBadge, viewSwitch } from "../doc-bits.mjs";
 import { $, el, icon, toast } from "../dom.mjs";
 import { deriveDraftId, draftsOfType, newDocButton } from "../drafts.mjs";
 import { docChip, kindTag, mdNodes, wikiResolver } from "../md.mjs";
@@ -54,7 +55,7 @@ function docRow(d, { on, id, pick = null, picked = false }) {
       tierChip(d),
       d.type === "db-schema" ? kindBadge(kindOf(d)) : null,
       d.type === "db-schema" ? coverageBar(d.coverage) : null,
-      d.updatedAt ? el("span", { class: "dim", text: `수정 ${shortDay(d.updatedAt)}` }) : null,
+      d.updatedAt ? freshBadge(d.updatedAt) : null,
     ]),
   ]);
 }
@@ -301,6 +302,7 @@ export async function renderBrowse(pickType = null, { focusTag = null } = {}) {
       el("span", { class: "mtop-sep", "aria-hidden": "true" }),
       where,
       el("span", { class: "sp" }),
+      viewSwitch("columns"),
       newDocButton({ compact: true }),
     ]),
     el("div", { class: "mcols" }, [c1, c2, c3]),
@@ -678,7 +680,7 @@ function preview(d, data, docs, open, repaint) {
       el("span", { class: `chip st-${doc.status}`, text: (doc.status || "").toUpperCase() }),
       tier ? el("span", { class: `chip tierchip t-${tier}`, text: `티어 ${TIER_LABEL[tier]}` }) : null,
       el("span", { class: "chip rev", text: `rev ${shortRev(data.rev)}` }),
-      d.updatedAt ? el("span", { class: "dim", text: `수정 ${shortDay(d.updatedAt)}` }) : null,
+      d.updatedAt ? freshBadge(d.updatedAt) : null,
     ]),
     firstTitle ? el("h3", { class: "pv-sec", text: firstTitle }) : null,
     firstBody ? el("div", { class: "pv-body" }, mdNodes(firstBody.split("\n").slice(0, 8).join("\n"), { wiki })) : null,

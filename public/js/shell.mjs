@@ -20,6 +20,7 @@ export const TABS = [
   { id: "agents", label: "에이전트", hash: "#/agents" },
   { id: "docs", label: "문서", hash: "#/docs" },
   { id: "graph", label: "그래프", hash: "#/graph" },
+  { id: "health", label: "건강", hash: "#/health" },
   { id: "review", label: "검토", hash: "#/review" },
   { id: "curation", label: "정리", hash: "#/curation" },
   { id: "audit", label: "감사", hash: "#/audit" },

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { columnHit, columnSection, groupOrder, matching, rankDocs, resultHash, sectionHit, splitHash } from "../../public/lib/cmdk.mjs";
+import { columnHit, columnSection, groupOrder, hasOperators, matching, operatorFilter, parseQuery, rankDocs, resultHash, sectionHit, splitHash } from "../../public/lib/cmdk.mjs";
 
 const DOCS = [
   { type: "domain-skill", id: "fdc-interlock", title: "fdc-interlock", role: "main", keywords: [{ kw: "인터락" }] },
@@ -101,4 +101,27 @@ test("a pick opens the doc with ?col=, and the router reads it back", () => {
   assert.deepEqual(splitHash("#/doc/db-schema/fdc_equipment?col=MODEL_CD"), { path: "#/doc/db-schema/fdc_equipment", col: "MODEL_CD" });
   assert.deepEqual(splitHash("#/doc/voc/a"), { path: "#/doc/voc/a", col: null });
   assert.deepEqual(splitHash("#/doc/voc/a?x=1"), { path: "#/doc/voc/a", col: null });
+});
+
+test("연산자 type: · status: 는 글에서 떼어 문서를 좁힌다", () => {
+  assert.deepEqual(parseQuery("type:voc,db 상태:비활성 인터락"), { text: "인터락", type: ["voc", "db"], status: ["inactive"] });
+  assert.deepEqual(parseQuery("interlock"), { text: "interlock", type: [], status: [] });
+  assert.deepEqual(parseQuery("status:nope 타입:manual"), { text: "", type: ["manual"], status: [] });
+  assert.equal(hasOperators(parseQuery("a:b")), false);
+  const docs = [
+    { type: "voc", id: "voc-a", status: "active", updatedAt: "2026-11-01T00:00:00Z" },
+    { type: "voc", id: "voc-b", status: "inactive", updatedAt: "2026-11-20T00:00:00Z" },
+    { type: "db-schema", id: "interlock", status: "active", updatedAt: "2026-10-01T00:00:00Z" },
+    { type: "manual", id: "interlock-release", status: "active" },
+  ];
+  const ids = (q) => rankDocs(docs, q, { order: ORDER }).map((r) => r.doc.id);
+  assert.deepEqual(ids("type:db interlock"), ["interlock"]);
+  assert.deepEqual(ids("interlock status:active"), ["interlock", "interlock-release"]);
+  // 연산자만: 좁힌 문서를 새로 고친 순으로.
+  assert.deepEqual(ids("type:voc"), ["voc-b", "voc-a"]);
+  assert.deepEqual(ids("type:voc status:inactive"), ["voc-b"]);
+  assert.deepEqual(ids("type:voc,manual status:active"), ["voc-a", "interlock-release"]);
+  assert.deepEqual(operatorFilter(docs, parseQuery("x")).length, 4);
+  assert.deepEqual(groupOrder("type:voc"), ["results"]);
+  assert.deepEqual(groupOrder("voc"), ["results", "types", "favorites", "recent", "commands"]);
 });

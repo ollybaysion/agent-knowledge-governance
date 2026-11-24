@@ -365,6 +365,8 @@ export function registerDocsRoutes(app) {
             assetCount: doc.assetCount,
             links: doc.links,
             title: doc.title,
+            // 본문 글자 수 (catalog 의 sizeOf): 건강 화면 · 표 보기의 크기
+            size: doc.size,
             ...originOf(doc),
             // what an agent list filters on; absent reads as main
             ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),

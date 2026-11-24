@@ -65,6 +65,7 @@ function oldList(storeDir, types, { type, tier, q, absorbed, tag } = {}) {
         assetCount: (doc.assets ?? []).length,
         links: doc.links ?? [],
         title: (typeof b.markdown === "string" ? mdTitle(b.markdown) : null) ?? b.title ?? b.name ?? b.table ?? b.command ?? null,
+        size: typeof b.markdown === "string" ? b.markdown.length : JSON.stringify(b).length,
         ...(doc.origin ? { origin: doc.origin } : {}),
         ...(t === "domain-skill" ? { role: doc.role ?? "main" } : {}),
         ...(t === "db-schema"

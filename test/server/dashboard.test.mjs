@@ -90,7 +90,7 @@ test("/js/ and /lib/ refuse a path outside their folder", async () => {
 
 test("a static file carries its content's etag and no-cache; the same etag back is a 304", async () => {
   const { app, cleanup } = await setup();
-  for (const url of ["/", "/app.css", "/js/main.mjs", "/js/tabs/overview.mjs", "/lib/search.mjs", "/lib/shared/wikilinks.mjs", "/vendor/mermaid/mermaid.min.js"]) {
+  for (const url of ["/", "/app.css", "/health.css", "/js/main.mjs", "/js/tabs/overview.mjs", "/js/tabs/health.mjs", "/js/tabs/doc-table.mjs", "/lib/search.mjs", "/lib/health.mjs", "/lib/doc-table.mjs", "/lib/shared/wikilinks.mjs", "/vendor/mermaid/mermaid.min.js"]) {
     const first = await app.inject({ method: "GET", url });
     assert.equal(first.statusCode, 200, url);
     assert.match(first.headers.etag, /^"[0-9a-f]{16}"$/, url);

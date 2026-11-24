@@ -1,6 +1,7 @@
 // Boot: the theme, the FE address, who is signed in, the type list, then the
 // frame and the first screen.
 import { bindCmdk } from "./cmdk.mjs";
+import { bindHoverCards } from "./hovercard.mjs";
 import { refreshReviewCount } from "./review-count.mjs";
 import { route } from "./router.mjs";
 import { applyTheme, gateMessage, mountShell, readTheme, rememberAnswer, showGate } from "./shell.mjs";
@@ -25,6 +26,7 @@ import { loadTypes, setConfig, setUser } from "./state.mjs";
   await loadTypes();
   mountShell();
   bindCmdk();
+  bindHoverCards();
   route();
   refreshReviewCount();
 })();

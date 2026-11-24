@@ -23,6 +23,8 @@ const FILES = {
   "/": { path: "index.html", type: "text/html; charset=utf-8" },
   "/app.css": { path: "app.css", type: "text/css; charset=utf-8" },
   "/ui.css": { path: "ui.css", type: "text/css; charset=utf-8" },
+  // 건강 탭 · 표 보기 · 미리보기 카드 · 신선도 배지
+  "/health.css": { path: "health.css", type: "text/css; charset=utf-8" },
   [MERMAID_FRAME]: { path: "mermaid-frame.html", type: "text/html; charset=utf-8" },
   // mermaid 11.17.2 (MIT, public/vendor/mermaid/LICENSE), copied from node_modules/mermaid/dist.
   "/vendor/mermaid/mermaid.min.js": { path: "vendor/mermaid/mermaid.min.js", type: JS },
