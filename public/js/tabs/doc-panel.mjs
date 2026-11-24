@@ -1,7 +1,7 @@
 // The reading view's right panel: small tabs 요약 · 연결 · 이력.
 // 요약 — an agent: Score · G A R · 측정 시각 · 절 · 검증 질문; another doc:
 // the agents that use it · type facts · 절 · 최근 이력. 연결 — the one-step
-// ring (2단 toggle), four lists and 전체 그래프에서 보기. 이력 — the doc's
+// ring (2단 toggle), four lists and 그래프에서 둘레 보기. 이력 — the doc's
 // commits (GET /api/audit?doc=type/id).
 import { api, lastScore } from "../api.mjs";
 import { el, icon, svgEl } from "../dom.mjs";
@@ -258,7 +258,7 @@ export function docPanel(ctx) {
       group("끊긴 연결", broken.map((w) =>
         el("li", { class: "plink broken" }, [docChip({ id: w.text, found: false }), el("span", { class: "plink-note", text: sectionOfWiki(md, w.text) ?? "" })])), "없음"),
       el("div", { class: "pfoot-btns" }, [
-        el("a", { class: "btn ghost pfull", href: `#/graph/${type}/${encodeURIComponent(id)}` }, [icon("graph", 15), "전체 그래프에서 보기"]),
+        el("a", { class: "btn ghost pfull", href: `#/graph/${type}/${encodeURIComponent(id)}` }, [icon("graph", 15), "그래프에서 둘레 보기"]),
         isAdmin() && ctx.onEditLinks ? el("button", { type: "button", class: "btn ghost pfull", text: "연결 고치기", onclick: ctx.onEditLinks }) : null,
       ]),
     );
