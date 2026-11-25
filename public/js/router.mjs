@@ -99,7 +99,8 @@ export async function route() {
   } else if (head === "docs") {
     if ((m = await load("docs"))) m.renderBrowse(parts[1] ?? null);
   } else if (head === "graph") {
-    if ((m = await load("graph"))) m.renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null);
+    // #/graph/<type>/<id> picks a doc; #/graph/matrix · #/graph/path name a view.
+    if ((m = await load("graph"))) m.renderGraph(parts[1] && parts[2] ? `${parts[1]}/${parts[2]}` : null, { mode: parts[2] ? null : parts[1] ?? null });
   } else if (head === "health") {
     if ((m = await load("health"))) m.renderHealth(parts[1] ?? null);
   } else if (head === "table") {

@@ -1,9 +1,12 @@
 // The document graph the dashboard's 그래프 screen draws (served as
-// /lib/shared/graph-model.mjs): nodes = documents, edges = links[]. Two
+// /lib/shared/graph-model.mjs): nodes = documents, edges = links[]. Four
 // pictures read it: 둘레 보기 (egoView — one doc, who points at it on the left,
-// what it points at on the right) and 전체 보기 (layoutColumns — undirected
-// distance from the main agents, wrapped by wrapRows). The side lists read
-// degrees · hubs · orphansByType, the name tags read declutter.
+// what it points at on the right), 전체 보기 (layoutColumns — undirected
+// distance from the main agents, wrapped by wrapRows, long runs of one kind
+// folded by groupColumns · mergeEdges), 행렬 (typeMatrix · matrixCell — links
+// counted kind by kind) and 경로 (shortestPaths — the fewest links between
+// two docs). The side lists read degrees · hubs · orphansByType, the name tags
+// read declutter.
 // No node imports: this file runs in the browser as it is.
 
 /** Column order inside a column: type first, then name. */
@@ -270,6 +273,206 @@ export function egoView(graph, center, { depth = 1, cap = 10, more = {} } = {}) 
     }
   }
   return { columns, edges };
+}
+
+/**
+ * 행렬의 줄 · 칸 종류: kindOf 와 같다 — domain-skill 은 main · sub 둘, 그 밖은
+ * 타입 하나. 그래프의 타입 순서를 따르고, 문서가 하나도 없는 종류는 빠진다.
+ */
+export function matrixKinds(graph) {
+  const have = new Set([...graph.nodes.values()].map((n) => n.kind));
+  return (graph.types ?? GRAPH_TYPES).flatMap((t) => (t === "domain-skill" ? ["main", "sub"] : [t])).filter((k) => have.has(k));
+}
+
+/**
+ * 타입 × 타입 행렬: 선 하나를 가리키는 문서의 종류(줄) → 가리켜지는 문서의
+ * 종류(칸)로 센다. 칸 = { links: 선 수, from: 그 선을 가진 줄 종류 문서 수,
+ * to: 그 선이 가리킨 칸 종류 문서 수 }, 선이 없는 칸은 cells 에 없다.
+ * noOut = 아무것도 가리키지 않는 문서 수, noIn = 아무도 가리키지 않는 문서 수.
+ * → { kinds, size: Map<kind, n>, cells: Map<"a>b", cell>, noOut: Map<kind, n>, noIn: Map<kind, n>, max }
+ */
+export function typeMatrix(graph) {
+  const kinds = matrixKinds(graph);
+  const zero = () => new Map(kinds.map((k) => [k, 0]));
+  const size = zero();
+  for (const n of graph.nodes.values()) size.set(n.kind, size.get(n.kind) + 1);
+  const acc = new Map();
+  for (const e of graph.edges) {
+    const id = `${graph.nodes.get(e.from).kind}>${graph.nodes.get(e.to).kind}`;
+    if (!acc.has(id)) acc.set(id, { links: 0, from: new Set(), to: new Set() });
+    const c = acc.get(id);
+    c.links++;
+    c.from.add(e.from);
+    c.to.add(e.to);
+  }
+  const cells = new Map([...acc].map(([id, c]) => [id, { links: c.links, from: c.from.size, to: c.to.size }]));
+  const deg = degrees(graph);
+  const noOut = zero();
+  const noIn = zero();
+  for (const n of graph.nodes.values()) {
+    const d = deg.get(n.key);
+    if (!d.out) noOut.set(n.kind, noOut.get(n.kind) + 1);
+    if (!d.in) noIn.set(n.kind, noIn.get(n.kind) + 1);
+  }
+  return { kinds, size, cells, noOut, noIn, max: Math.max(0, ...[...cells.values()].map((c) => c.links)) };
+}
+
+/**
+ * 행렬 한 칸의 문서. from · to 둘 다 종류면: from → to 선(가리키는 문서의
+ * 이름 순)과, to 종류를 하나도 가리키지 않는 from 문서(without). to = null 이면
+ * 아무것도 가리키지 않는 from 문서, from = null 이면 아무도 가리키지 않는 to 문서.
+ * → { edges: [{ from, to, rel }], without: [key] }
+ */
+export function matrixCell(graph, from, to) {
+  const name = (k) => graph.nodes.get(k).name;
+  const byName = (a, b) => name(a).localeCompare(name(b), "ko") || (a < b ? -1 : a > b ? 1 : 0);
+  const of = (kind) => [...graph.nodes.values()].filter((n) => n.kind === kind).map((n) => n.key);
+  const deg = degrees(graph);
+  if (to === null) return { edges: [], without: of(from).filter((k) => !deg.get(k).out).sort(byName) };
+  if (from === null) return { edges: [], without: of(to).filter((k) => !deg.get(k).in).sort(byName) };
+  const kind = (k) => graph.nodes.get(k).kind;
+  const edges = graph.edges.filter((e) => kind(e.from) === from && kind(e.to) === to).sort((a, b) => byName(a.from, b.from) || byName(a.to, b.to));
+  const linked = new Set(edges.map((e) => e.from));
+  return { edges, without: of(from).filter((k) => !linked.has(k)).sort(byName) };
+}
+
+/**
+ * 두 문서 사이 경로: `a` 에서 `b` 까지 선을 가장 적게 밟는 길. directed = false
+ * 면 선을 어느 쪽으로든 밟고, true 면 가리키는 쪽으로만 밟는다. 길이 없으면 null.
+ * paths = 가장 짧은 길을 `limit` 개까지. 갈림길에서는 main 먼저 · 타입 순 · 이름
+ * 순으로 고른다. count = 가장 짧은 길 전체의 수. layers[i] = 그 길들의 i 번째
+ * 자리에 선 문서들. edges = 그 길들이 밟은 두 문서 사이의 선(실제 방향, 두
+ * 방향이면 하나로 합치고 both).
+ * → { hops, count, paths: [[key]], layers: [[key]], edges: [{ from, to, rel, both }] } | null
+ */
+export function shortestPaths(graph, a, b, { directed = false, limit = 6 } = {}) {
+  if (!graph.nodes.has(a) || !graph.nodes.has(b)) return null;
+  if (a === b) return { hops: 0, count: 1, paths: [[a]], layers: [[a]], edges: [] };
+  const types = graph.types ?? GRAPH_TYPES;
+  const order = (x, y) => {
+    const p = graph.nodes.get(x);
+    const q = graph.nodes.get(y);
+    return (q.kind === "main") - (p.kind === "main") || types.indexOf(p.type) - types.indexOf(q.type) || p.name.localeCompare(q.name, "ko") || (x < y ? -1 : 1);
+  };
+  const fwd = new Map([...graph.nodes.keys()].map((k) => [k, new Set()]));
+  const back = new Map([...graph.nodes.keys()].map((k) => [k, new Set()]));
+  for (const e of graph.edges) {
+    fwd.get(e.from).add(e.to);
+    back.get(e.to).add(e.from);
+  }
+  const next = directed ? (k) => fwd.get(k) : (k) => new Set([...fwd.get(k), ...back.get(k)]);
+  const prev = directed ? (k) => back.get(k) : next;
+  const dist = new Map([[a, 0]]);
+  for (let frontier = [a]; frontier.length && !dist.has(b); ) {
+    const found = [];
+    for (const k of frontier)
+      for (const m of next(k))
+        if (!dist.has(m)) {
+          dist.set(m, dist.get(k) + 1);
+          found.push(m);
+        }
+    frontier = found;
+  }
+  if (!dist.has(b)) return null;
+  // The docs on some shortest path: walked back from b, one step nearer a each time.
+  const on = new Set([b]);
+  const ways = new Map([[a, 1]]);
+  const waysTo = (k) => {
+    if (!ways.has(k)) ways.set(k, [...prev(k)].filter((m) => dist.get(m) === dist.get(k) - 1).reduce((s, m) => s + waysTo(m), 0));
+    return ways.get(k);
+  };
+  for (let layer = [b]; layer.length; ) {
+    const before = [];
+    for (const k of layer)
+      for (const m of prev(k))
+        if (dist.get(m) === dist.get(k) - 1 && !on.has(m)) {
+          on.add(m);
+          before.push(m);
+        }
+    layer = before;
+  }
+  const paths = [];
+  const walk = (path) => {
+    if (paths.length >= limit) return;
+    const k = path.at(-1);
+    if (k === b) return paths.push(path);
+    for (const m of [...next(k)].filter((m) => on.has(m) && dist.get(m) === dist.get(k) + 1).sort(order)) walk([...path, m]);
+  };
+  walk([a]);
+  const layers = Array.from({ length: dist.get(b) + 1 }, (_, i) => [...new Set(paths.map((p) => p[i]))]);
+  const steps = new Set(paths.flatMap((p) => p.slice(1).map((k, i) => [p[i], k].sort().join("\n"))));
+  const edges = [];
+  const at = new Map();
+  for (const e of graph.edges) {
+    if (!steps.has([e.from, e.to].sort().join("\n"))) continue;
+    const reverse = at.get(`${e.to}>${e.from}#${e.rel}`);
+    if (reverse) reverse.both = true;
+    else {
+      const edge = { from: e.from, to: e.to, rel: e.rel, both: false };
+      at.set(`${e.from}>${e.to}#${e.rel}`, edge);
+      edges.push(edge);
+    }
+  }
+  return { hops: dist.get(b), count: waysTo(b), paths, layers, edges };
+}
+
+/**
+ * 묶음 노드: 전체 보기의 한 열에서 같은 종류(kindOf) 문서가 `threshold` 개를
+ * 넘으면 한 덩어리로 선다. `open` 에 든 덩어리 id 는 펼친 채 문서마다 선다.
+ * `keep` 에 든 문서(고른 문서)는 덩어리에 들지 않고 그 앞에 따로 선다.
+ * 덩어리 id = "group:<열의 dist>:<종류>". columns = layoutColumns 의 결과.
+ * → { columns: [{ dist, label, items: [{ kind: "doc", key } | { kind: "group", id, type, of, keys }] }], itemOf: Map<key, 선 끝 id> }
+ */
+export function groupColumns(columns, graph, { threshold = 12, open = new Set(), keep = new Set() } = {}) {
+  const itemOf = new Map();
+  const out = columns.map((c) => {
+    const runs = new Map();
+    for (const key of c.keys) {
+      const kind = graph.nodes.get(key).kind;
+      if (!runs.has(kind)) runs.set(kind, []);
+      runs.get(kind).push(key);
+    }
+    const items = [];
+    for (const [kind, keys] of runs) {
+      const id = `group:${c.dist ?? "none"}:${kind}`;
+      const folded = keys.filter((k) => !keep.has(k));
+      if (keys.length > threshold && !open.has(id) && folded.length) {
+        for (const k of keys.filter((k) => keep.has(k))) {
+          items.push({ kind: "doc", key: k });
+          itemOf.set(k, k);
+        }
+        items.push({ kind: "group", id, type: graph.nodes.get(keys[0]).type, of: kind, keys: folded });
+        for (const k of folded) itemOf.set(k, id);
+      } else
+        for (const k of keys) {
+          items.push({ kind: "doc", key: k });
+          itemOf.set(k, k);
+        }
+    }
+    return { dist: c.dist, label: c.label, items };
+  });
+  return { columns: out, itemOf };
+}
+
+/**
+ * 묶음 노드 사이의 선: 선 끝을 그 문서가 든 덩어리로 옮기고, 끝이 같은 선은
+ * 하나로 합친다. 한 덩어리 안의 선과 itemOf 에 없는 문서의 선은 빠진다.
+ * → [{ from, to, n, rel, idx: [graph.edges 의 자리] }] (rel = 모두 screen 일 때만 screen)
+ */
+export function mergeEdges(graph, itemOf) {
+  const by = new Map();
+  graph.edges.forEach((e, i) => {
+    const from = itemOf.get(e.from);
+    const to = itemOf.get(e.to);
+    if (!from || !to || from === to) return;
+    const k = `${from}>${to}`;
+    if (!by.has(k)) by.set(k, { from, to, n: 0, rel: e.rel, idx: [] });
+    const m = by.get(k);
+    m.n++;
+    m.idx.push(i);
+    if (e.rel !== "screen") m.rel = "related";
+  });
+  return [...by.values()];
 }
 
 /**
