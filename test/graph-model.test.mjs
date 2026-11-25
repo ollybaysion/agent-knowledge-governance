@@ -9,12 +9,17 @@ import {
   distances,
   egoView,
   filterGraph,
+  groupColumns,
   hubs,
   layoutColumns,
+  matrixCell,
+  mergeEdges,
   orphansByType,
   reach,
   shapeOf,
   shapePath,
+  shortestPaths,
+  typeMatrix,
   wrapRows,
 } from "../src/graph-model.mjs";
 
@@ -218,4 +223,103 @@ test("a node carries its status, for the picture to draw an inactive doc hollow"
   const g = buildGraph([{ type: "voc", id: "a", status: "inactive", links: [] }, { type: "voc", id: "b", links: [] }]);
   assert.equal(g.nodes.get("voc/a").status, "inactive");
   assert.equal(g.nodes.get("voc/b").status, "active");
+});
+
+test("행렬: links are counted from the pointing doc's kind to the pointed-at doc's kind; main and sub stand apart", () => {
+  const m = typeMatrix(graph);
+  // msg-format has no doc here, so it has no row.
+  assert.deepEqual(m.kinds, ["main", "sub", "db-schema", "manual", "screen-map", "voc"]);
+  assert.deepEqual(Object.fromEntries(m.size), { main: 2, sub: 1, "db-schema": 3, manual: 1, "screen-map": 1, voc: 1 });
+  assert.deepEqual(Object.fromEntries(m.cells), {
+    "main>sub": { links: 1, from: 1, to: 1 },
+    "main>manual": { links: 1, from: 1, to: 1 },
+    "main>db-schema": { links: 1, from: 1, to: 1 },
+    "sub>db-schema": { links: 1, from: 1, to: 1 },
+    "manual>screen-map": { links: 1, from: 1, to: 1 },
+    "voc>main": { links: 1, from: 1, to: 1 },
+  });
+  // 가리키는 것 없음 · 가리켜지지 않음, kind by kind
+  assert.deepEqual(Object.fromEntries(m.noOut), { main: 0, sub: 0, "db-schema": 3, manual: 0, "screen-map": 1, voc: 0 });
+  assert.deepEqual(Object.fromEntries(m.noIn), { main: 1, sub: 0, "db-schema": 1, manual: 0, "screen-map": 0, voc: 1 });
+  assert.equal(m.max, 1);
+  assert.deepEqual(typeMatrix(buildGraph([])), { kinds: [], size: new Map(), cells: new Map(), noOut: new Map(), noIn: new Map(), max: 0 });
+});
+
+test("행렬 한 칸: its links, and the docs of the row that point at no doc of the column", () => {
+  // the agents that link no table: interlock reaches a table only through its sub
+  const cell = matrixCell(graph, "main", "db-schema");
+  assert.deepEqual(cell.edges, [{ from: "domain-skill/trace", to: "db-schema/recipe_step", rel: "related" }]);
+  assert.deepEqual(cell.without, ["domain-skill/interlock"]);
+  // an empty cell: no link, every doc of the row is without
+  assert.deepEqual(matrixCell(graph, "voc", "db-schema"), { edges: [], without: ["voc/voc-1"] });
+  // the side cells: points at nothing · pointed at by nothing
+  assert.deepEqual(matrixCell(graph, "db-schema", null).without, ["db-schema/lonely", "db-schema/param_type", "db-schema/recipe_step"]);
+  assert.deepEqual(matrixCell(graph, null, "db-schema").without, ["db-schema/lonely"]);
+});
+
+test("경로: the fewest links between two docs, either way by default, only forward when directed", () => {
+  const p = shortestPaths(graph, "voc/voc-1", "db-schema/param_type");
+  assert.equal(p.hops, 3);
+  assert.equal(p.count, 1);
+  assert.deepEqual(p.paths, [["voc/voc-1", "domain-skill/interlock", "domain-skill/param", "db-schema/param_type"]]);
+  assert.deepEqual(p.layers, p.paths[0].map((k) => [k]));
+  // the edges keep the way each link points
+  assert.deepEqual(p.edges.map((e) => `${e.from}>${e.to}`), ["domain-skill/interlock>domain-skill/param", "domain-skill/param>db-schema/param_type", "voc/voc-1>domain-skill/interlock"]);
+  // backwards: every link points away, so only the undirected walk joins them
+  assert.equal(shortestPaths(graph, "db-schema/param_type", "voc/voc-1", { directed: true }), null);
+  assert.equal(shortestPaths(graph, "db-schema/param_type", "voc/voc-1").hops, 3);
+  assert.equal(shortestPaths(graph, "voc/voc-1", "db-schema/param_type", { directed: true }).hops, 3);
+  // trace and its table are an island of their own: 이어지지 않음
+  assert.equal(shortestPaths(graph, "voc/voc-1", "db-schema/recipe_step"), null);
+  assert.equal(shortestPaths(graph, "voc/voc-1", "db-schema/nope"), null);
+  assert.deepEqual(shortestPaths(graph, "voc/voc-1", "voc/voc-1").paths, [["voc/voc-1"]]);
+});
+
+test("경로: several shortest paths — `limit` of them, mains first then by type and name; all of them counted", () => {
+  const g = buildGraph([
+    { type: "voc", id: "a", links: [link("db-schema", "t2"), link("db-schema", "t1"), link("domain-skill", "agent"), link("manual", "m")] },
+    { type: "db-schema", id: "t1", links: [link("voc", "b")] },
+    { type: "db-schema", id: "t2", links: [link("voc", "b")] },
+    { type: "domain-skill", id: "agent", role: "main", links: [link("voc", "b")] },
+    { type: "manual", id: "m", links: [] },
+    { type: "voc", id: "b", links: [link("manual", "m"), link("domain-skill", "agent")] },
+  ]);
+  const p = shortestPaths(g, "voc/a", "voc/b", { limit: 3 });
+  assert.equal(p.hops, 2);
+  assert.equal(p.count, 4);
+  assert.deepEqual(p.paths.map((x) => x[1]), ["domain-skill/agent", "db-schema/t1", "db-schema/t2"]);
+  assert.deepEqual(p.layers, [["voc/a"], ["domain-skill/agent", "db-schema/t1", "db-schema/t2"], ["voc/b"]]);
+  // agent ↔ b links both ways: one edge marked both
+  const pair = p.edges.filter((e) => [e.from, e.to].sort().join(" ") === "domain-skill/agent voc/b");
+  assert.equal(pair.length, 1);
+  assert.equal(pair[0].both, true);
+  // directed, the manual is a dead end (b points at it), so three ways remain
+  assert.equal(shortestPaths(g, "voc/a", "voc/b", { directed: true }).count, 3);
+});
+
+test("묶음 노드: a column's run of one kind longer than the threshold stands as one group, unless it is open", () => {
+  const docs = [
+    { type: "domain-skill", id: "m", role: "main", links: [link("db-schema", "t1"), link("db-schema", "t2")] },
+    { type: "db-schema", id: "t1", links: [] },
+    { type: "db-schema", id: "t2", links: [] },
+    ...Array.from({ length: 5 }, (_, i) => ({ type: "voc", id: `v${i}`, links: [link("domain-skill", "m"), ...(i === 0 ? [link("db-schema", "t1")] : [])] })),
+  ];
+  const g = buildGraph(docs);
+  const cols = layoutColumns(g);
+  const { columns, itemOf } = groupColumns(cols, g, { threshold: 3 });
+  assert.deepEqual(columns[1].items.map((it) => (it.kind === "group" ? `${it.id} ${it.keys.length}` : it.key)), ["db-schema/t1", "db-schema/t2", "group:1:voc 5"]);
+  assert.equal(itemOf.get("voc/v3"), "group:1:voc");
+  assert.equal(itemOf.get("db-schema/t1"), "db-schema/t1");
+  // five voc → m links are one line of n 5; v0 → t1 is a line of its own
+  const lines = mergeEdges(g, itemOf);
+  assert.deepEqual(lines.map(({ from, to, n }) => `${from}>${to} ${n}`).sort(), ["domain-skill/m>db-schema/t1 1", "domain-skill/m>db-schema/t2 1", "group:1:voc>db-schema/t1 1", "group:1:voc>domain-skill/m 5"]);
+  assert.equal(lines.find((l) => l.n === 5).idx.length, 5);
+  // the picked doc stands apart, in front of its group
+  const kept = groupColumns(cols, g, { threshold: 3, keep: new Set(["voc/v2"]) });
+  assert.deepEqual(kept.columns[1].items.slice(2).map((it) => (it.kind === "group" ? `${it.id} ${it.keys.length}` : it.key)), ["voc/v2", "group:1:voc 4"]);
+  assert.equal(kept.itemOf.get("voc/v2"), "voc/v2");
+  // opened, every voc stands again
+  const open = groupColumns(cols, g, { threshold: 3, open: new Set(["group:1:voc"]) });
+  assert.equal(open.columns[1].items.length, 7);
+  assert.equal(mergeEdges(g, open.itemOf).length, g.edges.length);
 });

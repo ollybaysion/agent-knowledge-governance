@@ -102,6 +102,9 @@
   --violet-ink: #b393e0;
   --rose-ink: #d98bb7;
   --green-ink: #7cc488;
+  /* 스크롤 막대: 리눅스 Firefox 는 color-scheme: dark 에도 막대 바탕을 시스템의 밝은 색(흰 띠)으로
+     그린다. scrollbar-color 는 물려받는 속성이라 여기 한 줄이 모든 스크롤 상자에 닿는다. */
+  scrollbar-color: #5a5248 transparent;
 }
 * {
   box-sizing: border-box;
